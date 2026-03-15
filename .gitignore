@@ -1,0 +1,152 @@
+# === Environment & Secrets ===
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+*.p12
+*.pfx
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.pytest_cache/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+venv/
+ENV/
+env/
+.venv
+.venv/
+
+# === Node / Frontend ===
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/.turbo/
+frontend/.eslintcache
+frontend/.stylelintcache
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+frontend/.pnpm-store/
+frontend/.DS_Store
+frontend/package-lock.json
+frontend/yarn.lock
+frontend/pnpm-lock.yaml
+
+# === IDE & Editor ===
+# .vscode/ #? during development intend to store tasks.json and launch.json with the code
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.sublime-project
+*.sublime-workspace
+.atom/
+.project
+.pydevproject
+.settings/
+*.jdtls
+.classpath
+debug.log
+
+# === OS ===
+.DS_Store
+.DS_Store?
+._*
+.AppleDouble
+.LSOverride
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# === App-Specific ===
+# Config (keep *.example files for templates)
+config.yaml
+!config.yaml.example
+
+# User-provided prompts (keep default prompts/ committed)
+prompts/local/
+
+# ChromaDB index data
+data/
+chroma_data/
+*.db
+
+# User vault (not version controlled; can be local or mounted)
+vault/
+!vault/.templates
+!vault/.gitkeep
+
+# Agent/version control
+.versions/
+.trash/
+
+# Temporary ingest artifacts
+*.error.md
+.inbox/
+
+# Generated API types
+frontend/src/api/schema.d.ts
+
+# macOS specific
+.AppleDouble
+.LSOverride
+._*
+.DocumentRevisions-V100
+.fseventsd
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+
+# Windows specific
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# === Logs ===
+*.log
+logs/
+*.log.*
