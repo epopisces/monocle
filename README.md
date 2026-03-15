@@ -13,7 +13,9 @@ Process:
 3. Create a VSCode workspace: `Ctrl+Shift_P > Workspaces: Save Workspace As...`
 4. Using GitHub Copilot Custom Agents (instructing the agent to emulate specialists such as Product Manager, UX Designer, Cybsersecurity Expert, Development Architect) draft PRD, UI Design, and SRS documentation, as well as a build plan.  Some things that were important to me:
    1. Debugging in VSCode.  I included the creation and maintenance of 
-5. Create a local index `Ctrl+Shift+P → Chat: Build Local Workspace Index` (since this was not an AzDO or GitHub project which support remote index)
+   2. Tracing using AI Toolkit
+5. Create a GitHub Copilot workspace instructions file
+6. Create a local index `Ctrl+Shift+P → Chat: Build Local Workspace Index` (since this was not an AzDO or GitHub project which support remote index)
 
 # References
 - Nate B Jones [Build Your Monocle](https://promptkit.natebjones.com/20260224_uq1_guide_main)

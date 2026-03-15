@@ -39,19 +39,19 @@ Run these after every change. Copilot **must** run the appropriate command befor
 
 ```bash
 # Backend unit tests
-python -m pytest monocle/tests/ -x --tb=short -q
+uv run python -m pytest monocle/tests/ -x --tb=short -q
 
 # Frontend unit tests
 cd frontend && npm run test -- --run
 
 # E2E tests (requires server running at http://localhost:8000)
-playwright test
+uv run playwright test
 
 # Type-check frontend
 cd frontend && npx tsc --noEmit
 
 # Full check before marking a milestone complete
-python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm run test -- --run
+uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm run test -- --run
 ```
 
 ---
@@ -61,7 +61,7 @@ python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm run test 
 | Item | Value |
 |---|---|
 | Python package dir | `monocle/` (import as `import monocle`) |
-| CLI entry | `python -m monocle <command>` |
+| CLI entry | `uv run python -m monocle <command>` |
 | Backend port | `8000` (binds `127.0.0.1` by default) |
 | Frontend dev | `http://localhost:5173` (Vite) |
 | Config file | `config.yaml` (gitignored) / `config.yaml.example` (committed) |
@@ -69,14 +69,14 @@ python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm run test 
 | Vault | path from `config.yaml` → `vault.path` |
 | Vault inbox | path from `config.yaml` → `vault.inbox_path` (default `./vault/inbox`) |
 | Prompts dir | `prompts/` (default prompts committed; `prompts/local/` gitignored for user overrides) |
-| Dev start | `python -m monocle dev` (starts unified API + services with prefixed logging) |
+| Dev start | `uv run python -m monocle dev` (starts unified API + services with prefixed logging) |
 | Version shadows | `<vault>/.versions/<path>/<timestamp_ms>.md` (millisecond-precision ISO timestamp) |
 | Soft-delete trash | `<vault>/.trash/<path>.md` |
 | ChromaDB data | `config.yaml` → `index.chroma_persist_path` |
 | Failed-ingest registry | `data/failed_ingests.json` (JSON array; stdlib only; gitignored; auto-created on first failure) |
 | OpenAPI spec | Auto-generated: `GET http://localhost:8000/openapi.json` |
 | Frontend type gen | `npx openapi-typescript http://localhost:8000/openapi.json -o frontend/src/api/schema.d.ts` |
-| Commit openapi.json | `python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(), indent=2))"` |
+| Commit openapi.json | `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(), indent=2))"` |
 | OTLP endpoint | `config.yaml` → `telemetry.otlp_endpoint` (default `http://localhost:4317`; AI Toolkit gRPC port) |
 | Log level | `config.yaml` → `telemetry.log_level` (default `INFO`; `DEBUG` in dev mode) |
 | Log format | `config.yaml` → `telemetry.log_format` (`text` in dev, `json` in prod) |
@@ -444,28 +444,28 @@ tests/e2e/            Playwright tests (require running server)
   - `tmp_vault` fixture — temp dir with 5 fixture notes (one per template type: person, decision, meeting, idea, blank)
   - `memory_index` fixture — returns a fresh `MemoryIndex` instance
 - [ ] `.vscode/tasks.json` — foundational build task definitions:
-  - `install: backend deps` — `pip install -e .[dev]`
+  - `install: backend deps` — `uv sync`
   - `install: frontend deps` — `npm install` (cwd: `frontend/`)
-  - `test: backend` — `python -m pytest monocle/tests/ -x --tb=short -q`
+  - `test: backend` — `uv run python -m pytest monocle/tests/ -x --tb=short -q`
   - `test: frontend` — `npm run test -- --run` (cwd: `frontend/`)
 - [ ] `.vscode/launch.json` — foundational debug launch configurations:
   - `Dev Server (debug)` — debugpy launch of `python -m monocle dev`; primary developer launch
   - `Backend Tests (debug)` — debugpy launch of pytest against `monocle/tests/`
 
 **Acceptance Criteria:**
-- [ ] `python -m pytest monocle/tests/ -x --tb=short -q` exits 0 (smoke test — no tests yet, just import checks)
+- [ ] `uv run python -m pytest monocle/tests/ -x --tb=short -q` exits 0 (smoke test — no tests yet, just import checks)
 - [ ] `cd frontend && npm run test -- --run` exits 0
-- [ ] `python -c "from monocle.config import Settings"` succeeds (no import errors)
-- [ ] `python -c "from monocle.models import Note, BrainStats, IngestRequest, GraphData, LinkRef"` succeeds
+- [ ] `uv run python -c "from monocle.config import Settings"` succeeds (no import errors)
+- [ ] `uv run python -c "from monocle.models import Note, BrainStats, IngestRequest, GraphData, LinkRef"` succeeds
 - [ ] `.gitignore` covers `config.yaml`, `.env`, `data/`, `frontend/dist/`, `__pycache__/`, `.venv/`
 - [ ] `F5` in VS Code with `Dev Server (debug)` as the active configuration starts the unified server with the debugger attached
-- [ ] `python -c "from monocle.telemetry import configure_telemetry"` succeeds (no import errors)
+- [ ] `uv run python -c "from monocle.telemetry import configure_telemetry"` succeeds (no import errors)
 
 **Notes:**
-- Python minimum version: 3.11. Set `python_requires = ">=3.11"` in `pyproject.toml`.
+- Python minimum version: 3.11. Set `requires-python = ">=3.11"` in `pyproject.toml` (uv reads this to select the interpreter).
 - Pin agent-framework versions — the package renames identifiers between preview builds.
-- Create and use a `.venv/` at project root. Never install into system Python.
-- `monocle` is the Python package name (directory is `monocle/`). `python -m monocle` works via `monocle/__main__.py`.
+- Use `uv` for all Python environment and dependency management. `uv sync` creates `.venv/` at project root and installs all deps (including dev extras). Never use `pip` directly or install into system Python.
+- `monocle` is the Python package name (directory is `monocle/`). `uv run python -m monocle` works via `monocle/__main__.py`.
 - On first run, if `config.yaml` is missing, `Settings` auto-copies `config.yaml.example` → `config.yaml` and logs a one-time notice. This ensures a fresh clone works immediately without manual setup while preserving the user's ability to override any value.
 - `allow_duplicate: bool = False` in `IngestRequest` must be present from M1 even though the duplicate-detection logic is not wired until M7. Stubs in M2 must accept the field without error.
 
@@ -476,7 +476,7 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** Register every API endpoint as a stub. This is the scaffold all future milestones wire into. The OpenAPI spec must be complete before frontend work begins.
 
 **Deliverables:**
-- [ ] `monocle/main.py` — FastAPI app, all routers included, CORS middleware (**production**: allow only `http://localhost:{server.port}` and `http://127.0.0.1:{server.port}`; **dev mode only**: additionally allow `http://localhost:5173` and `http://127.0.0.1:5173` for the Vite dev server — no wildcard origins; controlled by `server.dev_cors` flag set by `python -m monocle dev`), lifespan hook (placeholder startup/shutdown)
+- [ ] `monocle/main.py` — FastAPI app, all routers included, CORS middleware (**production**: allow only `http://localhost:{server.port}` and `http://127.0.0.1:{server.port}`; **dev mode only**: additionally allow `http://localhost:5173` and `http://127.0.0.1:5173` for the Vite dev server — no wildcard origins; controlled by `server.dev_cors` flag set by `uv run python -m monocle dev`), lifespan hook (placeholder startup/shutdown)
 - [ ] `monocle/routers/health.py` — `GET /api/health` returns `{"status": "starting", "version": "0.1.0", "ai_reachable": false, "index_status": "empty"}`
 - [ ] `monocle/routers/notes.py` — `GET /api/notes`, `GET /api/notes/{path}`, `PUT /api/notes/{path}`, `PATCH /api/notes/{path}`, `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move`, `GET /api/templates`, `GET /api/notes/{path}/backlinks` — all return `501`
 - [ ] `monocle/routers/search.py` — `GET /api/search`, `GET /api/search/keyword` — return `501`
@@ -497,8 +497,8 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `openapi.json` exported to repo root and committed
 - [ ] `monocle/tests/test_api.py` — `TestClient` tests verifying every route returns 200 or 501, never 404 or 500
 - [ ] Extend `.vscode/tasks.json`:
-  - `api: export openapi` — `python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
-  - `api: start server` — `uvicorn monocle.main:app --host 127.0.0.1 --port 8000 --reload` (non-debug, used as a preLaunchTask)
+  - `api: export openapi` — `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
+  - `api: start server` — `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000 --reload` (non-debug, used as a preLaunchTask)
 - [ ] Extend `.vscode/launch.json`:
   - `API Server (debug)` — debugpy launch of uvicorn at `127.0.0.1:8000 --reload`; lighter than `Dev Server (debug)` (no watcher/scheduler) and intended for iterating on individual routes
 
@@ -506,12 +506,12 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `GET http://localhost:8000/api/health` returns 200 JSON
 - [ ] `GET http://localhost:8000/openapi.json` returns a valid OpenAPI 3.x document listing all 30 endpoints
 - [ ] Every non-health endpoint returns exactly 501 (not 404, not 500)
-- [ ] `uvicorn monocle.main:app --host 127.0.0.1 --port 8000` starts without errors
-- [ ] `python -m pytest monocle/tests/test_api.py -x --tb=short -q` passes
+- [ ] `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000` starts without errors
+- [ ] `uv run python -m pytest monocle/tests/test_api.py -x --tb=short -q` passes
 
 **Notes:**
 - Commit `openapi.json` to the repo. The frontend uses it to generate `schema.d.ts`.
-- After any route change, regenerate: `python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
+- After any route change, regenerate: `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
 
 ---
 
@@ -546,7 +546,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] Mtime conflict: `write_note(path, note, if_mtime=stale_ts)` raises `409`
 - [ ] Schema normalisation: note with no `type` field reads back with `type: "other"`
 - [ ] `parse_links_field` normalises plain strings `"Note Name"` and dicts `{target: "..."}` both into `LinkRef` objects
-- [ ] `python -m pytest monocle/tests/test_vault.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_vault.py -x --tb=short -q` passes
 
 ---
 
@@ -568,7 +568,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `ChromaIndex` raises `DimensionMismatch` if `embed_dimensions` from config doesn't match existing collection
 - [ ] `delete_file(path)` removes all chunks for that file path
 - [ ] `search` respects `type`, `domain`, `source` metadata filters
-- [ ] `python -m pytest monocle/tests/test_index.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q` passes
 
 ---
 
@@ -610,7 +610,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `ReindexAgent.run(force=True)` re-embeds all notes regardless
 - [ ] `startup_check` triggers full re-index when index is empty; health reports `"indexing"`
 - [ ] APScheduler runs weekly_summary and re-index crons; scheduled tasks execution is logged
-- [ ] `python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q` passes
 
 ---
 
@@ -640,7 +640,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `extract_note_metadata` returns complete `NoteMetadata` with all required fields
 - [ ] Mock-based unit tests pass; no live Ollama required
 - [ ] SPIKE-1 outcome recorded in `## Technical Spikes`
-- [ ] `python -m pytest monocle/tests/test_ai.py -x --tb=short -q` passes (skips `@pytest.mark.integration`)
+- [ ] `uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q` passes (skips `@pytest.mark.integration`)
 
 ---
 
@@ -690,7 +690,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] Auto-approved notes include `approval_mode: auto`, `approved_by: "system:auto"`, and `approved_at`; manually approved notes later record `approval_mode: manual`
 - [ ] Re-ingesting a note with semantic similarity > 0.95 to existing note returns advisory flag; user can override with `allow_duplicate=true`
 - [ ] Failed-ingest registry entry is created alongside `.error.md` and cleared after a successful retry
-- [ ] `python -m pytest monocle/tests/test_ingest.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_ingest.py -x --tb=short -q` passes
 
 ---
 
@@ -724,7 +724,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `GET /api/notes/../../.env` → 403
 - [ ] `POST /api/ingest` with `audio_bytes` > 25 MB → 422
 - [ ] `GET /api/health` → `{"status": "ready", "ai_reachable": true, "telemetry_endpoint": "http://localhost:4317", ...}` when provider is live
-- [ ] `python -m pytest monocle/tests/test_api.py monocle/tests/test_security.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_security.py -x --tb=short -q` passes
 
 ---
 
@@ -750,7 +750,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `types=person` excludes note and tag nodes from response
 - [ ] Cache hit on second identical request; cache invalidated after a vault file is modified
 - [ ] `GET /api/notes/people/sarah.md/backlinks` returns all notes that link to `sarah.md` via structured links, wikilinks, or `people` co-mention
-- [ ] `python -m pytest monocle/tests/test_graph.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_graph.py -x --tb=short -q` passes
 
 ---
 
@@ -775,7 +775,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `note_created` event emitted when agent creates a note during conversation
 - [ ] SPIKE-3 outcome recorded
 - [ ] `chat.ttft` histogram records time from POST to first `token` event; `chat.total_duration` records time to `done` event; both visible in AI Toolkit trace view
-- [ ] `python -m pytest monocle/tests/test_agents.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_agents.py -x --tb=short -q` passes
 
 ---
 
@@ -805,7 +805,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] Summary note does NOT appear in review queue (`confidence: 1.0`, `review_status: approved`)
 - [ ] Weekly summary clustering works with the built-in lightweight clustering implementation; very small batches fall back to LLM grouping
 - [ ] `POST /api/agents/reindex` triggers `ReindexAgent.run()` async, returns 202
-- [ ] `python -m pytest monocle/tests/test_scheduler.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_scheduler.py -x --tb=short -q` passes
 
 ---
 
@@ -827,7 +827,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `search_vault` returns `list[dict]` with `file_path`, `similarity`, `chunk` fields
 - [ ] `capture_thought` creates a vault note and returns its `file_path`
 - [ ] SPIKE-2 outcome recorded per client
-- [ ] `python -m pytest monocle/tests/test_mcp.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_mcp.py -x --tb=short -q` passes
 
 ---
 
@@ -846,7 +846,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `GET /api/settings` returns MCP key masked to last 4 characters only
 - [ ] `PATCH /api/settings {"review": {"queue_threshold": 0.75, "auto_approve_threshold_pct": 90}}` takes effect immediately
 - [ ] `PATCH /api/review/{path}/approve` sets `review_status: approved`, `approval_mode: manual`, `approved_by`, and `approved_at` in the file and in ChromaDB metadata
-- [ ] `python -m pytest monocle/tests/test_settings.py monocle/tests/test_review.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_settings.py monocle/tests/test_review.py -x --tb=short -q` passes
 
 ---
 
@@ -891,7 +891,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `python -m monocle dev` prints a telemetry block on startup, e.g. `[TELEMETRY] OTLP endpoint: http://localhost:4317 | log_level: DEBUG | format: text`
 - [ ] `live_server` fixture is available for integration tests and Playwright before M22 begins
 - [ ] `CLI: Reindex (debug)` launch config runs `reindex` with the debugger attached
-- [ ] `python -m pytest monocle/tests/test_cli.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_cli.py -x --tb=short -q` passes
 
 ---
 
@@ -1059,7 +1059,7 @@ tests/e2e/            Playwright tests (require running server)
 - [ ] `POST /api/teams/messages` without valid Bot Framework JWT → 401
 - [ ] Teams message ingest creates a note with `source: "teams"`
 - [ ] `/search query` replies with top 3 results
-- [ ] `python -m pytest monocle/tests/test_teams.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/test_teams.py -x --tb=short -q` passes
 
 ---
 
@@ -1147,7 +1147,7 @@ cd .. && playwright test
 - [ ] An exported OneNote HTML page produces a valid vault note with extracted title, headings, and lists; no raw HTML tags in the note body
 - [ ] `python -m monocle import-onenote ./exports/` imports all `.html` files in the directory and prints a success count
 - [ ] Adding the plugin required zero changes to `IngestPipeline` or `IngestPluginRegistry` core code
-- [ ] `python -m pytest monocle/tests/plugins/test_onenote_plugin.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/plugins/test_onenote_plugin.py -x --tb=short -q` passes
 
 ---
 

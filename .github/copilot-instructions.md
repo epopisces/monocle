@@ -79,13 +79,13 @@ approval_mode: null         # auto | manual
 
 ```bash
 # Backend unit tests (run after every backend change)
-python -m pytest monocle/tests/ -x --tb=short -q
+uv run python -m pytest monocle/tests/ -x --tb=short -q
 
 # Frontend unit tests
 cd frontend && npm run test -- --run
 
 # E2E (requires server running at http://localhost:8000)
-playwright test
+uv run playwright test
 
 # Type-check frontend
 cd frontend && npx tsc --noEmit
@@ -97,6 +97,7 @@ cd frontend && npx tsc --noEmit
 
 ## Conventions
 
+- **Python environment managed by `uv`**: `uv sync` installs all deps into `.venv/`; prefix all Python invocations with `uv run` (e.g., `uv run python -m monocle dev`). Never use `pip` directly.
 - **No `print()` in application code** — always use `logging.getLogger(__name__)`.
 - **OpenTelemetry is cross-cutting**: `monocle/telemetry.py` exports `get_tracer()`, `get_meter()`, `span()` (async context manager), `timed()`. Import from there, not directly from OTel SDK.
 - **Vault path validation everywhere**: resolve to absolute path with `os.path.realpath`; reject anything outside `vault.path` with `403`.
