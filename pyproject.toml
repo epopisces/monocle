@@ -1,0 +1,70 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "monocle"
+version = "0.1.0"
+description = "Personal AI-powered knowledge system"
+requires-python = ">=3.11"
+dependencies = [
+    # Web framework
+    "fastapi>=0.115",
+    "uvicorn[standard]",
+    # Vector index
+    "chromadb>=0.6",
+    # File watcher
+    "watchdog>=4",
+    # Task scheduler
+    "apscheduler>=3.10",
+    # Agent framework (versions pinned — identifiers change between preview builds)
+    "agent-framework-azure-ai==1.0.0b260107",
+    "agent-framework-core==1.0.0b260107",
+    # MCP server
+    "mcp[cli]",
+    # Teams integration
+    "botbuilder-core",
+    # Config & env
+    "pyyaml",
+    "python-dotenv",
+    "python-frontmatter",
+    # Tokeniser
+    "tiktoken",
+    # AI backends
+    "ollama",
+    "openai",
+    # CLI
+    "typer",
+    # Rate limiting
+    "slowapi",
+    # Topic modelling (weekly summary clustering)
+    "scikit-learn",
+    # OpenTelemetry
+    "opentelemetry-sdk",
+    "opentelemetry-exporter-otlp-proto-grpc",
+    "opentelemetry-exporter-otlp-proto-http",
+    "opentelemetry-instrumentation-fastapi",
+    "opentelemetry-instrumentation-logging",
+    "opentelemetry-instrumentation-httpx",
+]
+
+[project.scripts]
+monocle = "monocle.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["monocle"]
+
+[tool.pytest.ini_options]
+testpaths = ["monocle/tests"]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio",
+    "httpx",
+    "playwright",
+]
+
+[tool.uv]
+prerelease = "allow"

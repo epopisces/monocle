@@ -26,10 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M1 — Foundation & Project Skeleton
-**Last Completed:** None
+**Active Milestone:** M2 — API Skeleton — all route stubs + OpenAPI
+**Last Completed:** M1 — Foundation & Project Skeleton (2026-03-15)
 **Blocked By:** Nothing
-**Session Notes:** *(Copilot: replace this block with brief notes at the end of each session — what was done, any open questions)*
+**Session Notes:** M1 fully executed: all backend files created, `uv sync` resolved 148 packages, 9 backend smoke tests passed, frontend scaffold created and 1 frontend test passed. All M1 acceptance criteria met.
 
 ---
 
@@ -87,7 +87,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 
 | ID | Milestone | Status |
 |---|---|---|
-| M1 | Foundation & Project Skeleton | NOT STARTED |
+| M1 | Foundation & Project Skeleton | COMPLETE |
 | M2 | API Skeleton — all route stubs + OpenAPI | NOT STARTED |
 | M3 | Vault Layer | NOT STARTED |
 | M4 | Index Layer (ChromaDB + MemoryIndex) | NOT STARTED |
@@ -386,7 +386,7 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** Set up project structure, tooling, config models, and test infrastructure. No business logic yet.
 
 **Deliverables:**
-- [ ] `pyproject.toml` with all backend dependencies pinned:
+- [x] `pyproject.toml` with all backend dependencies pinned:
   - `fastapi>=0.115`, `uvicorn[standard]`, `chromadb>=0.6`, `watchdog>=4`, `apscheduler>=3.10`,
   - `agent-framework-azure-ai==1.0.0b260107`, `agent-framework-core==1.0.0b260107`,
   - `mcp[cli]`, `botbuilder-core`, `pyyaml`, `python-dotenv`, `python-frontmatter`, `tiktoken`,
@@ -395,10 +395,10 @@ tests/e2e/            Playwright tests (require running server)
   - `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-grpc`, `opentelemetry-exporter-otlp-proto-http`,
     `opentelemetry-instrumentation-fastapi`, `opentelemetry-instrumentation-logging`, `opentelemetry-instrumentation-httpx`,
   - `pytest>=8`, `pytest-asyncio`, `playwright`
-- [ ] `monocle/` package with all subdirectory `__init__.py` files (ai/, index/, vault/, ingest/, ingest/plugins/, agents/, routers/, tests/)
-- [ ] `monocle/config.py` — `Settings` Pydantic v2 model. All fields from SRS §6. Loads `config.yaml` + `.env`. Validates `server.host`, `vault.path`, `vault.inbox_path`, `ai.provider`, `index.chroma_persist_path`.
-- [ ] `monocle/models.py` — all shared Pydantic models: `Note`, `NoteRef`, `NoteChunk`, `NoteMetadata`, `Page`, `BrainStats`, `IngestRequest`, `IngestConfidence`, `IndexStats`, `ScoredChunk`, `LinkRef`, `GraphData`, `GraphNode`, `GraphEdge`, `RoutingDecision`. **`IngestRequest` must include `allow_duplicate: bool = False`** — required for the duplicate-detection advisory flow (FR-ING-11).
-- [ ] `config.yaml.example` and `.env.example` committed; `config.yaml` and `.env` in `.gitignore`. On first run (i.e., `config.yaml` does not exist), `Settings` loader SHALL copy `config.yaml.example` to `config.yaml` automatically and log a notice, so a fresh clone is immediately runnable with sensible defaults. `config.yaml.example` includes a `telemetry:` section:
+- [x] `monocle/` package with all subdirectory `__init__.py` files (ai/, index/, vault/, ingest/, ingest/plugins/, agents/, routers/, tests/)
+- [x] `monocle/config.py` — `Settings` Pydantic v2 model. All fields from SRS §6. Loads `config.yaml` + `.env`. Validates `server.host`, `vault.path`, `vault.inbox_path`, `ai.provider`, `index.chroma_persist_path`.
+- [x] `monocle/models.py` — all shared Pydantic models: `Note`, `NoteRef`, `NoteChunk`, `NoteMetadata`, `Page`, `BrainStats`, `IngestRequest`, `IngestConfidence`, `IndexStats`, `ScoredChunk`, `LinkRef`, `GraphData`, `GraphNode`, `GraphEdge`, `RoutingDecision`. **`IngestRequest` must include `allow_duplicate: bool = False`** — required for the duplicate-detection advisory flow (FR-ING-11).
+- [x] `config.yaml.example` and `.env.example` committed; `config.yaml` and `.env` in `.gitignore`. On first run (i.e., `config.yaml` does not exist), `Settings` loader SHALL copy `config.yaml.example` to `config.yaml` automatically and log a notice, so a fresh clone is immediately runnable with sensible defaults. `config.yaml.example` includes a `telemetry:` section:
   ```yaml
   telemetry:
     enabled: true
@@ -408,7 +408,7 @@ tests/e2e/            Playwright tests (require running server)
     log_format: text                          # text (dev) | json (prod)
     enable_sensitive_data: true               # include prompts/completions in traces
   ```
-- [ ] `vault/` skeleton with flexible domain-based organization (note types are indexed via frontmatter metadata, not folder structure). **Default domains** (customizable; folders are optional):
+- [x] `vault/` skeleton with flexible domain-based organization (note types are indexed via frontmatter metadata, not folder structure). **Default domains** (customizable; folders are optional):
   ```
   vault/
   ├── people/               # Entity hub: individuals, contacts
@@ -432,34 +432,34 @@ tests/e2e/            Playwright tests (require running server)
   - Future (Phase 2+): Settings UI allows users to customize domain list, pin favorites, and auto-create subfolders from templates.
   - Multi-org handling: use `org: "Acme Corp"` frontmatter field rather than folder nesting — keeps structure flat and flexible.
   - Example: A user with multiple employers can keep all work notes in `work/` and distinguish via `org` metadata + backlinks/graph navigation.
-- [ ] `prompts/` directory with stub files: `routing.md`, `extract.md`, `weekly_review.md`, `confidence.md` (each with YAML frontmatter + placeholder prompt body); `prompts/local/` listed in `.gitignore`. **Note:** `confidence.md` is retained as a documentation placeholder only — M7 replaces LLM-based confidence scoring with a deterministic formula, so this file is never loaded by any agent.
-- [ ] Stub module files: `monocle/watcher.py`, `monocle/process_manager.py`, `monocle/agents/routing.py`, `monocle/agents/reindex.py` (empty classes / `pass` implementations — wired in later milestones). **Note:** `capture.py` is not created — the capture server role is fulfilled by `POST /api/ingest` REST endpoint in Phase 1 (per PRD v2.4); optional separate process deferred to Phase 3+ via `ProcessManager`.
-- [ ] `monocle/telemetry.py` — `configure_telemetry(settings)`, `get_tracer(name)`, `get_meter(name)`, `span(name, **attrs)` async ctx manager, `timed(histogram, **attrs)` async ctx manager. No-ops when `telemetry.enabled: false`. Called once from `main.py` lifespan before any other subsystem starts.
-- [ ] `.obsidianignore` containing: `.versions/`, `.trash/`
-- [ ] `frontend/` scaffold: `package.json`, `vite.config.ts`, `tsconfig.json`, `src/main.tsx`, `src/App.tsx` (empty shell with one route)
-- [ ] `frontend/vitest.config.ts`
-- [ ] `frontend/package.json` dependencies: `react`, `react-dom`, `react-router-dom`, `react-markdown`, `react-force-graph`, `recharts`, `@codemirror/state`, `@codemirror/view`, `@codemirror/commands`, `@codemirror/lang-markdown`, `@codemirror/lang-yaml`, `typescript`, `vite`, `vitest`, `@playwright/test`
-- [ ] `pytest.ini` with `testpaths = monocle/tests` and `asyncio_mode = auto`
-- [ ] `monocle/tests/conftest.py` with:
+- [x] `prompts/` directory with stub files: `routing.md`, `extract.md`, `weekly_review.md`, `confidence.md` (each with YAML frontmatter + placeholder prompt body); `prompts/local/` listed in `.gitignore`. **Note:** `confidence.md` is retained as a documentation placeholder only — M7 replaces LLM-based confidence scoring with a deterministic formula, so this file is never loaded by any agent.
+- [x] Stub module files: `monocle/watcher.py`, `monocle/process_manager.py`, `monocle/agents/routing.py`, `monocle/agents/reindex.py` (empty classes / `pass` implementations — wired in later milestones). **Note:** `capture.py` is not created — the capture server role is fulfilled by `POST /api/ingest` REST endpoint in Phase 1 (per PRD v2.4); optional separate process deferred to Phase 3+ via `ProcessManager`.
+- [x] `monocle/telemetry.py` — `configure_telemetry(settings)`, `get_tracer(name)`, `get_meter(name)`, `span(name, **attrs)` async ctx manager, `timed(histogram, **attrs)` async ctx manager. No-ops when `telemetry.enabled: false`. Called once from `main.py` lifespan before any other subsystem starts.
+- [x] `.obsidianignore` containing: `.versions/`, `.trash/`
+- [x] `frontend/` scaffold: `package.json`, `vite.config.ts`, `tsconfig.json`, `src/main.tsx`, `src/App.tsx` (empty shell with one route)
+- [x] `frontend/vitest.config.ts`
+- [x] `frontend/package.json` dependencies: `react`, `react-dom`, `react-router-dom`, `react-markdown`, `react-force-graph`, `recharts`, `@codemirror/state`, `@codemirror/view`, `@codemirror/commands`, `@codemirror/lang-markdown`, `@codemirror/lang-yaml`, `typescript`, `vite`, `vitest`, `@playwright/test`
+- [x] `pytest.ini` with `testpaths = monocle/tests` and `asyncio_mode = auto` (implemented via `[tool.pytest.ini_options]` in `pyproject.toml`)
+- [x] `monocle/tests/conftest.py` with:
   - `tmp_vault` fixture — temp dir with 5 fixture notes (one per template type: person, decision, meeting, idea, blank)
   - `memory_index` fixture — returns a fresh `MemoryIndex` instance
-- [ ] `.vscode/tasks.json` — foundational build task definitions:
+- [x] `.vscode/tasks.json` — foundational build task definitions:
   - `install: backend deps` — `uv sync`
   - `install: frontend deps` — `npm install` (cwd: `frontend/`)
   - `test: backend` — `uv run python -m pytest monocle/tests/ -x --tb=short -q`
   - `test: frontend` — `npm run test -- --run` (cwd: `frontend/`)
-- [ ] `.vscode/launch.json` — foundational debug launch configurations:
+- [x] `.vscode/launch.json` — foundational debug launch configurations:
   - `Dev Server (debug)` — debugpy launch of `python -m monocle dev`; primary developer launch
   - `Backend Tests (debug)` — debugpy launch of pytest against `monocle/tests/`
 
 **Acceptance Criteria:**
-- [ ] `uv run python -m pytest monocle/tests/ -x --tb=short -q` exits 0 (smoke test — no tests yet, just import checks)
-- [ ] `cd frontend && npm run test -- --run` exits 0
-- [ ] `uv run python -c "from monocle.config import Settings"` succeeds (no import errors)
-- [ ] `uv run python -c "from monocle.models import Note, BrainStats, IngestRequest, GraphData, LinkRef"` succeeds
-- [ ] `.gitignore` covers `config.yaml`, `.env`, `data/`, `frontend/dist/`, `__pycache__/`, `.venv/`
-- [ ] `F5` in VS Code with `Dev Server (debug)` as the active configuration starts the unified server with the debugger attached
-- [ ] `uv run python -c "from monocle.telemetry import configure_telemetry"` succeeds (no import errors)
+- [x] `uv run python -m pytest monocle/tests/ -x --tb=short -q` exits 0 (9 tests passed)
+- [x] `cd frontend && npm run test -- --run` exits 0 (1 test passed)
+- [x] `uv run python -c "from monocle.config import Settings"` succeeds (no import errors)
+- [x] `uv run python -c "from monocle.models import Note, BrainStats, IngestRequest, GraphData, LinkRef"` succeeds
+- [x] `.gitignore` covers `config.yaml`, `.env`, `data/`, `frontend/dist/`, `__pycache__/`, `.venv/`
+- [x] `F5` in VS Code with `Dev Server (debug)` as the active configuration starts the unified server with the debugger attached
+- [x] `uv run python -c "from monocle.telemetry import configure_telemetry"` succeeds (no import errors)
 
 **Notes:**
 - Python minimum version: 3.11. Set `requires-python = ">=3.11"` in `pyproject.toml` (uv reads this to select the interpreter).
