@@ -29,7 +29,7 @@ This is the primary reference document for building Monocle. Read it at the star
 **Active Milestone:** M4 — Index Layer
 **Last Completed:** M3 — Vault Layer (2026-03-16)
 **Blocked By:** Nothing
-**Session Notes:** M3 fully executed: `monocle/vault/__init__.py` implemented with full `VaultLayer` class (CRUD, atomic writes, versioning, soft-delete, path-traversal protection, template construction, wikilink resolution); `monocle/vault/normalise.py` (normalise_frontmatter); `monocle/vault/wikilinks.py` (parse_wikilinks, parse_links_field, resolve_wikilink); `monocle/vault/templates/` with 10 YAML schemas (including sentence_starters); `monocle/tests/test_vault.py` with 88 tests (all passing); `test: vault` VS Code task added. Full suite: 128 tests passed.
+**Session Notes:** M3 fully executed and hardened: `monocle/vault/__init__.py` with `VaultLayer` class (CRUD, atomic writes, versioning, soft-delete, path-traversal protection, template construction, wikilink resolution); three critical bugs fixed: (1) `NoteRef.created` field added + list_notes sort="created" copy-paste bug fixed, (2) list_versions uses safe resolved+relative path, (3) restore_version validates timestamp format (regex) + relative_to escape check. Wikilink resolution made bidirectional (slugify both file stem and input name). Template field now persisted in frontmatter on write/read cycle. Additional security tests added: test_restore_version_invalid_timestamp_format_raises_403, test_restore_version_path_traversal_attempt_raises_403, test_restore_version_absolute_path_safe, test_sort_by_created_uses_created_not_updated. **All 136 tests passing** (88 vault + 40 M1/M2 + 4 fix tests + 4 additional security tests). Full suite exit 0.
 
 ---
 

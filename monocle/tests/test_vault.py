@@ -229,6 +229,20 @@ class TestResolveWikilink:
         result = resolve_wikilink("Sarah Chen", tmp_path)
         assert result == "people/sarah-chen.md"
 
+    def test_reverse_slug_match(self, tmp_path: Path):
+        """Hyphenated search should match space-separated filename (bidirectional)."""
+        (tmp_path / "people").mkdir()
+        (tmp_path / "people" / "Sarah Chen.md").write_text("---\n---\n")
+        result = resolve_wikilink("sarah-chen", tmp_path)
+        assert result == "people/Sarah Chen.md"
+
+    def test_reverse_slug_match_case_insensitive(self, tmp_path: Path):
+        """Case-insensitive hyphenated search for space-separated filename."""
+        (tmp_path / "people").mkdir()
+        (tmp_path / "people" / "Alice Example.md").write_text("---\n---\n")
+        result = resolve_wikilink("alice-example", tmp_path)
+        assert result == "people/Alice Example.md"
+
     def test_not_found_returns_none(self, tmp_path: Path):
         assert resolve_wikilink("Nonexistent Person", tmp_path) is None
 
@@ -525,11 +539,33 @@ class TestVaultLayerCreateFromTemplate:
         note = vault.create_from_template("idea", {"title": "Body Test"}, body="Custom body.")
         assert note.body == "Custom body."
 
+    def test_template_preserved_on_roundtrip(self, tmp_path: Path):
+        """Template field should be preserved when written and read back."""
+        vault = VaultLayer(tmp_path)
+        note = vault.create_from_template("person_note", {"title": "Alice"})
+        assert note.metadata.template == "person"
+        
+        # Write and read back
+        vault.write_note(note.file_path, note)
+        read_back = vault.read_note(note.file_path)
+        assert read_back.metadata.template == "person"
+
+    def test_decision_template_preserved(self, tmp_path: Path):
+        """Decision template should be preserved in round-trip."""
+        vault = VaultLayer(tmp_path)
+        note = vault.create_from_template("decision", {"title": "Choose Stack"})
+        assert note.metadata.template == "decision"
+        
+        vault.write_note(note.file_path, note)
+        read_back = vault.read_note(note.file_path)
+        assert read_back.metadata.template == "decision"
+
     def test_slugify_special_chars(self, tmp_path: Path):
         """Special characters are stripped, spaces become hyphens."""
         vault = VaultLayer(tmp_path)
         note = vault.create_from_template("person_note", {"title": "O'Brien & Co!"})
         assert "obrien--co" in note.file_path or "obrien" in note.file_path
+
 
 
 # ============================================================================
@@ -606,6 +642,42 @@ class TestVaultLayerVersions:
         with pytest.raises(NoteNotFound):
             vault.restore_version("w/n.md", "2000-01-01T00-00-00.000Z")
 
+    def test_restore_version_invalid_timestamp_format_raises_403(self, tmp_path: Path):
+        """Invalid timestamp format should raise 403 (not allow arbitrary strings)."""
+        _write_md(tmp_path, "w/n.md", {})
+        vault = VaultLayer(tmp_path)
+        # Should reject timestamps that don't match YYYYMMDDTHHmmss.fffZ format
+        with pytest.raises(Exception) as exc_info:
+            vault.restore_version("w/n.md", "invalid-timestamp")
+        assert exc_info.value.status_code == 403
+
+    def test_restore_version_path_traversal_attempt_raises_403(self, tmp_path: Path):
+        """Timestamp containing .. or path separators should be rejected."""
+        _write_md(tmp_path, "w/n.md", {})
+        vault = VaultLayer(tmp_path)
+        # Try to escape the version directory
+        with pytest.raises(Exception) as exc_info:
+            vault.restore_version("w/n.md", "../../../etc/passwd.000Z")
+        assert exc_info.value.status_code == 403
+
+    def test_restore_version_absolute_path_safe(self, tmp_path: Path):
+        """Absolute file paths in restore_version should be safe (converted to relative)."""
+        vault = VaultLayer(tmp_path)
+        n = Note(file_path="w/r.md", title="T", body="v1", metadata=NoteMetadata())
+        vault.write_note("w/r.md", n)
+        time.sleep(0.05)
+        vault.write_note("w/r.md", n)
+        
+        # Get an absolute path
+        absolute_path = str(tmp_path / "w" / "r.md")
+        versions = vault.list_versions(absolute_path)
+        assert len(versions) > 0
+        
+        # Restore should work with absolute path
+        vault.restore_version(absolute_path, versions[0])
+        restored = vault.read_note("w/r.md")
+        assert restored.title == "T"
+
 
 # ============================================================================
 # VaultLayer: list_notes
@@ -663,6 +735,30 @@ class TestVaultLayerListNotes:
         dates = [n.updated for n in page.items if n.updated is not None]
         if len(dates) >= 2:
             assert dates == sorted(dates, reverse=True)
+
+    def test_sort_by_created_uses_created_not_updated(self, tmp_path: Path):
+        """Verify that sort='created' uses ref.created, not ref.updated (descending order)."""
+        vault = VaultLayer(tmp_path)
+        # Create three notes with different created dates
+        n1 = Note(file_path="a.md", title="First", body="", metadata=NoteMetadata(
+            created=datetime.datetime(2025, 1, 1, 10, 0, tzinfo=datetime.timezone.utc)))
+        n2 = Note(file_path="b.md", title="Second", body="", metadata=NoteMetadata(
+            created=datetime.datetime(2025, 1, 3, 10, 0, tzinfo=datetime.timezone.utc)))
+        n3 = Note(file_path="c.md", title="Third", body="", metadata=NoteMetadata(
+            created=datetime.datetime(2025, 1, 2, 10, 0, tzinfo=datetime.timezone.utc)))
+        
+        vault.write_note("a.md", n1)
+        time.sleep(0.01)
+        vault.write_note("b.md", n2)
+        time.sleep(0.01)
+        vault.write_note("c.md", n3)
+        
+        # Sort by created (descending): b (jan3), c (jan2), a (jan1)
+        page = vault.list_notes(sort="created")
+        titles = [n.title for n in page.items]
+        assert titles == ["Second", "Third", "First"]
+
+
 
     def test_empty_vault_returns_empty_page(self, tmp_path: Path):
         vault = VaultLayer(tmp_path)

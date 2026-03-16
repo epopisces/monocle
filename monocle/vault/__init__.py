@@ -323,6 +323,7 @@ class VaultLayer:
                     type=note.metadata.type,
                     domain=note.metadata.domain,
                     tags=list(note.metadata.tags),
+                    created=note.metadata.created,
                     updated=note.metadata.updated,
                     confidence=note.metadata.confidence,
                     review_status=note.metadata.review_status,
@@ -337,7 +338,7 @@ class VaultLayer:
             if sort_key == "updated":
                 return ref.updated or datetime.min.replace(tzinfo=timezone.utc)
             if sort_key == "created":
-                return ref.updated or datetime.min.replace(tzinfo=timezone.utc)
+                return ref.created or datetime.min.replace(tzinfo=timezone.utc)
             return ref.title.lower()
 
         refs.sort(key=_sort_value, reverse=descending)
@@ -512,6 +513,7 @@ class VaultLayer:
         now = datetime.now(timezone.utc)
         fm: dict[str, Any] = {
             "type": note_type,
+            "template": schema_name,
             "domain": "personal",
             "tags": [],
             "people": [],
@@ -567,8 +569,9 @@ class VaultLayer:
         Raises:
             HTTPException(403): Path traversal.
         """
-        self._safe_resolve(file_path)  # validate
-        version_dir = self._version_dir(file_path)
+        resolved = self._safe_resolve(file_path)  # validate and resolve
+        relative = self._to_relative(resolved)  # ensure relative path
+        version_dir = self._version_dir(relative)
         if not version_dir.exists():
             return []
         return sorted(f.stem for f in version_dir.glob("*.md"))
@@ -580,16 +583,35 @@ class VaultLayer:
 
         Raises:
             NoteNotFound(404): Note or version not found.
-            HTTPException(403): Path traversal.
+            HTTPException(403): Path traversal or invalid timestamp.
         """
+        # Validate timestamp format: must match _ms_timestamp() pattern
+        # Pattern: YYYY-MM-DDTHH-MM-SS.mmmZ (e.g. 2026-03-16T10-30-45.123Z)
+        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$", timestamp):
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid timestamp format",
+            )
+
         resolved = self._safe_resolve(file_path)
-        version_file = self._version_dir(file_path) / f"{timestamp}.md"
+        relative = self._to_relative(resolved)
+        version_dir = self._version_dir(relative)
+        version_file = version_dir / f"{timestamp}.md"
+
+        # Ensure version_file is within the intended version directory tree
+        try:
+            version_file.relative_to(version_dir)
+        except ValueError:
+            raise HTTPException(
+                status_code=403,
+                detail="Invalid version path",
+            )
 
         if not version_file.exists():
             raise NoteNotFound(f"{file_path}@{timestamp}")
 
         if resolved.exists():
-            self._shadow_version(self._to_relative(resolved), resolved)
+            self._shadow_version(relative, resolved)
 
         resolved.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(version_file), str(resolved))

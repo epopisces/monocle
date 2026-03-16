@@ -98,6 +98,10 @@ def resolve_wikilink(name: str, vault_root: str | Path) -> str | None:
     # Build a slug variant for comparison: "Sarah Chen" → "sarah-chen"
     name_slug = re.sub(r"[\s_]+", "-", re.sub(r"[^\w\s-]", "", name_lower)).strip("-")
 
+    def _slugify(text: str) -> str:
+        """Helper to convert any stem to slugified form."""
+        return re.sub(r"[\s_]+", "-", re.sub(r"[^\w\s-]", "", text.lower())).strip("-")
+
     for md_file in root.rglob("*.md"):
         # Skip hidden/system directories
         relative = md_file.relative_to(root)
@@ -106,7 +110,9 @@ def resolve_wikilink(name: str, vault_root: str | Path) -> str | None:
             continue
 
         stem_lower = md_file.stem.lower()
-        if stem_lower == name_lower or stem_lower == name_slug:
+        stem_slug = _slugify(md_file.stem)
+        # Bidirectional matching: compare all combinations
+        if stem_lower == name_lower or stem_lower == name_slug or stem_slug == name_lower or stem_slug == name_slug:
             # Return with forward slashes for cross-platform consistency
             return str(relative).replace(os.sep, "/")
 
