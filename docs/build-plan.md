@@ -76,7 +76,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | Failed-ingest registry | `data/failed_ingests.json` (JSON array; stdlib only; gitignored; auto-created on first failure) |
 | OpenAPI spec | Auto-generated: `GET http://localhost:8000/openapi.json` |
 | Frontend type gen | `npx openapi-typescript http://localhost:8000/openapi.json -o frontend/src/api/schema.d.ts` |
-| Commit openapi.json | `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(), indent=2))"` |
+| Commit openapi.json | `uv run python scripts/export_openapi.py` |
 | OTLP endpoint | `config.yaml` → `telemetry.otlp_endpoint` (default `http://localhost:4317`; AI Toolkit gRPC port) |
 | Log level | `config.yaml` → `telemetry.log_level` (default `INFO`; `DEBUG` in dev mode) |
 | Log format | `config.yaml` → `telemetry.log_format` (`text` in dev, `json` in prod) |
@@ -511,7 +511,7 @@ tests/e2e/            Playwright tests (require running server)
 
 **Notes:**
 - Commit `openapi.json` to the repo. The frontend uses it to generate `schema.d.ts`.
-- After any route change, regenerate: `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
+- After any route change, regenerate: `uv run python scripts/export_openapi.py`
 
 ---
 

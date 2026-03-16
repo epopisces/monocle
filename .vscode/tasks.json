@@ -38,7 +38,7 @@
     {
       "label": "api: export openapi",
       "type": "shell",
-      "command": "uv run python -c \"import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))\"",
+      "command": "uv run python scripts/export_openapi.py",
       "group": "build",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
