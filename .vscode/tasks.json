@@ -1,0 +1,56 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "install: backend deps",
+      "type": "shell",
+      "command": "uv sync",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "install: frontend deps",
+      "type": "shell",
+      "command": "npm install",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "test: backend",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/ -x --tb=short -q",
+      "group": { "kind": "test", "isDefault": true },
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "test: frontend",
+      "type": "shell",
+      "command": "npm run test -- --run",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "api: export openapi",
+      "type": "shell",
+      "command": "uv run python -c \"import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))\"",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "api: start server",
+      "type": "shell",
+      "command": "uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000 --reload",
+      "group": "build",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": []
+    }
+  ]
+}

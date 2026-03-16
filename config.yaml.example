@@ -1,0 +1,66 @@
+################################################################################
+# Monocle — Example Configuration
+#
+# Copy this file to config.yaml and customise.
+# On first run, this file is automatically copied to config.yaml if absent.
+#
+# SECRETS: Do not put secrets here. Use .env or environment variables.
+################################################################################
+
+ai:
+  provider: ollama             # "ollama" | "foundry_local" | "azure"
+  embed_model: nomic-embed-text
+  embed_dimensions: 1536       # Fixed — do not change unless you re-index from scratch
+  chat_model: llama3.2
+  ollama_base_url: http://localhost:11434
+  foundry_local_base_url: http://localhost:5272
+
+vault:
+  path: ./vault
+  inbox_path: ./vault/inbox
+  templates_path: ./vault/.templates
+  watch: true
+  debounce_ms: 2000
+
+index:
+  backend: chroma
+  chroma_persist_path: ./data/chroma
+  collection_name: notes
+  chunk_size_tokens: 512
+  chunk_overlap_tokens: 64
+
+agents:
+  weekly_summary:
+    enabled: true
+    cron: "0 17 * * 5"         # Friday at 17:00
+    domains: ["work", "personal"]
+  reindex:
+    enabled: true
+    cron: "0 3 * * 0"          # Sunday at 03:00
+
+review:
+  queue_threshold: 1.0
+  auto_approve_threshold_pct: 0  # 0 = no auto-approval; 90 = auto-approve if confidence >= 90%
+  confidence_weights:
+    template_match: 0.35
+    metadata_coverage: 0.30
+    tag_plausibility: 0.20
+    entity_match: 0.15
+
+server:
+  host: 127.0.0.1              # Change to 0.0.0.0 to expose to local network
+  port: 8000
+  mcp_access_key_env: MCP_ACCESS_KEY
+  frontend_dist: ./frontend/dist
+  separate_processes: false
+
+telemetry:
+  enabled: true
+  otlp_endpoint: "http://localhost:4317"   # AI Toolkit gRPC (or any OTLP-compatible backend)
+  otlp_transport: grpc                      # grpc | http
+  log_level: INFO                           # DEBUG | INFO | WARNING | ERROR
+  log_format: text                          # text (dev) | json (prod)
+  enable_sensitive_data: true               # include prompts/completions in traces
+
+ui:
+  chat_session_history_limit: 10

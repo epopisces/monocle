@@ -87,7 +87,7 @@ Requirements are grouped by subsystem. Each requirement has a unique ID (`FR-<SU
 
 ### 2.1 Configuration (FR-CFG)
 
-**FR-CFG-01:** The system SHALL read configuration from a `config.yaml` file co-located with the entrypoint (or at the path specified by env var `OPEN_BRAIN_CONFIG`). **On first run, if `config.yaml` does not exist, the `Settings` loader SHALL automatically copy `config.yaml.example` to `config.yaml` and log a one-time notice, so a fresh clone works without manual setup.**
+**FR-CFG-01:** The system SHALL read configuration from a `config.yaml` file co-located with the entrypoint (or at the path specified by env var `MONOCLE_CONFIG`). **On first run, if `config.yaml` does not exist, the `Settings` loader SHALL automatically copy `config.yaml.example` to `config.yaml` and log a one-time notice, so a fresh clone works without manual setup.**
 
 **FR-CFG-02:** The system SHALL read secrets from a `.env` file and from environment variables. Environment variables take precedence over `.env`.
 

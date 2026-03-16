@@ -17,3 +17,20 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Created `.github/copilot-instructions.md` — synthesized architecture, key abstractions, ingest pipeline, frontmatter schema, test commands, and conventions from build-plan, SRS, PRD, and UI Design docs
 - Created `GHI-ACTION-LOG.md` — seeded with 2026-03-14 entry from README; established as the canonical agent action log going forward
 - Standardized all Python/tool invocations in `docs/build-plan.md` and `.github/copilot-instructions.md` to use `uv run` (e.g., `uv run python -m pytest`, `uv run uvicorn`); updated M1 tasks.json deliverable from `pip install -e .[dev]` to `uv sync`; updated `pyproject.toml` note to use `requires-python` (uv standard)
+- **Executed M1 — Foundation & Project Skeleton (COMPLETE)**
+  - Created `pyproject.toml` with 30+ backend dependencies, `[dependency-groups]` dev group, `[tool.uv] prerelease = "allow"` (required for agent-framework pre-release packages), `[tool.pytest.ini_options]`
+  - Created all `monocle/` subdirectory `__init__.py` files: ai/, index/, vault/, ingest/, ingest/plugins/, agents/, routers/, tests/
+  - Created `monocle/config.py` — Pydantic v2 Settings, YAML + .env loading, auto-copy config.yaml.example on first run
+  - Created `monocle/models.py` — all 15+ shared Pydantic v2 models including `IngestRequest` with `allow_duplicate: bool = False`
+  - Created `monocle/telemetry.py` — full OTel wiring with no-op fallbacks for all signals
+  - Created `monocle/watcher.py`, `monocle/process_manager.py`, `monocle/agents/routing.py`, `monocle/agents/reindex.py` — stubs
+  - Created `monocle/cli.py`, `monocle/__main__.py` — Typer app with serve/dev/reindex/pull-models/export/versions commands
+  - Created `config.yaml.example`, `.env.example`
+  - Created `vault/` skeleton: inbox/, people/, work/, technologies/, projects/, summaries/, .templates/, .obsidianignore
+  - Created `prompts/routing.md`, `prompts/extract.md`, `prompts/weekly_review.md`, `prompts/confidence.md`, `prompts/local/README.md`
+  - Created `monocle/tests/conftest.py` (tmp_vault + memory_index fixtures), `monocle/tests/test_imports.py` (9 smoke tests)
+  - Created `frontend/` scaffold: package.json, vite.config.ts, tsconfig.json, vitest.config.ts, index.html, src/main.tsx, src/App.tsx, src/App.test.tsx, src/test-setup.ts
+  - Created `.vscode/tasks.json`, `.vscode/launch.json`
+  - Fixed `config.py`: removed stray `pydantic_settings` import (not in deps); fixed `pyproject.toml` to use `[dependency-groups]` (eliminates deprecation warning); added `[tool.uv] prerelease = "allow"` for agent-framework pre-release packages
+  - `uv sync` → 148 packages resolved (EXIT 0); `uv run python -m pytest` → 9 passed (EXIT 0); `npm run test -- --run` → 1 passed (EXIT 0)
+  - Updated `docs/build-plan.md`: all M1 deliverables and acceptance criteria marked `[x]`; Active Milestone → M2; M1 → COMPLETE in tracker

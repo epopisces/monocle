@@ -1,0 +1,53 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Dev Server (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "monocle",
+      "args": ["dev"],
+      "cwd": "${workspaceFolder}",
+      "env": { "MONOCLE_DEV": "true" },
+      "jinja": true,
+      "justMyCode": false,
+      "presentation": {
+        "group": "monocle",
+        "order": 1
+      }
+    },
+    {
+      "name": "Backend Tests (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "args": ["monocle/tests/", "-x", "--tb=short", "-q", "-s"],
+      "cwd": "${workspaceFolder}",
+      "jinja": true,
+      "justMyCode": false,
+      "presentation": {
+        "group": "monocle",
+        "order": 2
+      }
+    },
+    {
+      "name": "API Server (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": [
+        "monocle.main:app",
+        "--host", "127.0.0.1",
+        "--port", "8000",
+        "--reload"
+      ],
+      "cwd": "${workspaceFolder}",
+      "jinja": true,
+      "justMyCode": false,
+      "presentation": {
+        "group": "monocle",
+        "order": 3
+      }
+    }
+  ]
+}
