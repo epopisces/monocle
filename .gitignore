@@ -116,6 +116,7 @@ chroma_data/
 vault/
 !vault/.templates
 !vault/.gitkeep
+!monocle/vault/
 
 # Agent/version control
 .versions/
