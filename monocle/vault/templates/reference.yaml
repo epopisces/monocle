@@ -1,0 +1,36 @@
+template: reference
+note_type: reference
+default_folder: technologies
+description: "Pointer to a URL, document, or external resource."
+
+sentence_starters:
+  - "link:"
+  - "resource:"
+  - "see also"
+  - "http"
+  - "https"
+  - "reference:"
+  - "bookmarked"
+  - "interesting article"
+  - "great read"
+  - "check out"
+  - "found this"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Title or name of the referenced resource."
+  - name: domain
+    required: false
+    type: string
+    default: personal
+  - name: tags
+    required: false
+    type: list
+  - name: people
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list

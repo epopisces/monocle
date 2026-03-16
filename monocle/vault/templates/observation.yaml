@@ -1,0 +1,36 @@
+template: observation
+note_type: observation
+default_folder: work
+description: "Factual observation about a situation, project, or pattern."
+
+sentence_starters:
+  - "noticed that"
+  - "I observed"
+  - "interesting that"
+  - "it seems"
+  - "I noticed"
+  - "realized that"
+  - "found that"
+  - "it appears"
+  - "worth noting"
+  - "observation:"
+  - "pattern:"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Short observation summary."
+  - name: domain
+    required: false
+    type: string
+    default: work
+  - name: people
+    required: false
+    type: list
+  - name: tags
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list

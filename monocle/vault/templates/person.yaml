@@ -1,0 +1,41 @@
+template: person
+note_type: person_note
+default_folder: people
+description: "Observation or note about a specific person."
+
+sentence_starters:
+  - "I met"
+  - "met with"
+  - "talked to"
+  - "spoke with"
+  - "I spoke"
+  - "had coffee with"
+  - "had lunch with"
+  - "caught up with"
+  - "I caught up"
+  - "introduced to"
+  - "got to know"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Person's full name."
+  - name: people
+    required: true
+    type: list
+    description: "People mentioned in this note."
+  - name: domain
+    required: false
+    type: string
+    default: personal
+  - name: tags
+    required: false
+    type: list
+  - name: org
+    required: false
+    type: string
+    description: "Organisation this person is associated with."
+  - name: action_items
+    required: false
+    type: list

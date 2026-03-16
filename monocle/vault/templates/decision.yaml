@@ -1,0 +1,38 @@
+template: decision
+note_type: decision
+default_folder: work
+description: "A decision made, with context and rationale."
+
+sentence_starters:
+  - "I decided"
+  - "we decided"
+  - "decision:"
+  - "we agreed to"
+  - "decided to"
+  - "approved:"
+  - "resolved to"
+  - "we chose"
+  - "the decision is"
+  - "we're going with"
+  - "going with"
+  - "we will"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Short description of the decision."
+  - name: domain
+    required: false
+    type: string
+    default: work
+  - name: people
+    required: false
+    type: list
+    description: "People involved in the decision."
+  - name: tags
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list

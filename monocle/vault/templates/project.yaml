@@ -1,0 +1,37 @@
+template: project
+note_type: project
+default_folder: projects
+description: "Project overview and status."
+
+sentence_starters:
+  - "working on"
+  - "project:"
+  - "starting a project"
+  - "starting work on"
+  - "new project"
+  - "kicked off"
+  - "launched"
+  - "project update"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Project name."
+  - name: domain
+    required: false
+    type: string
+    default: work
+  - name: people
+    required: false
+    type: list
+    description: "Team members."
+  - name: tags
+    required: false
+    type: list
+  - name: org
+    required: false
+    type: string
+  - name: action_items
+    required: false
+    type: list

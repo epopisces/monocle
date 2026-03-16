@@ -109,6 +109,7 @@ class NoteRef(BaseModel):
     type: NOTE_TYPES = "other"
     domain: str = "personal"
     tags: list[str] = Field(default_factory=list)
+    created: datetime | None = None
     updated: datetime | None = None
     confidence: float = 1.0
     review_status: ReviewStatus = "approved"

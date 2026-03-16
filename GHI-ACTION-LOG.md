@@ -42,3 +42,28 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Exported `openapi.json`: 30 operations across 26 paths
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 40 passed (9 M1 + 31 M2), EXIT 0
   - Updated `docs/build-plan.md`: all M2 deliverables and acceptance criteria marked `[x]`; Active Milestone → M3; M2 → COMPLETE in tracker
+
+## 2026-03-16
+
+### Claude Sonnet 4.6
+- **Executed M3 — Vault Layer (COMPLETE)**
+  - Created `monocle/vault/normalise.py`: `normalise_frontmatter(fm)` applies all schema defaults (type→"other", lists→[], confidence→1.0, review_status→"approved", approval fields→null)
+  - Created `monocle/vault/wikilinks.py`: `parse_wikilinks(body)` regex extraction of `[[...]]` targets; `parse_links_field(links)` normalises plain strings and dicts to `LinkRef` objects; `resolve_wikilink(name, vault_root)` case-insensitive file scan skipping hidden dirs
+  - Created `monocle/vault/templates/__init__.py` + 10 YAML schemas: person, decision, project, meeting, idea, observation, reference, action_item, blank, weekly_summary — each with `sentence_starters`, `fields`, `default_folder`, `note_type`
+  - Created `monocle/vault/__init__.py`: full `VaultLayer` implementation — `list_notes` (paginated, filtered), `read_note` (frontmatter parse + normalise), `write_note` (atomic via tempfile.mkstemp + os.replace, shadow versioning, mtime 409), `patch_frontmatter` (FM-only update preserving body), `delete_note` (soft-delete to .trash/), `move_note`, `create_from_template` (slug derivation, in-memory, no disk write), `resolve_wikilink`, `list_versions`, `restore_version`, `list_templates`; `NoteNotFound` (HTTP 404) and path traversal protection (HTTP 403) throughout
+  - Created `monocle/tests/test_vault.py`: 88 tests covering all acceptance criteria — normalise_frontmatter defaults, parse_wikilinks, parse_links_field, resolve_wikilink, VaultLayer CRUD, atomic writes, versioning, soft-delete, path traversal 403, mtime conflict 409, create_from_template, list_notes pagination/filtering, version round-trip
+  - Added `test: vault` task to `.vscode/tasks.json`
+  - `uv run python -m pytest monocle/tests/test_vault.py -x --tb=short -q` → 88 passed, EXIT 0
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 128 passed (all tests), EXIT 0
+  - Updated `docs/build-plan.md`: all M3 deliverables and acceptance criteria marked `[x]`; Active Milestone → M4; M3 → COMPLETE in tracker
+
+### Claude Haiku 4.5
+- **Post-M3 Bug Fixes & Hardening (from PR review feedback)**
+  - Fixed **Bug 1 (NoteRef missing created field + list_notes sort="created" copy-paste)**: Added `created: datetime | None = None` field to `NoteRef` model in `monocle/models.py`; fixed `_sort_value()` in `monocle/vault/__init__.py` to use `ref.created` when `sort_key == "created"`; `list_notes` now passes `created` from `note.metadata.created` to `NoteRef` constructor
+  - Fixed **Bug 2 (list_versions unsafe path usage)**: Changed `list_versions(file_path)` to resolve and validate path before using in `_version_dir()` — now uses `self._safe_resolve(file_path)` + `self._to_relative()` to ensure safe, normalized vault-relative path (prevents directory escaping)
+  - Fixed **Bug 3 (restore_version timestamp injection vulnerability)**: Added regex validation of timestamp format (`^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$`); added `try/except version_file.relative_to(version_dir)` to catch path escape attempts with `..` or `/` sequences; raises HTTP 403 on invalid format or escape attempt
+  - Fixed **Wikilink resolution asymmetry (from PR review)**: Made `resolve_wikilink()` bidirectional by slugifying both file stem and input name; now compares all 4 combinations (stem_lower, stem_slug, name_lower, name_slug); added tests `test_reverse_slug_match` and `test_reverse_slug_match_case_insensitive`
+  - Fixed **Template field loss (from code review)**: `create_from_template()` now sets `"template": schema_name` in frontmatter dict; template choice persists through write/read cycle; added round-trip tests `test_template_preserved_on_roundtrip` and `test_decision_template_preserved`
+  - Added security & correctness tests: `test_restore_version_invalid_timestamp_format_raises_403`, `test_restore_version_path_traversal_attempt_raises_403`, `test_restore_version_absolute_path_safe`, `test_sort_by_created_uses_created_not_updated`
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **136 passed** (88 vault + 40 M1/M2 + 4 fix tests + 4 additional security tests), EXIT 0
+
