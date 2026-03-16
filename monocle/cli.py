@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 
 @app.command()
 def serve(
-    host: str = typer.Option(None, help="Override server.host from config"),
-    port: int = typer.Option(None, help="Override server.port from config"),
+    host: str | None = typer.Option(None, help="Override server.host from config"),
+    port: int | None = typer.Option(None, help="Override server.port from config"),
 ) -> None:
     """Start the unified Monocle server (API + MCP + watcher + scheduler)."""
     import uvicorn
@@ -34,8 +34,8 @@ def serve(
 
 @app.command()
 def dev(
-    host: str = typer.Option(None, help="Override server.host from config"),
-    port: int = typer.Option(None, help="Override server.port from config"),
+    host: str | None = typer.Option(None, help="Override server.host from config"),
+    port: int | None = typer.Option(None, help="Override server.port from config"),
 ) -> None:
     """Start Monocle in development mode (prefixed logging, auto-restart on crash)."""
     import os
