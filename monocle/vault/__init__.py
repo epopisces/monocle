@@ -523,7 +523,7 @@ class VaultLayer:
         fm: dict[str, Any] = {
             "type": note_type,
             "template": schema_name,
-            "domain": "personal",
+            "domain": domain_value,
             "tags": [],
             "people": [],
             "action_items": [],
