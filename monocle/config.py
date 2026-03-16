@@ -1,7 +1,7 @@
 """
 monocle/config.py — Settings model (Pydantic v2).
 
-Loads config.yaml (or path from OPEN_BRAIN_CONFIG env var) then overlays
+Loads config.yaml (or path from MONOCLE_CONFIG env var) then overlays
 values from a .env / environment variables.  On first run, if config.yaml
 is absent, it is automatically copied from config.yaml.example.
 """
@@ -113,7 +113,7 @@ class UIConfig(BaseModel):
 
 def _find_config_file() -> Path:
     """Locate config.yaml, auto-copying from example if missing."""
-    env_path = os.environ.get("OPEN_BRAIN_CONFIG")
+    env_path = os.environ.get("MONOCLE_CONFIG")
     if env_path:
         return Path(env_path)
 
