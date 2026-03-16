@@ -51,6 +51,14 @@
       "isBackground": true,
       "presentation": { "reveal": "always", "panel": "dedicated" },
       "problemMatcher": []
+    },
+    {
+      "label": "test: vault",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_vault.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
     }
   ]
 }

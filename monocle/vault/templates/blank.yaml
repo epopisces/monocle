@@ -1,0 +1,25 @@
+template: blank
+note_type: other
+default_folder: inbox
+description: "Catch-all template — used when classification confidence < 0.6."
+
+sentence_starters: []
+
+fields:
+  - name: title
+    required: false
+    type: string
+    description: "Optional title."
+  - name: domain
+    required: false
+    type: string
+    default: personal
+  - name: tags
+    required: false
+    type: list
+  - name: people
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list

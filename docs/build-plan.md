@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-13
-active-milestone: M1
+last-updated: 2026-03-16
+active-milestone: M4
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,10 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M3 — Vault Layer
-**Last Completed:** M2 — API Skeleton (2026-03-15)
+**Active Milestone:** M4 — Index Layer
+**Last Completed:** M3 — Vault Layer (2026-03-16)
 **Blocked By:** Nothing
-**Session Notes:** M2 fully executed: `monocle/main.py` created with FastAPI + CORS + OTel + slowapi; 13 router files created; `monocle/rate_limit.py` created to avoid circular imports; `monocle/tests/test_api.py` created with 31 tests (all passing); `openapi.json` exported (30 operations across 26 paths). All M2 acceptance criteria met.
+**Session Notes:** M3 fully executed: `monocle/vault/__init__.py` implemented with full `VaultLayer` class (CRUD, atomic writes, versioning, soft-delete, path-traversal protection, template construction, wikilink resolution); `monocle/vault/normalise.py` (normalise_frontmatter); `monocle/vault/wikilinks.py` (parse_wikilinks, parse_links_field, resolve_wikilink); `monocle/vault/templates/` with 10 YAML schemas (including sentence_starters); `monocle/tests/test_vault.py` with 88 tests (all passing); `test: vault` VS Code task added. Full suite: 128 tests passed.
 
 ---
 
@@ -89,7 +89,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 |---|---|---|
 | M1 | Foundation & Project Skeleton | COMPLETE |
 | M2 | API Skeleton — all route stubs + OpenAPI | COMPLETE |
-| M3 | Vault Layer | NOT STARTED |
+| M3 | Vault Layer | COMPLETE |
 | M4 | Index Layer (ChromaDB + MemoryIndex) | NOT STARTED |
 | M5 | File Watcher & Re-index Queue | NOT STARTED |
 | M6 | AI Provider Abstraction | NOT STARTED |
@@ -520,7 +520,7 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** All filesystem operations for vault notes — CRUD, atomic writes, versioning, soft-delete, schema normalisation, template management, wikilink resolution.
 
 **Deliverables:**
-- [ ] `monocle/vault/__init__.py` — `VaultLayer` class with methods:
+- [x] `monocle/vault/__init__.py` — `VaultLayer` class with methods:
   - `list_notes(folder, type, domain, sort, limit, offset) -> Page[NoteRef]` — paginated
   - `read_note(file_path) -> Note` — parse YAML frontmatter + body; raise `NoteNotFound` if missing; call `normalise_frontmatter`
   - `write_note(file_path, note, if_mtime=None)` — atomic write (system tempdir via `tempfile.mkstemp`); shadow version before overwrite; raise `409` on mtime mismatch
@@ -531,22 +531,22 @@ tests/e2e/            Playwright tests (require running server)
   - `resolve_wikilink(name) -> str | None` — case-insensitive filename match, returns vault-relative path or None
   - `list_versions(file_path) -> list[str]` — list timestamps in `.versions/<path>/`
   - `restore_version(file_path, timestamp)` — overwrite current with historical version
-- [ ] `monocle/vault/normalise.py` — `normalise_frontmatter(fm: dict) -> dict` applying schema defaults
-- [ ] `monocle/vault/wikilinks.py` — `parse_wikilinks(body: str) -> list[str]`, `parse_links_field(links: list) -> list[LinkRef]`, `resolve_wikilink(name, vault_root) -> str | None`
-- [ ] `monocle/vault/templates/` — 10 YAML schemas: `person.yaml`, `decision.yaml`, `project.yaml`, `meeting.yaml`, `idea.yaml`, `observation.yaml`, `reference.yaml`, `action_item.yaml`, `blank.yaml`, `weekly_summary.yaml`. **These are machine-readable Pydantic schema definitions living in the Python package at `monocle/vault/templates/` — not in the vault directory. They are distinct from the user-facing Markdown templates in `vault/.templates/`.**
-- [ ] `monocle/tests/test_vault.py` — comprehensive tests using `tmp_vault` fixture
-- [ ] Extend `.vscode/tasks.json`:
+- [x] `monocle/vault/normalise.py` — `normalise_frontmatter(fm: dict) -> dict` applying schema defaults
+- [x] `monocle/vault/wikilinks.py` — `parse_wikilinks(body: str) -> list[str]`, `parse_links_field(links: list) -> list[LinkRef]`, `resolve_wikilink(name, vault_root) -> str | None`
+- [x] `monocle/vault/templates/` — 10 YAML schemas: `person.yaml`, `decision.yaml`, `project.yaml`, `meeting.yaml`, `idea.yaml`, `observation.yaml`, `reference.yaml`, `action_item.yaml`, `blank.yaml`, `weekly_summary.yaml`. **These are machine-readable Pydantic schema definitions living in the Python package at `monocle/vault/templates/` — not in the vault directory. They are distinct from the user-facing Markdown templates in `vault/.templates/`.**
+- [x] `monocle/tests/test_vault.py` — comprehensive tests using `tmp_vault` fixture
+- [x] Extend `.vscode/tasks.json`:
   - `test: vault` — `python -m pytest monocle/tests/test_vault.py -x --tb=short -q`
 
 **Acceptance Criteria:**
-- [ ] Atomic writes: temp file created in system tempdir (not vault); final file written via `os.replace`
-- [ ] Versioning: writing an existing note creates `.versions/{path}/{updated_at}.md`
-- [ ] Soft-delete: deleted note appears in `.trash/`; original path is absent
-- [ ] Path traversal: `read_note("../../.env")` raises `403` (not a file error)
-- [ ] Mtime conflict: `write_note(path, note, if_mtime=stale_ts)` raises `409`
-- [ ] Schema normalisation: note with no `type` field reads back with `type: "other"`
-- [ ] `parse_links_field` normalises plain strings `"Note Name"` and dicts `{target: "..."}` both into `LinkRef` objects
-- [ ] `uv run python -m pytest monocle/tests/test_vault.py -x --tb=short -q` passes
+- [x] Atomic writes: temp file created in system tempdir (not vault); final file written via `os.replace`
+- [x] Versioning: writing an existing note creates `.versions/{path}/{updated_at}.md`
+- [x] Soft-delete: deleted note appears in `.trash/`; original path is absent
+- [x] Path traversal: `read_note("../../.env")` raises `403` (not a file error)
+- [x] Mtime conflict: `write_note(path, note, if_mtime=stale_ts)` raises `409`
+- [x] Schema normalisation: note with no `type` field reads back with `type: "other"`
+- [x] `parse_links_field` normalises plain strings `"Note Name"` and dicts `{target: "..."}` both into `LinkRef` objects
+- [x] `uv run python -m pytest monocle/tests/test_vault.py -x --tb=short -q` passes (88 tests)
 
 ---
 

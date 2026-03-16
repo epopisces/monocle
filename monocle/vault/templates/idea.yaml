@@ -1,0 +1,37 @@
+template: idea
+note_type: idea
+default_folder: technologies
+description: "Speculative or creative thought."
+
+sentence_starters:
+  - "what if"
+  - "idea:"
+  - "I had an idea"
+  - "it would be cool"
+  - "could we"
+  - "imagine if"
+  - "brainstorm:"
+  - "thinking about building"
+  - "maybe we could"
+  - "what about"
+  - "thinking about"
+  - "I wonder if"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Brief idea title."
+  - name: domain
+    required: false
+    type: string
+    default: personal
+  - name: tags
+    required: false
+    type: list
+  - name: people
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list

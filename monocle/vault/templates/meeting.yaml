@@ -1,0 +1,41 @@
+template: meeting
+note_type: meeting_note
+default_folder: work
+description: "Notes from a meeting or call."
+
+sentence_starters:
+  - "meeting with"
+  - "meeting notes"
+  - "had a meeting"
+  - "standup"
+  - "sync with"
+  - "call with"
+  - "we met to discuss"
+  - "agenda:"
+  - "meeting:"
+  - "retrospective"
+  - "one-on-one"
+  - "1:1 with"
+  - "sprint planning"
+  - "all hands"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Meeting subject or title."
+  - name: people
+    required: false
+    type: list
+    description: "Meeting attendees."
+  - name: domain
+    required: false
+    type: string
+    default: work
+  - name: tags
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list
+    description: "Follow-up tasks identified during the meeting."

@@ -1,0 +1,38 @@
+template: action_item
+note_type: action_item
+default_folder: work
+description: "A specific follow-up task."
+
+sentence_starters:
+  - "todo:"
+  - "action item:"
+  - "need to"
+  - "I need to"
+  - "must "
+  - "follow up on"
+  - "remind me to"
+  - "by friday"
+  - "due:"
+  - "task:"
+  - "don't forget"
+  - "action:"
+
+fields:
+  - name: title
+    required: true
+    type: string
+    description: "Task description."
+  - name: domain
+    required: false
+    type: string
+    default: work
+  - name: people
+    required: false
+    type: list
+    description: "People assigned to or involved in this task."
+  - name: tags
+    required: false
+    type: list
+  - name: action_items
+    required: false
+    type: list
