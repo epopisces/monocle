@@ -499,6 +499,15 @@ class VaultLayer:
         default_folder: str = schema.get("default_folder", "inbox")
         note_type: str = schema.get("note_type", "other")
 
+        # Determine domain, preferring caller metadata, then schema default, then "personal"
+        schema_default_domain: str | None = None
+        fields = schema.get("fields")
+        if isinstance(fields, dict):
+            domain_field = fields.get("domain")
+            if isinstance(domain_field, dict):
+                schema_default_domain = domain_field.get("default")
+        domain_value: str = metadata.get("domain") or schema_default_domain or "personal"
+
         # Derive title and filename
         people_list = metadata.get("people") or []
         title: str = (
