@@ -26,10 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M2 — API Skeleton — all route stubs + OpenAPI
-**Last Completed:** M1 — Foundation & Project Skeleton (2026-03-15)
+**Active Milestone:** M3 — Vault Layer
+**Last Completed:** M2 — API Skeleton (2026-03-15)
 **Blocked By:** Nothing
-**Session Notes:** M1 fully executed: all backend files created, `uv sync` resolved 148 packages, 9 backend smoke tests passed, frontend scaffold created and 1 frontend test passed. All M1 acceptance criteria met.
+**Session Notes:** M2 fully executed: `monocle/main.py` created with FastAPI + CORS + OTel + slowapi; 13 router files created; `monocle/rate_limit.py` created to avoid circular imports; `monocle/tests/test_api.py` created with 31 tests (all passing); `openapi.json` exported (30 operations across 26 paths). All M2 acceptance criteria met.
 
 ---
 
@@ -88,7 +88,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | ID | Milestone | Status |
 |---|---|---|
 | M1 | Foundation & Project Skeleton | COMPLETE |
-| M2 | API Skeleton — all route stubs + OpenAPI | NOT STARTED |
+| M2 | API Skeleton — all route stubs + OpenAPI | COMPLETE |
 | M3 | Vault Layer | NOT STARTED |
 | M4 | Index Layer (ChromaDB + MemoryIndex) | NOT STARTED |
 | M5 | File Watcher & Re-index Queue | NOT STARTED |
@@ -476,38 +476,38 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** Register every API endpoint as a stub. This is the scaffold all future milestones wire into. The OpenAPI spec must be complete before frontend work begins.
 
 **Deliverables:**
-- [ ] `monocle/main.py` — FastAPI app, all routers included, CORS middleware (**production**: allow only `http://localhost:{server.port}` and `http://127.0.0.1:{server.port}`; **dev mode only**: additionally allow `http://localhost:5173` and `http://127.0.0.1:5173` for the Vite dev server — no wildcard origins; controlled by `server.dev_cors` flag set by `uv run python -m monocle dev`), lifespan hook (placeholder startup/shutdown)
-- [ ] `monocle/routers/health.py` — `GET /api/health` returns `{"status": "starting", "version": "0.1.0", "ai_reachable": false, "index_status": "empty"}`
-- [ ] `monocle/routers/notes.py` — `GET /api/notes`, `GET /api/notes/{path}`, `PUT /api/notes/{path}`, `PATCH /api/notes/{path}`, `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move`, `GET /api/templates`, `GET /api/notes/{path}/backlinks` — all return `501`
-- [ ] `monocle/routers/search.py` — `GET /api/search`, `GET /api/search/keyword` — return `501`
-- [ ] `monocle/routers/ingest.py` — `POST /api/ingest`, `POST /api/ingest/stream` — return `501`
-- [ ] `monocle/routers/ingest_failures.py` — `GET /api/ingest/failures`, `POST /api/ingest/failures/retry`, `DELETE /api/ingest/failures/{id}` — all return `501`
-- [ ] `monocle/routers/transcribe.py` — `POST /api/transcribe` — returns `501`
-- [ ] `monocle/routers/graph.py` — `GET /api/graph` — returns `501`
-- [ ] `monocle/routers/stats.py` — `GET /api/stats` — returns `501`
-- [ ] `monocle/routers/chat.py` — `POST /api/chat` — returns `501`
-- [ ] `monocle/routers/agents.py` — `POST /api/agents/weekly-summary`, `POST /api/agents/reindex` — return `501`
-- [ ] `monocle/routers/review.py` — `GET /api/review`, `PATCH /api/review/{path}/approve`, `POST /api/review/approve-all`, `GET /api/review/count` — return `501`
-- [ ] `monocle/routers/settings.py` — `GET /api/settings`, `PATCH /api/settings`, `POST /api/settings/rotate-mcp-key` — return `501`
-- [ ] `monocle/routers/teams.py` — `POST /api/teams/messages` — returns `501`
-- [ ] All stubs use correct Pydantic request/response models from `models.py`
-- [ ] Rate limiting via `slowapi`: `/api/ingest` + `/api/transcribe` = 30 req/min; `/api/chat` = 60 req/min
-- [ ] FastAPI static files mount at `/` (serves `frontend/dist/`; noop if not built)
-- [ ] `OpenTelemetryMiddleware` (from `opentelemetry-instrumentation-fastapi`) registered in `main.py`; automatically creates a server span per request with `http.method`, `http.route`, `http.status_code`, and duration. Provides the user-facing latency signal for every endpoint with zero per-route code.
-- [ ] `openapi.json` exported to repo root and committed
-- [ ] `monocle/tests/test_api.py` — `TestClient` tests verifying every route returns 200 or 501, never 404 or 500
-- [ ] Extend `.vscode/tasks.json`:
+- [x] `monocle/main.py` — FastAPI app, all routers included, CORS middleware (**production**: allow only `http://localhost:{server.port}` and `http://127.0.0.1:{server.port}`; **dev mode only**: additionally allow `http://localhost:5173` and `http://127.0.0.1:5173` for the Vite dev server — no wildcard origins; controlled by `server.dev_cors` flag set by `uv run python -m monocle dev`), lifespan hook (placeholder startup/shutdown)
+- [x] `monocle/routers/health.py` — `GET /api/health` returns `{"status": "starting", "version": "0.1.0", "ai_reachable": false, "index_status": "empty"}`
+- [x] `monocle/routers/notes.py` — `GET /api/notes`, `GET /api/notes/{path}`, `PUT /api/notes/{path}`, `PATCH /api/notes/{path}`, `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move`, `GET /api/templates`, `GET /api/notes/{path}/backlinks` — all return `501`
+- [x] `monocle/routers/search.py` — `GET /api/search`, `GET /api/search/keyword` — return `501`
+- [x] `monocle/routers/ingest.py` — `POST /api/ingest`, `POST /api/ingest/stream` — return `501`
+- [x] `monocle/routers/ingest_failures.py` — `GET /api/ingest/failures`, `POST /api/ingest/failures/retry`, `DELETE /api/ingest/failures/{id}` — all return `501`
+- [x] `monocle/routers/transcribe.py` — `POST /api/transcribe` — returns `501`
+- [x] `monocle/routers/graph.py` — `GET /api/graph` — returns `501`
+- [x] `monocle/routers/stats.py` — `GET /api/stats` — returns `501`
+- [x] `monocle/routers/chat.py` — `POST /api/chat` — returns `501`
+- [x] `monocle/routers/agents.py` — `POST /api/agents/weekly-summary`, `POST /api/agents/reindex` — return `501`
+- [x] `monocle/routers/review.py` — `GET /api/review`, `PATCH /api/review/{path}/approve`, `POST /api/review/approve-all`, `GET /api/review/count` — return `501`
+- [x] `monocle/routers/settings.py` — `GET /api/settings`, `PATCH /api/settings`, `POST /api/settings/rotate-mcp-key` — return `501`
+- [x] `monocle/routers/teams.py` — `POST /api/teams/messages` — returns `501`
+- [x] All stubs use correct Pydantic request/response models from `models.py`
+- [x] Rate limiting via `slowapi`: `/api/ingest` + `/api/transcribe` = 30 req/min; `/api/chat` = 60 req/min
+- [x] FastAPI static files mount at `/` (serves `frontend/dist/`; noop if not built)
+- [x] `OpenTelemetryMiddleware` (from `opentelemetry-instrumentation-fastapi`) registered in `main.py`; automatically creates a server span per request with `http.method`, `http.route`, `http.status_code`, and duration. Provides the user-facing latency signal for every endpoint with zero per-route code.
+- [x] `openapi.json` exported to repo root and committed
+- [x] `monocle/tests/test_api.py` — `TestClient` tests verifying every route returns 200 or 501, never 404 or 500
+- [x] Extend `.vscode/tasks.json`:
   - `api: export openapi` — `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
   - `api: start server` — `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000 --reload` (non-debug, used as a preLaunchTask)
-- [ ] Extend `.vscode/launch.json`:
-  - `API Server (debug)` — debugpy launch of uvicorn at `127.0.0.1:8000 --reload`; lighter than `Dev Server (debug)` (no watcher/scheduler) and intended for iterating on individual routes
+- [x] Extend `.vscode/launch.json`:
+  - `API Server (debug)` — debugpy launch of uvicorn at `127.0.0.1:8000 --reload`
 
 **Acceptance Criteria:**
-- [ ] `GET http://localhost:8000/api/health` returns 200 JSON
-- [ ] `GET http://localhost:8000/openapi.json` returns a valid OpenAPI 3.x document listing all 30 endpoints
-- [ ] Every non-health endpoint returns exactly 501 (not 404, not 500)
-- [ ] `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000` starts without errors
-- [ ] `uv run python -m pytest monocle/tests/test_api.py -x --tb=short -q` passes
+- [x] `GET http://localhost:8000/api/health` returns 200 JSON
+- [x] `GET http://localhost:8000/openapi.json` returns a valid OpenAPI 3.x document listing all 30 endpoints
+- [x] Every non-health endpoint returns exactly 501 (not 404, not 500)
+- [x] `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000` starts without errors
+- [x] `uv run python -m pytest monocle/tests/test_api.py -x --tb=short -q` passes (31 tests)
 
 **Notes:**
 - Commit `openapi.json` to the repo. The frontend uses it to generate `schema.d.ts`.

@@ -34,3 +34,11 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Fixed `config.py`: removed stray `pydantic_settings` import (not in deps); fixed `pyproject.toml` to use `[dependency-groups]` (eliminates deprecation warning); added `[tool.uv] prerelease = "allow"` for agent-framework pre-release packages
   - `uv sync` → 148 packages resolved (EXIT 0); `uv run python -m pytest` → 9 passed (EXIT 0); `npm run test -- --run` → 1 passed (EXIT 0)
   - Updated `docs/build-plan.md`: all M1 deliverables and acceptance criteria marked `[x]`; Active Milestone → M2; M1 → COMPLETE in tracker
+- **Executed M2 — API Skeleton (COMPLETE)**
+  - Created `monocle/main.py`: FastAPI app with CORS (prod + dev_cors Vite origins), OTel FastAPI instrumentation, slowapi rate limiting, static file mount (noop if frontend/dist absent), lifespan hook, all 13 routers registered
+  - Created `monocle/rate_limit.py`: shared `Limiter` instance to avoid circular imports between `main.py` and routers
+  - Created 13 router files: `health.py` (200), `notes.py` (8 stubs), `search.py` (2 stubs), `ingest.py` (2 stubs, 30/min limit), `ingest_failures.py` (3 stubs), `transcribe.py` (1 stub, 30/min limit), `graph.py`, `stats.py`, `chat.py` (60/min limit), `agents.py`, `review.py`, `settings.py`, `teams.py`
+  - Created `monocle/tests/test_api.py`: 31 TestClient tests — health returns 200, all 29 stubs return 501, none return 404/500
+  - Exported `openapi.json`: 30 operations across 26 paths
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 40 passed (9 M1 + 31 M2), EXIT 0
+  - Updated `docs/build-plan.md`: all M2 deliverables and acceptance criteria marked `[x]`; Active Milestone → M3; M2 → COMPLETE in tracker
