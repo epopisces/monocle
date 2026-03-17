@@ -173,6 +173,47 @@ class TestReindexAgentStaleDetection:
 
         assert count == 0, "Up-to-date note should not be re-indexed"
 
+    async def test_note_without_updated_frontmatter_always_reindexed(self, tmp_path: Path):
+        """A note with no 'updated' frontmatter field is always re-indexed, even
+        if it was previously indexed.
+
+        Without this guard, ``note_updated`` is an empty string, and
+        ``indexed_updated >= ""`` is always True in Python — permanently freezing
+        the note in the index and preventing any future updates from landing.
+        """
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        # Write a note with no 'updated' frontmatter (pass updated=None)
+        (tmp_path / "work").mkdir(parents=True, exist_ok=True)
+        note_path = tmp_path / "work" / "no-ts.md"
+        # Write raw markdown with frontmatter that has no 'updated' field
+        note_path.write_text(
+            "---\ntype: observation\ndomain: work\n---\nNote without timestamp.\n",
+            encoding="utf-8",
+        )
+
+        # Pre-populate index with a non-empty updated_at so the bad comparison
+        # would have triggered the skip if not guarded
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/no-ts.md::0",
+                file_path="work/no-ts.md",
+                chunk_index=0,
+                text="old content",
+                embedding=[],
+                metadata={"updated_at": "2026-01-01T12:00:00Z"},
+            )
+        ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+
+        assert count == 1, (
+            f"Note without 'updated' frontmatter must always be re-indexed; got count={count}. "
+            "A count of 0 means the empty note_updated triggered an incorrect skip."
+        )
+
     async def test_force_reindexes_all(self, tmp_path: Path):
         """force=True clears the index and re-indexes every note."""
         vault = VaultLayer(str(tmp_path))

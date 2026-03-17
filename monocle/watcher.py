@@ -149,15 +149,16 @@ class InboxWatcher:
     """Watches ``vault/inbox/`` for new files and triggers the ingest pipeline.
 
     Uses ``watchdog.Observer`` (non-recursive) to detect file-system events on
-    the inbox directory.  A 2-second per-file debounce prevents double-triggering
-    when editors write files in multiple partial steps.
+    the inbox directory.  A per-file debounce (default 2 s, configurable via
+    ``debounce_s`` constructor argument or ``settings.vault.debounce_ms``) prevents
+    double-triggering when editors write files in multiple partial steps.
 
     The watcher is designed for Phase 1 (integrated async task) and Phase 3+
     (optional standalone process).  The ``start()`` / ``stop()`` / ``status()``
     interface is compatible with the future ProcessManager API.
     """
 
-    DEBOUNCE_S: float = 2.0
+    DEBOUNCE_S: float = 2.0  # class-level default; override via constructor
 
     def __init__(
         self,
@@ -165,6 +166,7 @@ class InboxWatcher:
         ingest_callback: (
             Callable[[str], Coroutine[Any, Any, None]] | None
         ) = None,
+        debounce_s: float | None = None,
     ) -> None:
         """Initialise the watcher.
 
@@ -177,9 +179,16 @@ class InboxWatcher:
             modified ``.md`` file is stable in the inbox.  When ``None`` the
             watcher logs the event but does not process it (useful during
             development before the ingest pipeline is wired in M7).
+        debounce_s:
+            Per-file debounce window in seconds.  When ``None`` the class
+            default ``DEBOUNCE_S`` (2.0 s) is used.  Pass
+            ``settings.vault.debounce_ms / 1000`` at construction time so the
+            live value always matches the user's config and configuration drift
+            between the class constant and ``vault.debounce_ms`` is impossible.
         """
         self._inbox_path = os.path.realpath(inbox_path)
         self._ingest_callback = ingest_callback
+        self._debounce_s: float = debounce_s if debounce_s is not None else self.DEBOUNCE_S
         self._running = False
         self._observer: Any = None  # watchdog.Observer; lazy import
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -214,7 +223,7 @@ class InboxWatcher:
         handler = _InboxEventHandler(
             inbox_path=self._inbox_path,
             on_stable_file=self._on_stable_file,
-            debounce_s=self.DEBOUNCE_S,
+            debounce_s=self._debounce_s,
             timers=self._timers,
             timer_lock=self._timer_lock,
             loop=self._loop,

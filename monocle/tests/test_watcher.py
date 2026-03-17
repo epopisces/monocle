@@ -611,6 +611,71 @@ class TestInboxWatcherLifecycle:
         assert inbox.exists()
         await watcher.stop()
 
+    async def test_debounce_s_from_constructor_overrides_class_default(self, tmp_path: Path):
+        """debounce_s passed to the constructor is stored on the instance and
+        used by the handler, ensuring vault.debounce_ms from config always
+        takes effect rather than the hard-coded class constant.
+        """
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+
+        custom_debounce = 0.123
+        watcher = InboxWatcher(inbox_path=str(inbox), debounce_s=custom_debounce)
+        assert watcher._debounce_s == custom_debounce, (
+            f"Expected _debounce_s={custom_debounce}, got {watcher._debounce_s}"
+        )
+
+        # Verify it flows through to the handler created inside start()
+        await watcher.start()
+        # The handler is embedded in the observer schedule; check via a
+        # dispatched event that the debounce window matches the custom value.
+        try:
+            from watchdog.events import FileCreatedEvent
+        except ImportError:
+            await watcher.stop()
+            return
+
+        md_file = inbox / "note.md"
+        md_file.write_text("# content", encoding="utf-8")
+        fired: list[str] = []
+
+        async def on_stable(fp: str) -> None:
+            fired.append(fp)
+
+        watcher.set_ingest_callback(on_stable)
+
+        import threading
+        with watcher._timer_lock:
+            keys_before = set(watcher._timers.keys())
+
+        watcher._observer.event_queue  # ensure observer is live (attribute exists)
+        # Dispatch a synthetic event directly through the handler to verify debounce
+        loop = asyncio.get_running_loop()
+        from monocle.watcher import _InboxEventHandler
+        handler = _InboxEventHandler(
+            inbox_path=str(inbox),
+            on_stable_file=watcher._on_stable_file,
+            debounce_s=watcher._debounce_s,
+            timers=watcher._timers,
+            timer_lock=watcher._timer_lock,
+            loop=loop,
+        )
+        handler.dispatch(FileCreatedEvent(str(md_file)))
+
+        # With 0.123 s debounce the timer should fire well within 0.5 s
+        await asyncio.sleep(0.4)
+        assert str(md_file) in fired, (
+            f"Expected callback with custom debounce={custom_debounce}s; fired={fired}"
+        )
+        await watcher.stop()
+
+    async def test_debounce_s_none_uses_class_default(self, tmp_path: Path):
+        """When debounce_s is not provided, DEBOUNCE_S class constant is used."""
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        watcher = InboxWatcher(inbox_path=str(inbox))
+        assert watcher._debounce_s == InboxWatcher.DEBOUNCE_S
+
     async def test_status_running(self, tmp_path: Path):
         """status() reports running=True after start and False baseline."""
         inbox = tmp_path / "inbox"

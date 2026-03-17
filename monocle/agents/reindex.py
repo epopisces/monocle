@@ -134,9 +134,15 @@ class ReindexAgent:
             )
             indexed_updated = _normalise_ts(indexed_ts.get(vault_rel, ""))
 
-            if not force and indexed_updated and indexed_updated >= note_updated:
+            if not force and indexed_updated and note_updated and indexed_updated >= note_updated:
                 logger.debug("[INGEST] ReindexAgent: up-to-date, skipping %s", vault_rel)
                 continue
+
+            if not note_updated:
+                logger.debug(
+                    "[INGEST] ReindexAgent: no 'updated' frontmatter, will re-index %s",
+                    vault_rel,
+                )
 
             try:
                 indexed = await self._reindex_note(vault_rel, note.body, note_updated, index)

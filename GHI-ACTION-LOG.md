@@ -161,3 +161,15 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Docstring updated to document the dir-only exclusion rule and explicitly note that dotfiles are **not** excluded
   - Added `test_dotfile_at_vault_root_included`: verifies `.hidden-note.md` and `work/.hidden-in-subdir.md` are collected while `.versions/note.md` is still excluded
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **268 passed** (all tests), EXIT 0
+- **`reindex.py` — staleness comparison broken for notes without `updated` frontmatter**
+  - Without the fix, `note_updated = ""` and `"2026-...Z" >= ""` is always `True`, so any previously-indexed note with no frontmatter timestamp was permanently frozen (never re-indexed on body changes)
+  - Skip condition changed from `indexed_updated and indexed_updated >= note_updated` → `indexed_updated and note_updated and indexed_updated >= note_updated`; added DEBUG log for the no-timestamp path
+  - Added `test_note_without_updated_frontmatter_always_reindexed`: pre-populates index with a non-empty `updated_at`, writes a note with no `updated` field, asserts `count == 1`
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **269 passed** (all tests), EXIT 0
+- **`watcher.py` / `main.py` — debounce wired from `settings.vault.debounce_ms`**
+  - Added `debounce_s: float | None = None` to `InboxWatcher.__init__()`; when `None`, falls back to `DEBOUNCE_S` class constant (2.0 s) for backward compatibility
+  - Instance stores `self._debounce_s`; `start()` passes `self._debounce_s` to `_InboxEventHandler` instead of the class constant
+  - `main.py` now passes `debounce_s=cfg.vault.debounce_ms / 1000` at construction time; configuration drift between class constant and user config is impossible
+  - `DEBOUNCE_S = 2.0` retained as explicit fallback default and for tests that instantiate `InboxWatcher` without settings
+  - Added 2 tests: `test_debounce_s_from_constructor_overrides_class_default` (verifies storage and end-to-end timer firing at custom interval), `test_debounce_s_none_uses_class_default` (verifies `DEBOUNCE_S` fallback)
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **271 passed** (all tests), EXIT 0

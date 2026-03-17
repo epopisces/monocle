@@ -122,7 +122,10 @@ async def lifespan(app: FastAPI):
     # ------------------------------------------------------------------
     from monocle.watcher import InboxWatcher
 
-    watcher = InboxWatcher(inbox_path=cfg.vault.inbox_path)
+    watcher = InboxWatcher(
+        inbox_path=cfg.vault.inbox_path,
+        debounce_s=cfg.vault.debounce_ms / 1000,
+    )
     # Ingest callback is wired in M7 when IngestPipeline is implemented
     await watcher.start()
     app.state.watcher = watcher
