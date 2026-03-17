@@ -67,3 +67,29 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Added security & correctness tests: `test_restore_version_invalid_timestamp_format_raises_403`, `test_restore_version_path_traversal_attempt_raises_403`, `test_restore_version_absolute_path_safe`, `test_sort_by_created_uses_created_not_updated`
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **136 passed** (88 vault + 40 M1/M2 + 4 fix tests + 4 additional security tests), EXIT 0
 
+- **Executed M4 — Index Layer (COMPLETE)**
+  - Created `monocle/index/base.py`: `IndexLayer` ABC with five abstract methods (`upsert_chunks`, `delete_file`, `search`, `get_stats`, `delete_all`); `DimensionMismatch` exception class; `search()` includes `query_text: str = ""` optional param (used by `MemoryIndex` for substring matching; ignored by `ChromaIndex`)
+  - Created `monocle/index/memory.py`: `MemoryIndex(IndexLayer)` — dict-backed in-memory index, substring search on `query_text`, metadata equality filters, stable sort; no embeddings computed; tests-only
+  - Created `monocle/index/chroma.py`: `ChromaIndex(IndexLayer)` wrapping `chromadb.PersistentClient` with cosine HNSW collection; `_open_collection()` validates `embed_dimensions` from stored collection metadata on startup (raises `DimensionMismatch` on mismatch); OTel metric instruments `index.search_duration` and `index.upsert_duration` histograms; scalar metadata filtering via `_build_where()` (supports single-key and multi-key `$and` clauses); cosine distance → similarity conversion
+  - Created `monocle/index/__init__.py`: `get_index(settings) -> IndexLayer` factory; re-exports `IndexLayer` and `DimensionMismatch`
+  - Created `monocle/tests/test_index.py`: 43 tests including parametrized suite (memory + chroma), dimension mismatch, factory, and MemoryIndex-specific tests; ChromaDB `PersistentClient` replaced with `_FakeChromaClient`/`_FakeCollection` (pure-Python, cosine distance, where-clause evaluation) via `monkeypatch` to work around ChromaDB Rust-backend access-violation on this Windows + Python 3.14 environment
+  - Added `test: index` task to `.vscode/tasks.json`
+  - Created `.python-version` pinning to Python 3.14 to align local development and CI with the target runtime for this stack
+  - `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q` → 43 passed, EXIT 0
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **179 passed** (all tests), EXIT 0
+  - Updated `docs/build-plan.md`: all M4 deliverables and acceptance criteria marked `[x]`; Active Milestone → M5; M4 → COMPLETE in tracker
+## 2026-03-17
+
+### Claude Sonnet 4.6
+- Added `packaging` to the `dev` dependency group in `pyproject.toml` so `scripts/check_requires_python.py` does not crash with `ModuleNotFoundError` in environments where `packaging` is not pulled in transitively
+- Added per-chunk embedding dimension validation to `ChromaIndex.upsert_chunks()`: raises `ValueError` when a chunk's embedding length is empty or does not match `settings.ai.embed_dimensions`; added two covering tests → 181 passed, EXIT 0
+- Added query embedding validation to `ChromaIndex.search()`: raises `ValueError` on wrong/empty vector length before ChromaDB call; added two covering tests → 183 passed, EXIT 0
+- Audited M1–M4 test coverage for gaps; added 12 missing tests across `test_index.py`, `test_vault.py`, `test_imports.py`:
+  - `TestChromaIndexStats` — `backend == "chroma"` and `collection_name` field values (3 tests)
+  - `test_destination_path_traversal_raises_403` in `TestVaultLayerMoveNote` — destination path traversal was documented but untested
+  - `test_sort_by_title_ascending` and `test_noteref_review_status_propagated` in `TestVaultLayerListNotes`
+  - `test_server_config_invalid_host_raises` and `test_server_config_valid_hosts_accepted` (parametrized) for `ServerConfig.validate_host`
+  - `test_inbox_watcher_stub_running_flag` and `test_reindex_queue_stub_does_not_raise` for M1 stubs
+  - → 195 passed, EXIT 0
+- Fixed `DeprecationWarning: datetime.datetime.utcnow()` in `test_vault.py` and `conftest.py`; replaced with `datetime.datetime.now(datetime.timezone.utc)` — warnings eliminated
+- SPIKE-4 resolved: Re-validated ChromaDB 1.5.5 Rust `PersistentClient` on Python 3.14.3 — full smoke test (upsert, query, delete) passes without workaround; investigated [chroma-core/chroma#5937](https://github.com/chroma-core/chroma/issues/5937) `SegmentAPI` workaround (not needed); updated `.python-version` from `3.12` → `3.14`; 195 tests pass on Python 3.14.3; updated SPIKE-4 in `docs/build-plan.md` as RESOLVED

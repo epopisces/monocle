@@ -26,10 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M4 — Index Layer
-**Last Completed:** M3 — Vault Layer (2026-03-16)
+**Active Milestone:** M5 — File Watcher & Re-index Queue
+**Last Completed:** M4 — Index Layer (2026-03-17)
 **Blocked By:** Nothing
-**Session Notes:** M3 fully executed and hardened: `monocle/vault/__init__.py` with `VaultLayer` class (CRUD, atomic writes, versioning, soft-delete, path-traversal protection, template construction, wikilink resolution); three critical bugs fixed: (1) `NoteRef.created` field added + list_notes sort="created" copy-paste bug fixed, (2) list_versions uses safe resolved+relative path, (3) restore_version validates timestamp format (regex) + relative_to escape check. Wikilink resolution made bidirectional (slugify both file stem and input name). Template field now persisted in frontmatter on write/read cycle. Additional security tests added: test_restore_version_invalid_timestamp_format_raises_403, test_restore_version_path_traversal_attempt_raises_403, test_restore_version_absolute_path_safe, test_sort_by_created_uses_created_not_updated. **All 136 tests passing** (88 vault + 40 M1/M2 + 4 fix tests + 4 additional security tests). Full suite exit 0.
+**Session Notes:** M4 fully executed: `monocle/index/base.py` (`IndexLayer` ABC + `DimensionMismatch`); `monocle/index/memory.py` (`MemoryIndex` — dict-backed, substring search, no embeddings, tests-only); `monocle/index/chroma.py` (`ChromaIndex` wrapping `chromadb.PersistentClient`, cosine HNSW collection, dimension validation on startup, OTel `index.search_duration` + `index.upsert_duration` histograms); `monocle/index/__init__.py` (`get_index(settings)` factory). Tests use a pure-Python `_FakeChromaClient`/`_FakeCollection` (injected via `monkeypatch.setattr`) for isolation; the fake correctly exercises all ChromaIndex logic (dimension mismatch, filtering, delete, stats). SPIKE-4 resolved 2026-03-17 — ChromaDB 1.5.5 Rust backend passes full smoke test on Python 3.14.3; `.python-version` updated to 3.14. **All 195 tests passing** on Python 3.14.3, EXIT 0.
 
 ---
 
@@ -90,7 +90,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M1 | Foundation & Project Skeleton | COMPLETE |
 | M2 | API Skeleton — all route stubs + OpenAPI | COMPLETE |
 | M3 | Vault Layer | COMPLETE |
-| M4 | Index Layer (ChromaDB + MemoryIndex) | NOT STARTED |
+| M4 | Index Layer (ChromaDB + MemoryIndex) | COMPLETE |
 | M5 | File Watcher & Re-index Queue | NOT STARTED |
 | M6 | AI Provider Abstraction | NOT STARTED |
 | M7 | Ingest Pipeline & Plugin Registry | NOT STARTED |
@@ -148,6 +148,20 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 **Status:** UNRESOLVED
 **Outcome:** *(fill in: CONFIRMED / FAILED — latency observed, any workarounds needed)*
 **Fallback:** Queue-based approach: agent runs in a background thread and pushes tokens to an `asyncio.Queue` that the SSE endpoint drains.
+
+---
+
+### SPIKE-4: ChromaDB Rust backend crash on Python 3.14 (Windows)
+
+**Status: RESOLVED — 2026-03-17**
+
+**Original hypothesis:** ChromaDB 1.5.5 Rust extension crashes at runtime on Python 3.14 (Windows) with access violation `0xC0000005` on any `upsert`/`add` call.
+**Crash observed:** 2026-03-16 on `chromadb==1.5.5`, `cpython-3.14.3`.
+**Resolution (2026-03-17):** Re-tested on same chromadb==1.5.5, cpython-3.14.3. Rust `PersistentClient` now passes full smoke test (upsert, count, query, delete). All 195 tests pass. The crash may have been a transient environment issue or a silent re-release of the chromadb 1.5.5 wheel.
+- Investigated `chroma-core/chroma` issue [#5937](https://github.com/chroma-core/chroma/issues/5937) — a related `SegmentAPI` workaround was identified, but the Rust backend passes without it.
+- `.python-version` updated from `3.12` → `3.14`.
+- `_FakeChromaClient` retained in `test_index.py` for test isolation (no real I/O in unit tests); not required as a crash workaround.
+**If the crash reappears:** Use `SegmentAPI` fallback: `chromadb.Client(Settings(chroma_api_impl="chromadb.api.segment.SegmentAPI", is_persistent=True, persist_directory=path))`.
 
 ---
 
@@ -555,20 +569,20 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** IndexLayer abstraction with a ChromaDB production implementation and an in-memory test fake that requires no embeddings.
 
 **Deliverables:**
-- [ ] `monocle/index/base.py` — `IndexLayer` ABC: `upsert_chunks`, `delete_file`, `search`, `get_stats`, `delete_all`
-- [ ] `monocle/index/memory.py` — `MemoryIndex(IndexLayer)` — in-memory dict, no embeddings, substring search. **Used only in tests.**
-- [ ] `monocle/index/chroma.py` — `ChromaIndex(IndexLayer)` wrapping `chromadb.PersistentClient`. Collection uses `cosine` space. Validates `embed_dimensions` against existing collection on startup; raises `DimensionMismatch` on mismatch.
-- [ ] `monocle/index/__init__.py` — `get_index(settings) -> IndexLayer` factory
-- [ ] `monocle/tests/test_index.py` — parametrized tests (`@pytest.mark.parametrize`) against both `MemoryIndex` and `ChromaIndex` (real ChromaDB in a tmp directory)
-- [ ] Extend `.vscode/tasks.json`:
-  - `test: index` — `python -m pytest monocle/tests/test_index.py -x --tb=short -q`
+- [x] `monocle/index/base.py` — `IndexLayer` ABC: `upsert_chunks`, `delete_file`, `search`, `get_stats`, `delete_all`
+- [x] `monocle/index/memory.py` — `MemoryIndex(IndexLayer)` — in-memory dict, no embeddings, substring search. **Used only in tests.**
+- [x] `monocle/index/chroma.py` — `ChromaIndex(IndexLayer)` wrapping `chromadb.PersistentClient`. Collection uses `cosine` space. Validates `embed_dimensions` against existing collection on startup; raises `DimensionMismatch` on mismatch.
+- [x] `monocle/index/__init__.py` — `get_index(settings) -> IndexLayer` factory
+- [x] `monocle/tests/test_index.py` — parametrized tests (`@pytest.mark.parametrize`) against both `MemoryIndex` and `ChromaIndex` (real ChromaIndex via fake in-memory ChromaDB client)
+- [x] Extend `.vscode/tasks.json`:
+  - `test: index` — `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q`
 
 **Acceptance Criteria:**
-- [ ] `MemoryIndex` and `ChromaIndex` both pass identical parametrized test cases
-- [ ] `ChromaIndex` raises `DimensionMismatch` if `embed_dimensions` from config doesn't match existing collection
-- [ ] `delete_file(path)` removes all chunks for that file path
-- [ ] `search` respects `type`, `domain`, `source` metadata filters
-- [ ] `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q` passes
+- [x] `MemoryIndex` and `ChromaIndex` both pass identical parametrized test cases
+- [x] `ChromaIndex` raises `DimensionMismatch` if `embed_dimensions` from config doesn't match existing collection
+- [x] `delete_file(path)` removes all chunks for that file path
+- [x] `search` respects `type`, `domain`, `source` metadata filters
+- [x] `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q` passes
 
 ---
 
