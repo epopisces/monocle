@@ -27,7 +27,7 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M5 — File Watcher & Re-index Queue
-**Last Completed:** M4 — Index Layer (2026-03-16)
+**Last Completed:** M4 — Index Layer (2026-03-17)
 **Blocked By:** Nothing
 **Session Notes:** M4 fully executed: `monocle/index/base.py` (`IndexLayer` ABC + `DimensionMismatch`); `monocle/index/memory.py` (`MemoryIndex` — dict-backed, substring search, no embeddings, tests-only); `monocle/index/chroma.py` (`ChromaIndex` wrapping `chromadb.PersistentClient`, cosine HNSW collection, dimension validation on startup, OTel `index.search_duration` + `index.upsert_duration` histograms); `monocle/index/__init__.py` (`get_index(settings)` factory). Tests use a pure-Python `_FakeChromaClient`/`_FakeCollection` (injected via `monkeypatch.setattr`) for isolation; the fake correctly exercises all ChromaIndex logic (dimension mismatch, filtering, delete, stats). SPIKE-4 resolved 2026-03-17 — ChromaDB 1.5.5 Rust backend passes full smoke test on Python 3.14.3; `.python-version` updated to 3.14. **All 195 tests passing** on Python 3.14.3, EXIT 0.
 
