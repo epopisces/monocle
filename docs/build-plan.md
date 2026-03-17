@@ -26,9 +26,11 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M6 — AI Provider Abstraction
-**Last Completed:** M5 — File Watcher & Re-index Queue (2026-03-17)
+**Active Milestone:** M7 — Ingest Pipeline & Plugin Registry
+**Last Completed:** M6 — AI Provider Abstraction (2026-03-17) + TranscriptionProvider refactor (2026-03-18)
 **Blocked By:** Nothing
+**Session Notes (2026-03-18):** Pluggable `TranscriptionProvider` abstraction implemented. `monocle/ai/transcription.py`: `TranscriptionProvider` ABC; `WhisperCppTranscriptionProvider` (httpx POST to whisper.cpp `POST /inference`); `SubprocessTranscriptionProvider` (openai-whisper CLI executor); `NativeOpenAITranscriptionProvider` (OpenAI client adapter for Foundry/Azure); `get_transcription_provider(settings)` factory (returns `None` for `"native"`). `AIProvider.transcribe()` made concrete — delegates to `self._transcription_provider`. `OllamaProvider` subprocess transcription removed; accepts `transcription_provider=` param. `FoundryLocalProvider` + `AzureOpenAIProvider` accept `transcription_provider=`; default to `NativeOpenAITranscriptionProvider`. `get_provider()` factory calls `get_transcription_provider()` and passes provider to all three constructors. `config.py` extended with `ai.transcribe_backend` + `ai.transcribe_url`. `pyproject.toml` adds `httpx` to runtime deps. 12 new tests in `test_ai.py` (`TestWhisperCppTranscriptionProvider`, `TestSubprocessTranscriptionProvider`, `TestNativeOpenAITranscriptionProvider`, `TestGetTranscriptionProvider`, `TestOllamaTranscription`). **314 tests passing, EXIT 0.**
+**Session Notes (2026-03-17):** M6 fully executed: `monocle/ai/base.py` (`AIProvider` ABC with `embed`, `embed_batch`, `chat`, `transcribe`, `extract_note_metadata`; `_open_span` sync span helper for async-generator compatibility; `_load_extract_prompt()` loads `prompts/extract.md` with frontmatter stripping and inline default fallback; `_parse_json_response()` handles markdown-fenced and plain JSON); `monocle/ai/ollama_provider.py` (`OllamaProvider` — `ollama.AsyncClient`, auto-pull on first use via `_ensure_model()`, streaming via `_stream_chat()` async generator without await, SPIKE-1 fallback via `openai-whisper` subprocess in `_whisper_subprocess()`); `monocle/ai/foundry_local_provider.py` (`FoundryLocalProvider` — `openai.AsyncOpenAI` with custom base_url, `embed_dimensions` parameter support, OpenAI-compatible transcription); `monocle/ai/azure_provider.py` (`AzureOpenAIProvider` — `openai.AsyncAzureOpenAI`, `dimensions` on embed, Azure Whisper transcription); `monocle/ai/__init__.py` (`get_provider(settings)` factory selecting all three providers); `monocle/config.py` extended with `ai.transcribe_model` field; OTel instrumentation: `span()` + `timed()` on all methods, `_open_span()` sync helper for streaming generators; **SPIKE-1 RESOLVED (FAILED)**: Ollama Python client has no transcription API; fallback is `openai-whisper` subprocess; `monocle/tests/test_ai.py` (27 tests, 3 integration tests deselected by default via `addopts`); `monocle/telemetry.py` `span()` fixed for Python 3.14 double-yield bug (`_yielded` flag prevents re-yield after `athrow()`); `pyproject.toml` updated with `addopts = "-m 'not integration'"` and `integration` marker registration; `.vscode/tasks.json` extended with `test: ai` task. **All 302 tests passing (27 new), EXIT 0.**
 **Session Notes:** M5 fully executed: `monocle/ingest/chunker.py` (`chunk_text()` via tiktoken cl100k_base, 512-token chunks, 64-token overlap); `monocle/watcher.py` (`ReindexQueue` — asyncio-based per-file coalescing queue with 10-second idle window, thread-safe `push()` via `call_soon_threadsafe`; `InboxWatcher` — watchdog.Observer non-recursive on inbox dir, 2-second per-file debounce via threading.Timer, `_InboxEventHandler` with dynamic watchdog base-class inheritance, `.error.md` sidecar on failure); `monocle/agents/reindex.py` (`ReindexAgent` — stale detection via `get_file_timestamps()`, `run(vault, index, force=False)`, `startup_check(vault, index)`, `health_status` attribute); `monocle/agents/scheduler.py` (`MonocleScheduler` wrapping `AsyncIOScheduler`, `add_cron_job()` from 5-field cron string); `monocle/index/base.py`, `memory.py`, `chroma.py` extended with `get_file_timestamps() -> dict[str, str]`; `monocle/main.py` lifespan wired with VaultLayer, IndexLayer, ReindexQueue, ReindexAgent, MonocleScheduler, InboxWatcher, and startup_check. Post-M5 code review resolved 14 issues: timestamp Z/+00:00 normalisation (`_normalise_ts()`), `.error.md` exclusion from `_collect_md_files()`, `status()` timer-lock race, ReindexQueue callback exception logging, `MonocleScheduler` typo rename (alias retained), symlink traversal guard in `_collect_md_files()`, YAML injection fix in `_write_error_sidecar()`, `push()` trust-boundary doc, tiktoken encoder caching; 21 new tests in `test_scheduler.py` + additions to `test_watcher.py` and `test_reindex.py`; pinned `apscheduler<4`. Second-pass review resolved 4 more issues: `.error.md` cascade dispatch filter, vault-relative hidden-dir guard in `_collect_md_files()`, per-note try/except in `ReindexAgent.run()`, `os.path.basename` dedup; 4 more tests added. Post-review hardening: `_fire()` shutdown-race (loop.is_running() guard + RuntimeError TOCTOU catch + coroutine close) and unobserved-Future fix (`_log_future_exception` done-callback); 5 more tests. `ReindexQueue.stop()` now gathers cancelled tasks to completion (no pending-task teardown warnings); 1 more test. `ChromaIndex.get_file_timestamps()` now pages through chunks in batches of 1 000 (`_GET_PAGE_SIZE`) instead of one unbounded `collection.get()`; fake updated; 2 pagination tests. `_reindex_note()` now returns `bool` (`True`=chunks upserted, `False`=empty body); `run()` gates `reindexed += 1` on the return value so empty-body notes (chunk-deleted but nothing written) no longer inflate the count; 1 new test. `_collect_md_files()` hidden-dir check narrowed to `rel_parts[:-1]` so dotfiles (e.g. `.frontmatter.md`) are no longer silently excluded — only hidden *directory* components are filtered; docstring updated; 1 new test. Staleness comparison fix: skip condition now requires `note_updated` to be non-empty so notes without an `updated` frontmatter field are always re-indexed rather than frozen in the index; 1 new test. `InboxWatcher` now accepts `debounce_s` constructor arg; `main.py` passes `cfg.vault.debounce_ms / 1000` eliminating drift between the class constant and `vault.debounce_ms` config; 2 new tests. `ReindexAgent.run()` now guards against `embed_fn=None` + non-memory backend at the top of `run()`: if `get_stats().backend != "memory"` and no `embed_fn`, it logs a WARNING and returns 0 immediately — preventing the delete-before-upsert wipe cycle that would silently destroy all indexed chunks on every startup_check/scheduled run until M6 wires a real AIProvider. `_reindex_note()` reordered to **prepare-then-swap**: all chunks are built (and embedded) before `delete_file()` is called, so if chunk preparation fails the existing index data is preserved; `main.py` `ReindexAgent()` call annotated with TODO comment for M6 embed_fn wiring; 4 new tests in `TestReindexAgentEmbedGuard`. `main.py` lifespan now respects `cfg.vault.watch`: `InboxWatcher` creation, `start()`, and `stop()` are all gated behind `if cfg.vault.watch`; when disabled a `[WATCHER]` INFO log is emitted and `app.state.watcher` is set to `None`; shutdown guard changed to `if watcher is not None`. No new tests needed (covered by existing watcher tests and API lifecycle tests). **All 275 tests passing** on Python 3.14.3, EXIT 0.
 
 ---
@@ -92,7 +94,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M3 | Vault Layer | COMPLETE |
 | M4 | Index Layer (ChromaDB + MemoryIndex) | COMPLETE |
 | M5 | File Watcher & Re-index Queue | COMPLETE |
-| M6 | AI Provider Abstraction | NOT STARTED |
+| M6 | AI Provider Abstraction | COMPLETE |
 | M7 | Ingest Pipeline & Plugin Registry | NOT STARTED |
 | M8 | REST API Wiring — Core | NOT STARTED |
 | M9 | Graph Layer | NOT STARTED |
@@ -123,9 +125,9 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 **Resolve by:** M6 (AI Provider)
 **Hypothesis:** Ollama can transcribe audio by passing a `.webm`/`.mp4` blob as an attachment to a Whisper model via `ollama.chat()` with a multimodal request.
 **Validation:** POST a real audio blob to a locally running Ollama instance with a Whisper model; confirm a text transcript is returned.
-**Status:** UNRESOLVED
-**Outcome:** *(fill in: CONFIRMED / FAILED — if failed, document the fallback approach chosen)*
-**Fallback:** Run `openai-whisper` as a subprocess (`whisper audio.wav --output_format txt`) or call the OpenAI Whisper API endpoint directly.
+**Status:** RESOLVED — 2026-03-17 (updated 2026-03-18)
+**Outcome:** FAILED — the `ollama` Python client has no dedicated transcription method and does not support passing audio blobs via its chat/generate API in a documented, stable way.
+**Final architecture:** `TranscriptionProvider` ABC in `monocle/ai/transcription.py` — fully decoupled from `AIProvider`. Three implementations: `WhisperCppTranscriptionProvider` (HTTP POST to a local whisper.cpp server, configurable via `ai.transcribe_url`); `SubprocessTranscriptionProvider` (openai-whisper CLI subprocess, dev fallback); `NativeOpenAITranscriptionProvider` (OpenAI client wrapper, used by Foundry/Azure). Factory `get_transcription_provider(settings)` returns `None` for `"native"` backend (Foundry/Azure set their own default) and the configured provider for `whisper_cpp`/`subprocess` backends. `AIProvider.transcribe()` is now concrete — delegates to `self._transcription_provider`; raises `RuntimeError` if unset. Config: `ai.transcribe_backend` (`native`|`whisper_cpp`|`subprocess`, default `native`), `ai.transcribe_url` (default `http://localhost:9000`). **Start whisper.cpp server:** `./server --model ggml-base.en.bin --host 0.0.0.0 --port 9000` then set `ai.transcribe_backend: whisper_cpp`.
 
 ---
 
@@ -633,28 +635,28 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** `AIProvider` ABC and `OllamaProvider`. Resolve SPIKE-1 (Whisper audio).
 
 **Deliverables:**
-- [ ] `monocle/ai/base.py` — `AIProvider` ABC:
+- [x] `monocle/ai/base.py` — `AIProvider` ABC:
   - `embed(text: str) -> list[float]`
   - `embed_batch(texts: list[str]) -> list[list[float]]`
   - `chat(messages: list[dict], stream: bool) -> str | AsyncIterator[str]`
   - `transcribe(audio_bytes: bytes, mime_type: str) -> str`
   - `extract_note_metadata(text: str, template: str) -> NoteMetadata`
-- [ ] `monocle/ai/ollama_provider.py` — `OllamaProvider(AIProvider)` using `ollama.AsyncClient`. Auto-pulls model on first use if not found.
-- [ ] `monocle/ai/foundry_local_provider.py` — `FoundryLocalProvider(AIProvider)` using OpenAI-compatible HTTP API
-- [ ] `monocle/ai/azure_provider.py` — `AzureOpenAIProvider(AIProvider)` using `openai.AzureOpenAI`
-- [ ] `monocle/ai/__init__.py` — `get_provider(settings) -> AIProvider` factory
-- [ ] Instrument all `AIProvider` method implementations with OTel spans and metrics using `telemetry.span()` / `telemetry.timed()`: each of `embed`, `embed_batch`, `chat`, `transcribe`, `extract_note_metadata` creates a child span (attributes: `ai.provider`, `ai.model`) and records duration into the corresponding histogram (`ai.embed_duration`, `ai.chat_duration`, `ai.transcribe_duration`). `opentelemetry-instrumentation-httpx` auto-instruments the underlying HTTP calls to Ollama/Azure.
-- [ ] **SPIKE-1 resolution:** Run validation; record outcome in `## Technical Spikes` above
-- [ ] `monocle/tests/test_ai.py` — mock-based unit tests (mock `httpx`/`ollama` client). Integration tests behind `@pytest.mark.integration` (skipped by default).
-- [ ] Extend `.vscode/tasks.json`:
+- [x] `monocle/ai/ollama_provider.py` — `OllamaProvider(AIProvider)` using `ollama.AsyncClient`. Auto-pulls model on first use if not found.
+- [x] `monocle/ai/foundry_local_provider.py` — `FoundryLocalProvider(AIProvider)` using OpenAI-compatible HTTP API
+- [x] `monocle/ai/azure_provider.py` — `AzureOpenAIProvider(AIProvider)` using `openai.AzureOpenAI`
+- [x] `monocle/ai/__init__.py` — `get_provider(settings) -> AIProvider` factory
+- [x] Instrument all `AIProvider` method implementations with OTel spans and metrics using `telemetry.span()` / `telemetry.timed()`: each of `embed`, `embed_batch`, `chat`, `transcribe`, `extract_note_metadata` creates a child span (attributes: `ai.provider`, `ai.model`) and records duration into the corresponding histogram (`ai.embed_duration`, `ai.chat_duration`, `ai.transcribe_duration`). `opentelemetry-instrumentation-httpx` auto-instruments the underlying HTTP calls to Ollama/Azure.
+- [x] **SPIKE-1 resolution:** Run validation; record outcome in `## Technical Spikes` above
+- [x] `monocle/tests/test_ai.py` — mock-based unit tests (mock `httpx`/`ollama` client). Integration tests behind `@pytest.mark.integration` (skipped by default).
+- [x] Extend `.vscode/tasks.json`:
   - `test: ai` — `python -m pytest monocle/tests/test_ai.py -x --tb=short -q` (skips `@pytest.mark.integration`)
 
 **Acceptance Criteria:**
-- [ ] Factory selects correct provider based on `settings.ai.provider`
-- [ ] `extract_note_metadata` returns complete `NoteMetadata` with all required fields
-- [ ] Mock-based unit tests pass; no live Ollama required
-- [ ] SPIKE-1 outcome recorded in `## Technical Spikes`
-- [ ] `uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q` passes (skips `@pytest.mark.integration`)
+- [x] Factory selects correct provider based on `settings.ai.provider`
+- [x] `extract_note_metadata` returns complete `NoteMetadata` with all required fields
+- [x] Mock-based unit tests pass; no live Ollama required
+- [x] SPIKE-1 outcome recorded in `## Technical Spikes`
+- [x] `uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q` passes (skips `@pytest.mark.integration`)
 
 ---
 

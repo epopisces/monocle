@@ -141,6 +141,7 @@ async def span(name: str, **attrs: Any) -> AsyncIterator[Any]:
 
     Falls back to a no-op context if OTel is unavailable.
     """
+    _yielded = False
     try:
         from opentelemetry import trace
 
@@ -148,9 +149,15 @@ async def span(name: str, **attrs: Any) -> AsyncIterator[Any]:
         with tracer.start_as_current_span(name) as s:
             for k, v in attrs.items():
                 s.set_attribute(k, str(v))
+            _yielded = True
             yield s
     except Exception:  # noqa: BLE001
-        yield None
+        # If we haven't yielded yet (OTel unavailable / import error), yield a
+        # no-op so the ``async with`` body still executes.
+        # If we've already yielded, an exception was thrown via athrow() — do
+        # NOT yield again or Python raises "generator didn't stop after athrow()".
+        if not _yielded:
+            yield None
 
 
 @asynccontextmanager

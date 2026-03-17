@@ -185,3 +185,35 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - `watcher` local variable initialised to `None` before the conditional; shutdown guard changed from `await watcher.stop()` to `if watcher is not None: await watcher.stop()` to match
   - `app.state.watcher` is set in both branches (`InboxWatcher` instance or `None`) for consistent downstream access
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **275 passed** (all tests), EXIT 0
+- **Executed M6 — AI Provider Abstraction (COMPLETE)**
+  - Created `monocle/ai/base.py`: `AIProvider` ABC (`embed`, `embed_batch`, `chat`, `transcribe` abstract; `extract_note_metadata` concrete using `self.chat()` + `_load_extract_prompt()` + `_parse_json_response()`); `_open_span()` sync span helper (safe inside async generator functions where `@asynccontextmanager` is incompatible); `_AttrSpanContext` wrapper for attribute injection
+  - Created `monocle/ai/ollama_provider.py`: `OllamaProvider` using `ollama.AsyncClient`; auto-pull via `_ensure_model()` (checks `show()`, pulls if 404); streaming via `_stream_chat()` async generator (iterate directly, no `await` on async generator); `_whisper_subprocess()` blocking helper for transcription (SPIKE-1 fallback)
+  - Created `monocle/ai/foundry_local_provider.py`: `FoundryLocalProvider` using `openai.AsyncOpenAI` with custom `base_url`; `embed_dimensions` forwarded to API; OpenAI-compatible `/audio/transcriptions` for transcription
+  - Created `monocle/ai/azure_provider.py`: `AzureOpenAIProvider` using `openai.AsyncAzureOpenAI`; `dimensions` parameter on embed; Azure Whisper deployment for transcription
+  - Updated `monocle/ai/__init__.py`: `get_provider(settings) -> AIProvider` factory for all three providers
+  - Updated `monocle/config.py`: added `ai.transcribe_model: str = "whisper"` field to `AIConfig`
+  - OTel instrumentation: `span()` + `timed()` on all non-streaming methods; `_open_span()` sync wrapper on streaming methods; histograms `ai.embed_duration`, `ai.chat_duration`, `ai.transcribe_duration` created per-provider in `__init__`
+  - Fixed `monocle/telemetry.py` `span()` Python 3.14 double-yield bug: added `_yielded` flag to prevent `yield None` after `athrow()` (context manager exception propagation was violated)
+  - **SPIKE-1 RESOLVED (FAILED)**: `ollama` Python client has no transcription API; fallback is `openai-whisper` subprocess; documented in build-plan under Technical Spikes
+  - Created `monocle/tests/test_ai.py`: 27 mock-based unit tests; 3 live integration tests behind `@pytest.mark.integration` (skipped by default)
+  - Updated `pyproject.toml`: added `addopts = "-m 'not integration'"` and registered `integration` marker
+  - Updated `.vscode/tasks.json`: added `test: ai` task
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **302 passed, 3 deselected** (all tests), EXIT 0
+
+---
+
+## 2026-03-18
+
+### Claude Sonnet 4.6
+- **Implemented pluggable `TranscriptionProvider` architecture** (follow-up to SPIKE-1 resolution; user chose Option 3 — whisper.cpp HTTP server with future-swap interface)
+  - Created `monocle/ai/transcription.py`: `TranscriptionProvider` ABC; `WhisperCppTranscriptionProvider` (httpx `POST /inference` to whisper.cpp HTTP server); `SubprocessTranscriptionProvider` (openai-whisper CLI subprocess, dev fallback); `NativeOpenAITranscriptionProvider` (OpenAI client adapter for Foundry/Azure native endpoints); `get_transcription_provider(settings)` factory returning `None` for `"native"` backend
+  - Updated `monocle/ai/base.py`: `AIProvider.transcribe()` made concrete — delegates to `self._transcription_provider`; adds `_transcription_provider: object = None` class attribute; removed `@abstractmethod` decorator
+  - Updated `monocle/ai/ollama_provider.py`: removed subprocess imports, `_EXT_MAP`, `_whisper_subprocess()` function and inline `transcribe()` override; accepts `transcription_provider=` constructor param; `TYPE_CHECKING` import for annotation
+  - Updated `monocle/ai/foundry_local_provider.py`: accepts `transcription_provider=` param; defaults to `NativeOpenAITranscriptionProvider(self._client, self._transcribe_model)` when `None`; removed inline `transcribe()` and `import io`
+  - Updated `monocle/ai/azure_provider.py`: same pattern as Foundry; defaults to `NativeOpenAITranscriptionProvider(self._client, self._transcribe_deployment)`; removed inline `transcribe()` and `import io`
+  - Updated `monocle/ai/__init__.py`: calls `get_transcription_provider(settings)` once and passes result to all three provider constructors
+  - Updated `monocle/config.py`: added `transcribe_backend: Literal["native","whisper_cpp","subprocess"] = "native"` and `transcribe_url: str = "http://localhost:9000"` to `AIConfig`
+  - Updated `pyproject.toml`: added `httpx` to runtime `dependencies` (used directly by `WhisperCppTranscriptionProvider`)
+  - Added 12 new tests to `monocle/tests/test_ai.py`: `TestWhisperCppTranscriptionProvider` (mock httpx, connect-error path, default URL), `TestSubprocessTranscriptionProvider` (mock subprocess, missing-whisper path), `TestNativeOpenAITranscriptionProvider` (mock OpenAI client), `TestGetTranscriptionProvider` (all 3 backends + unknown raises), `TestOllamaTranscription` (delegation + no-provider raises)
+  - Updated SPIKE-1 outcome in `docs/build-plan.md` with final architecture description
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **314 passed, 3 deselected**, EXIT 0

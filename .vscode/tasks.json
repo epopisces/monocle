@@ -75,6 +75,50 @@
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
+    },
+    {
+      "label": "test: ai",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      // Run only the transcription provider tests (unit + integration if server is up).
+      // For integration tests pass: -m integration
+      "label": "test: transcription",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_ai.py -k transcription -x --tb=short -v",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      // Start a local whisper.cpp HTTP server for transcription.
+      // Prerequisites:
+      //   1. Build whisper.cpp: https://github.com/ggerganov/whisper.cpp
+      //   2. Download a GGUF model, e.g. ggml-base.en.bin
+      //   3. Set WHISPER_CPP_SERVER env var to the server binary path, or
+      //      place the binary at tools/whisper-server (tools/whisper-server.exe on Windows).
+      //   4. Set WHISPER_CPP_MODEL env var to the .bin model path.
+      // Then set  ai.transcribe_backend: whisper_cpp  in config.yaml.
+      "label": "whisper.cpp: start server",
+      "type": "shell",
+      "command": "& \"${env:WHISPER_CPP_SERVER:=${workspaceFolder}/tools/whisper-server.exe}\" --model \"${env:WHISPER_CPP_MODEL:=${workspaceFolder}/tools/models/ggml-base.en.bin}\" --host 127.0.0.1 --port 9000",
+      "isBackground": true,
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": [
+        {
+          "pattern": { "regexp": "^$" },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "whisper_print_timings",
+            "endsPattern": "listening on"
+          }
+        }
+      ]
     }
   ]
 }
