@@ -139,7 +139,7 @@ class ReindexAgent:
                 continue
 
             try:
-                await self._reindex_note(vault_rel, note.body, note_updated, index)
+                indexed = await self._reindex_note(vault_rel, note.body, note_updated, index)
             except Exception as exc:  # noqa: BLE001
                 logger.error(
                     "[INGEST] ReindexAgent: failed to re-index %s: %s",
@@ -148,7 +148,8 @@ class ReindexAgent:
                     exc_info=True,
                 )
                 continue
-            reindexed += 1
+            if indexed:
+                reindexed += 1
 
         logger.info("[INGEST] ReindexAgent.run complete: %d note(s) re-indexed", reindexed)
         return reindexed
@@ -197,15 +198,22 @@ class ReindexAgent:
         body: str,
         updated_at: str,
         index: "IndexLayer",
-    ) -> None:
-        """Chunk, embed (if embed_fn configured), and upsert a single note."""
+    ) -> bool:
+        """Chunk, embed (if embed_fn configured), and upsert a single note.
+
+        Returns
+        -------
+        bool
+            ``True`` if at least one chunk was upserted, ``False`` if the note
+            body was empty/whitespace-only (existing chunks were still deleted).
+        """
         # Remove existing chunks so stale chunk count doesn't accumulate
         await asyncio.to_thread(index.delete_file, vault_rel)
 
         texts = chunk_text(body, chunk_size=self._chunk_size, overlap=self._chunk_overlap)
         if not texts:
-            logger.debug("[INGEST] ReindexAgent: empty body, skipping %s", vault_rel)
-            return
+            logger.debug("[INGEST] ReindexAgent: empty body, removed existing chunks for %s", vault_rel)
+            return False
 
         chunks: list[NoteChunk] = []
         for i, text in enumerate(texts):
@@ -234,6 +242,7 @@ class ReindexAgent:
         logger.debug(
             "[INGEST] ReindexAgent: upserted %d chunk(s) for %s", len(chunks), vault_rel
         )
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -245,8 +254,11 @@ def _collect_md_files(vault_root: str) -> list[str]:
     """Return absolute paths of all .md files in *vault_root* (recursive).
 
     Excludes:
-    - Hidden directories (names starting with ``.``) such as
+    - Hidden directories (path components starting with ``.``) such as
       ``.versions/``, ``.trash/``, and ``.templates/``.
+    - Dotfiles (files whose names start with ``.'') are **not** excluded —
+      only hidden *directory* components in the vault-relative path are
+      filtered.
     - ``.error.md`` sidecar files written on ingest failure.
     - Symlinks that resolve outside *vault_root* (path-traversal guard).
     """
@@ -259,14 +271,16 @@ def _collect_md_files(vault_root: str) -> list[str]:
 
     for f in root.rglob("*.md"):
         # Skip hidden subdirectories (.versions, .trash, .templates, etc.).
-        # Check only vault-relative parts so a vault installed under a parent
-        # directory whose name starts with '.' (e.g. ~/.config/monocle/vault)
-        # is not silently excluded.
+        # Check only the directory components of the vault-relative path
+        # (rel_parts[:-1]) so that:
+        # 1. Dotfiles like .frontmatter.md at the vault root are NOT excluded.
+        # 2. A vault installed under a hidden parent dir (e.g. ~/.config/…)
+        #    is not silently emptied (rel_parts is vault-relative, not absolute).
         try:
             rel_parts = f.relative_to(root).parts
         except ValueError:
             rel_parts = f.parts  # fall back to full parts if relative_to fails
-        if any(part.startswith(".") for part in rel_parts):
+        if any(part.startswith(".") for part in rel_parts[:-1]):
             continue
 
         # Skip .error.md sidecar files written on ingest failure

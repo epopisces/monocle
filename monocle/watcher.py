@@ -27,6 +27,7 @@ ReindexQueue
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import logging
 import os
 import threading
@@ -72,10 +73,21 @@ class ReindexQueue:
         logger.debug("[WATCHER] ReindexQueue started (idle_window=%.1fs)", self.IDLE_WINDOW_S)
 
     async def stop(self) -> None:
-        """Cancel all pending coalescing tasks."""
-        for task in list(self._tasks.values()):
-            task.cancel()
+        """Cancel all pending coalescing tasks and await their cleanup.
+
+        Gathering the cancelled tasks ensures each one has surfaced its
+        ``CancelledError`` and completed any ``finally`` / ``__aexit__``
+        cleanup before this coroutine returns.  Without the gather, the loop
+        may be torn down while the tasks are still pending, triggering
+        ``Task was destroyed but it is pending!`` warnings and potentially
+        allowing callbacks to run during teardown.
+        """
+        tasks = list(self._tasks.values())
         self._tasks.clear()
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
         logger.debug("[WATCHER] ReindexQueue stopped")
 
     def push(self, file_path: str) -> None:
@@ -360,14 +372,56 @@ class _InboxEventHandler:
             logger.debug("[WATCHER] Debounced file no longer exists: %s", file_path)
             return
 
-        asyncio.run_coroutine_threadsafe(
-            self._on_stable_file(file_path), self._loop
-        )
+        # Guard: if the event loop is no longer running (e.g. stop() was called
+        # between the timer firing and this point) there is nothing to schedule.
+        if not self._loop.is_running():
+            logger.debug(
+                "[WATCHER] Event loop stopped before ingest could be scheduled: %s",
+                file_path,
+            )
+            return
+
+        # Create the coroutine first so we can close() it on a RuntimeError
+        # (avoids a "coroutine was never awaited" ResourceWarning in that path).
+        coro = self._on_stable_file(file_path)
+        try:
+            future = asyncio.run_coroutine_threadsafe(coro, self._loop)
+        except RuntimeError:
+            # TOCTOU: loop closed between the is_running() check and here.
+            coro.close()
+            logger.debug(
+                "[WATCHER] Event loop closed before ingest could be scheduled: %s",
+                file_path,
+            )
+            return
+
+        # Observe the Future so any unexpected exception that escapes
+        # _on_stable_file's own try/except is logged rather than silently dropped.
+        future.add_done_callback(_log_future_exception)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _log_future_exception(future: concurrent.futures.Future) -> None:  # type: ignore[type-arg]
+    """Done-callback for run_coroutine_threadsafe futures.
+
+    Retrieves the result so that any exception stored on the future is logged
+    rather than silently swallowed.  ``CancelledError`` is ignored — it means
+    the event loop shut down cleanly while the coroutine was in flight.
+    """
+    try:
+        future.result()
+    except concurrent.futures.CancelledError:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        logger.error(
+            "[WATCHER] Unhandled exception in _on_stable_file future: %s",
+            exc,
+            exc_info=True,
+        )
 
 
 def _write_error_sidecar(source_path: str, exc: Exception) -> None:

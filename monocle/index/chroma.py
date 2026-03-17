@@ -35,6 +35,11 @@ _upsert_histogram = _meter.create_histogram(
 
 _COSINE_META: dict[str, Any] = {"hnsw:space": "cosine"}
 
+# Maximum number of chunks fetched per round-trip in get_file_timestamps().
+# Bounding this to a fixed page size keeps peak memory proportional to
+# _GET_PAGE_SIZE rather than total collection size.
+_GET_PAGE_SIZE: int = 1_000
+
 
 class ChromaIndex(IndexLayer):
     """Production index backed by a ChromaDB :class:`chromadb.PersistentClient`.
@@ -207,16 +212,25 @@ class ChromaIndex(IndexLayer):
         )
 
     def get_file_timestamps(self) -> dict[str, str]:
-        count = self._collection.count()
-        if count == 0:
+        if self._collection.count() == 0:
             return {}
-        all_items = self._collection.get(include=["metadatas"])
         result: dict[str, str] = {}
-        for meta in all_items["metadatas"]:
-            fp = meta.get("file_path", "")
-            ts = meta.get("updated_at", "")
-            if fp and ts and fp not in result:
-                result[fp] = str(ts)
+        offset = 0
+        while True:
+            batch = self._collection.get(
+                include=["metadatas"],
+                limit=_GET_PAGE_SIZE,
+                offset=offset,
+            )
+            metadatas: list[dict] = batch.get("metadatas") or []
+            for meta in metadatas:
+                fp = meta.get("file_path", "")
+                ts = meta.get("updated_at", "")
+                if fp and ts and fp not in result:
+                    result[fp] = str(ts)
+            if len(metadatas) < _GET_PAGE_SIZE:
+                break
+            offset += _GET_PAGE_SIZE
         return result
 
     # ------------------------------------------------------------------

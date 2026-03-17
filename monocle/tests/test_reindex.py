@@ -199,6 +199,42 @@ class TestReindexAgentStaleDetection:
 
         assert count == 2, f"force=True should re-index all 2 notes, got {count}"
 
+    async def test_empty_body_note_not_counted_as_reindexed(self, tmp_path: Path):
+        """A note whose body is empty/whitespace-only is NOT included in the
+        returned count.  Its existing chunks are deleted from the index, but
+        no new chunks are upserted — this is a removal, not an index, so it
+        must not be reported as 're-indexed'.
+        """
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        # One note with real content, one with an empty body
+        _write_vault_note(tmp_path, "work/real.md", "Some actual content.", _t(100))
+        _write_vault_note(tmp_path, "work/empty.md", "", _t(100))
+
+        # Pre-index a stale chunk for the empty note so delete_file is exercised
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/empty.md::0",
+                file_path="work/empty.md",
+                chunk_index=0,
+                text="old stale chunk",
+                embedding=[],
+                metadata={"updated_at": _t(50)},
+            )
+        ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+
+        assert count == 1, (
+            f"Only the note with real content should be counted as re-indexed; got {count}"
+        )
+        # Empty note's stale chunk must have been removed
+        assert index.get_file_timestamps().get("work/empty.md") is None, (
+            "Empty note's old chunks should have been deleted from the index"
+        )
+
 
 # ---------------------------------------------------------------------------
 # ReindexAgent — force=True clears first
@@ -375,6 +411,30 @@ class TestCollectMdFiles:
 
         assert "work/note.md" in rel, (
             f"Note inside vault under hidden parent should be collected; got {rel}"
+        )
+
+    def test_dotfile_at_vault_root_included(self, tmp_path: Path):
+        """A dotfile directly in the vault root (e.g. .frontmatter.md) is NOT
+        excluded — the hidden filter applies only to *directory* components,
+        not to the filename itself.
+        """
+        (tmp_path / ".hidden-note.md").write_text("# Dotfile note", encoding="utf-8")
+        (tmp_path / "work").mkdir()
+        (tmp_path / "work" / ".hidden-in-subdir.md").write_text("# Also a dotfile", encoding="utf-8")
+        (tmp_path / ".versions").mkdir()
+        (tmp_path / ".versions" / "note.md").write_text("# In hidden dir", encoding="utf-8")
+
+        files = _collect_md_files(str(tmp_path))
+        rel = {os.path.relpath(f, str(tmp_path)).replace(os.sep, "/") for f in files}
+
+        assert ".hidden-note.md" in rel, (
+            "Dotfile at vault root should be collected (filter is dir-only)"
+        )
+        assert "work/.hidden-in-subdir.md" in rel, (
+            "Dotfile inside non-hidden subdir should be collected"
+        )
+        assert not any(".versions" in r for r in rel), (
+            "Notes inside hidden directories should still be excluded"
         )
 
 
@@ -602,7 +662,7 @@ class TestReindexAgentNoteIsolation:
             call_order.append(vault_rel)
             if "b.md" in vault_rel:
                 raise RuntimeError("simulated index write failure for b.md")
-            await original_reindex(vault_rel, body, updated_at, idx)
+            return await original_reindex(vault_rel, body, updated_at, idx)
 
         agent._reindex_note = patched_reindex  # type: ignore[method-assign]
 

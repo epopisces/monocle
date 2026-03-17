@@ -26,6 +26,7 @@ from monocle.watcher import (
     InboxWatcher,
     ReindexQueue,
     _InboxEventHandler,
+    _log_future_exception,
     _write_error_sidecar,
 )
 
@@ -113,6 +114,41 @@ class TestReindexQueue:
         await asyncio.sleep(0.1)
 
         assert fired == [], "Callback should not fire after stop()"
+
+    async def test_stop_awaits_task_cleanup(self):
+        """stop() awaits cancellation so all tasks are done() when it returns.
+
+        Without a gather, tasks are merely *requested* to cancel.  The
+        CancelledError is not raised until the event loop next resumes those
+        tasks.  If the loop is torn down immediately after stop() (e.g. at
+        process shutdown), those tasks are still pending and Python emits
+        'Task was destroyed but it is pending!' warnings.  This test proves
+        that every task is fully done the moment stop() returns.
+        """
+        q = ReindexQueue()
+        q.IDLE_WINDOW_S = 10.0  # will never fire naturally
+        await q.start()
+        q.set_callback(lambda fp: asyncio.sleep(0))  # type: ignore[arg-type]
+
+        # Enqueue three files to create three pending tasks
+        q.push("/vault/a.md")
+        q.push("/vault/b.md")
+        q.push("/vault/c.md")
+        # Give call_soon_threadsafe a chance to schedule the _reschedule calls
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+
+        # Snapshot the tasks *before* stop() so we can inspect them afterwards
+        tasks_snapshot = list(q._tasks.values())
+        assert len(tasks_snapshot) == 3, "Expected 3 pending tasks before stop()"
+
+        await q.stop()
+
+        # Every task must be done — no pending warnings possible
+        not_done = [t for t in tasks_snapshot if not t.done()]
+        assert not_done == [], (
+            f"{len(not_done)} task(s) still pending after stop() returned"
+        )
 
     async def test_push_before_start_is_ignored(self):
         """push() before start() does not crash and produces no callback."""
@@ -410,6 +446,122 @@ class TestInboxEventHandlerDispatch:
         assert fired == [], (
             f".error.md sidecar should be ignored to prevent cascade; fired={fired}"
         )
+
+
+# ---------------------------------------------------------------------------
+# _fire() shutdown-race and Future-observation tests
+# ---------------------------------------------------------------------------
+
+
+class TestFireShutdownRaceAndFutureObservation:
+    """Tests for _InboxEventHandler._fire() edge cases."""
+
+    @staticmethod
+    def _make_handler(
+        inbox_path: str,
+        on_stable_file,
+        loop: asyncio.AbstractEventLoop,
+        debounce_s: float = 0.05,
+    ) -> _InboxEventHandler:
+        timers: dict = {}
+        timer_lock = threading.Lock()
+        return _InboxEventHandler(
+            inbox_path=inbox_path,
+            on_stable_file=on_stable_file,
+            debounce_s=debounce_s,
+            timers=timers,
+            timer_lock=timer_lock,
+            loop=loop,
+        )
+
+    async def test_fire_loop_not_running_drops_event(self, tmp_path: Path):
+        """_fire() drops the event silently when the event loop is not running."""
+        import unittest.mock as mock
+
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        md_file = inbox / "note.md"
+        md_file.write_text("# content", encoding="utf-8")
+
+        loop = asyncio.get_running_loop()
+        fired: list[str] = []
+
+        async def on_stable(fp: str) -> None:  # pragma: no cover
+            fired.append(fp)
+
+        handler = self._make_handler(str(inbox), on_stable, loop)
+
+        # Pretend the loop has stopped
+        with mock.patch.object(loop, "is_running", return_value=False):
+            handler._fire(str(md_file))  # must not raise
+
+        await asyncio.sleep(0.05)
+        assert fired == [], "No callback should fire when loop is not running"
+
+    async def test_fire_runtime_error_is_swallowed(self, tmp_path: Path):
+        """_fire() handles RuntimeError from run_coroutine_threadsafe gracefully.
+
+        This covers the TOCTOU window between is_running() returning True and
+        the loop actually closing before run_coroutine_threadsafe is called.
+        """
+        import unittest.mock as mock
+
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        md_file = inbox / "note.md"
+        md_file.write_text("# content", encoding="utf-8")
+
+        loop = asyncio.get_running_loop()
+        fired: list[str] = []
+
+        async def on_stable(fp: str) -> None:  # pragma: no cover
+            fired.append(fp)
+
+        handler = self._make_handler(str(inbox), on_stable, loop)
+
+        with mock.patch("asyncio.run_coroutine_threadsafe", side_effect=RuntimeError("loop closed")):
+            handler._fire(str(md_file))  # must not raise
+
+        assert fired == [], "No callback should fire when loop raises RuntimeError"
+
+    def test_log_future_exception_logs_error(self):
+        """_log_future_exception logs exceptions stored on the Future."""
+        import concurrent.futures
+        import unittest.mock as mock
+
+        # Build a resolved Future that holds an exception
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        fut.set_exception(ValueError("oops"))
+
+        with mock.patch("monocle.watcher.logger") as mock_logger:
+            _log_future_exception(fut)
+            mock_logger.error.assert_called_once()
+            args = mock_logger.error.call_args[0]
+            assert "Unhandled exception" in args[0]
+
+    def test_log_future_exception_ignores_cancelled(self):
+        """_log_future_exception does not log CancelledError (clean shutdown)."""
+        import concurrent.futures
+        import unittest.mock as mock
+
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        fut.cancel()
+
+        with mock.patch("monocle.watcher.logger") as mock_logger:
+            _log_future_exception(fut)
+            mock_logger.error.assert_not_called()
+
+    def test_log_future_exception_ignores_success(self):
+        """_log_future_exception does not log when the Future completed normally."""
+        import concurrent.futures
+        import unittest.mock as mock
+
+        fut: concurrent.futures.Future = concurrent.futures.Future()
+        fut.set_result(None)
+
+        with mock.patch("monocle.watcher.logger") as mock_logger:
+            _log_future_exception(fut)
+            mock_logger.error.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

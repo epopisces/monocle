@@ -133,4 +133,31 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - **Bug C — embed failure aborts entire `run()` batch:** `ReindexAgent.run()` now wraps `await self._reindex_note(...)` in a per-note `try/except` that logs at ERROR and `continue`s; a single failing note no longer raises and aborts re-indexing of all subsequent notes
   - **Smell D — redundant `os.path.basename` (already applied in prior edit pass):** `_write_error_sidecar()` computes `basename` once before building the `fm` dict
   - Added 4 tests: `test_error_sidecar_not_dispatched` (cascade prevention), `test_vault_under_hidden_parent_dir_included` (Bug B), `test_embed_failure_leaves_empty_embedding_run_completes` (Bug C — per-chunk), `test_run_continues_after_per_note_exception` (Bug C — per-note)
-  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **258 passed** (all tests), EXIT 0
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **258 passed** (all tests), EXIT 0- **`watcher.py` — `_fire()` shutdown-race and unobserved-Future fixes**
+  - Added `import concurrent.futures`
+  - Added `_log_future_exception(future)` module-level done-callback; logs at ERROR on unexpected exception, silently ignores `CancelledError` (clean shutdown)
+  - Rewrote `_fire()`: added `loop.is_running()` pre-check (drops event with DEBUG log when loop already stopped); extracts coroutine into local variable before calling `run_coroutine_threadsafe` so it can be `close()`d on `RuntimeError` (avoids `ResourceWarning`); wraps call in `try/except RuntimeError` for TOCTOU gap; attaches `_log_future_exception` as done-callback
+  - Added 5 tests in new `TestFireShutdownRaceAndFutureObservation` class: `test_fire_loop_not_running_drops_event`, `test_fire_runtime_error_is_swallowed`, `test_log_future_exception_logs_error`, `test_log_future_exception_ignores_cancelled`, `test_log_future_exception_ignores_success`
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **263 passed** (all tests), EXIT 0
+- **`watcher.py` — `ReindexQueue.stop()` pending-task fix**
+  - Snapshot + clear `_tasks` before cancelling, then `await asyncio.gather(*tasks, return_exceptions=True)` so every `CancelledError` is fully raised and handled before `stop()` returns; eliminates `Task was destroyed but it is pending!` warnings on loop teardown
+  - Added `test_stop_awaits_task_cleanup` test: enqueues 3 tasks, calls `stop()`, asserts all tasks are `done()` immediately after `stop()` returns
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **264 passed** (all tests), EXIT 0
+- **`chroma.py` — `get_file_timestamps()` paginated load**
+  - Added `_GET_PAGE_SIZE = 1_000` module constant
+  - Rewrote `get_file_timestamps()` to loop with `collection.get(include=["metadatas"], limit=_GET_PAGE_SIZE, offset=offset)`; loop exits when a batch is smaller than the page size; peak memory is now O(_GET_PAGE_SIZE) instead of O(collection size)
+  - Updated `_FakeCollection.get()` in `test_index.py` to accept and apply `limit` / `offset` parameters so the fake faithfully models ChromaDB pagination
+  - Added `TestChromaIndexGetFileTimestampsPagination` with two tests: `test_all_files_returned_across_multiple_pages` (page_size=3, 5 files/10 chunks) and `test_exact_page_boundary_returns_all_files` (page_size=4, 4 files/4 chunks — edge case where first page is exactly full)
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **266 passed** (all tests), EXIT 0
+- **`reindex.py` — `_reindex_note()` returns `bool`; `run()` count fix**
+  - Changed `_reindex_note()` return type `None` → `bool`: returns `True` after upsert, `False` on empty/whitespace-only body (old chunks still deleted)
+  - `run()` now gates `reindexed += 1` on the return value; empty-body notes no longer inflate the count or appear in the “N note(s) re-indexed” log line
+  - Updated `debug` log in the empty-body path to say “removed existing chunks” (was “skipping”)
+  - Fixed `patched_reindex` in `test_run_continues_after_per_note_exception` to `return await original_reindex(...)` so the mock forwards the bool correctly
+  - Added `test_empty_body_note_not_counted_as_reindexed`: empty-body note counts as 0, its stale chunk is deleted
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **267 passed** (all tests), EXIT 0
+- **`reindex.py` — `_collect_md_files()` dotfile/hidden-dir distinction**
+  - Hidden-dir check changed from `rel_parts` to `rel_parts[:-1]` so only *directory* components are tested; dotfiles at any depth (e.g. `.frontmatter.md`, `work/.hidden.md`) are no longer silently excluded
+  - Docstring updated to document the dir-only exclusion rule and explicitly note that dotfiles are **not** excluded
+  - Added `test_dotfile_at_vault_root_included`: verifies `.hidden-note.md` and `work/.hidden-in-subdir.md` are collected while `.versions/note.md` is still excluded
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **268 passed** (all tests), EXIT 0
