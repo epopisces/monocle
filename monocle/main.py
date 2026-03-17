@@ -89,7 +89,14 @@ async def lifespan(app: FastAPI):
     from monocle.agents.reindex import ReindexAgent
     from monocle.agents.scheduler import MonocleScheduler
 
-    reindex_agent = ReindexAgent()
+    # TODO (M6): pass embed_fn=ai_provider.embed once AIProvider is wired.
+    # Without embed_fn, ReindexAgent.run() will skip re-indexing for any
+    # non-memory backend (ChromaDB) to prevent the delete-before-upsert data
+    # loss that would occur if empty embeddings are rejected at upsert time.
+    reindex_agent = ReindexAgent(
+        chunk_size=cfg.index.chunk_size_tokens,
+        chunk_overlap=cfg.index.chunk_overlap_tokens,
+    )
     app.state.reindex_agent = reindex_agent
 
     scheduler = MonocleScheduler(cfg)
@@ -120,14 +127,18 @@ async def lifespan(app: FastAPI):
     # ------------------------------------------------------------------
     # Inbox watcher (async task — Phase 1 integration)
     # ------------------------------------------------------------------
-    from monocle.watcher import InboxWatcher
+    watcher: "InboxWatcher | None" = None
+    if cfg.vault.watch:
+        from monocle.watcher import InboxWatcher
 
-    watcher = InboxWatcher(
-        inbox_path=cfg.vault.inbox_path,
-        debounce_s=cfg.vault.debounce_ms / 1000,
-    )
-    # Ingest callback is wired in M7 when IngestPipeline is implemented
-    await watcher.start()
+        watcher = InboxWatcher(
+            inbox_path=cfg.vault.inbox_path,
+            debounce_s=cfg.vault.debounce_ms / 1000,
+        )
+        # Ingest callback is wired in M7 when IngestPipeline is implemented
+        await watcher.start()
+    else:
+        logger.info("[WATCHER] vault.watch=false — inbox watcher disabled")
     app.state.watcher = watcher
 
     # ------------------------------------------------------------------
@@ -142,7 +153,8 @@ async def lifespan(app: FastAPI):
     # Shutdown
     # ------------------------------------------------------------------
     logger.info("[API] Monocle shutting down")
-    await watcher.stop()
+    if watcher is not None:
+        await watcher.stop()
     await reindex_queue.stop()
     await scheduler.stop()
     logger.info("[API] Monocle shutdown complete")

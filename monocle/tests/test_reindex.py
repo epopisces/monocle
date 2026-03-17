@@ -720,3 +720,138 @@ class TestReindexAgentNoteIsolation:
         )
         # Confirm all three were attempted
         assert len(call_order) == 3, f"Expected all 3 notes attempted; got {call_order}"
+
+
+# ---------------------------------------------------------------------------
+# ReindexAgent — embed_fn=None guard (non-memory backend safety)
+# ---------------------------------------------------------------------------
+
+
+class TestReindexAgentEmbedGuard:
+    """run() must skip re-indexing (with a WARNING) when embed_fn is None and
+    the index backend requires real embeddings (i.e. backend != "memory").
+
+    Without this guard the agent would call delete_file() on every note then
+    fail at upsert_chunks() because the empty embeddings don't match the
+    configured embedding dimensions — silently wiping the entire index.
+
+    MemoryIndex accepts any embedding size, so the guard must NOT fire for the
+    "memory" backend; run() must proceed normally in that case.
+    """
+
+    def _make_chroma_index(self) -> MemoryIndex:
+        """Return a MemoryIndex whose get_stats() reports backend='chroma'."""
+        from monocle.models import IndexStats as _IndexStats
+
+        index = MemoryIndex()
+        orig = index.get_stats
+
+        def chroma_stats() -> _IndexStats:
+            s = orig()
+            return _IndexStats(
+                backend="chroma",
+                total_chunks=s.total_chunks,
+                total_files=s.total_files,
+                collection_name=s.collection_name,
+            )
+
+        index.get_stats = chroma_stats  # type: ignore[method-assign]
+        return index
+
+    async def test_run_skips_and_warns_when_no_embed_fn_and_non_memory_backend(
+        self, tmp_path: Path, caplog
+    ):
+        """run() returns 0 and emits a WARNING without calling delete_file when
+        embed_fn is None and the backend is not 'memory'."""
+        import logging
+
+        vault = VaultLayer(str(tmp_path))
+        _write_vault_note(tmp_path, "work/note.md", "Some content.", _t(100))
+
+        index = self._make_chroma_index()
+
+        # Track whether delete_file is ever called
+        delete_calls: list[str] = []
+        orig_delete = index.delete_file  # type: ignore[attr-defined]
+
+        def tracking_delete(path: str) -> None:
+            delete_calls.append(path)
+            orig_delete(path)
+
+        index.delete_file = tracking_delete  # type: ignore[method-assign]
+
+        agent = ReindexAgent()  # embed_fn=None
+
+        with caplog.at_level(logging.WARNING, logger="monocle.agents.reindex"):
+            count = await agent.run(vault, index)
+
+        assert count == 0, (
+            "run() must return 0 when embed_fn is None and backend is non-memory; "
+            f"got count={count}"
+        )
+        assert not delete_calls, (
+            "delete_file must not be called when the embed guard fires; "
+            f"called with: {delete_calls}"
+        )
+        assert any(
+            "embed_fn" in r.message and r.levelno >= logging.WARNING
+            for r in caplog.records
+        ), "Expected a WARNING message containing 'embed_fn'"
+
+    async def test_run_skips_and_warns_for_force_mode_too(
+        self, tmp_path: Path, caplog
+    ):
+        """The embed guard must trigger even when force=True to prevent a full
+        index wipe when no embed_fn is available."""
+        import logging
+
+        vault = VaultLayer(str(tmp_path))
+        _write_vault_note(tmp_path, "work/note.md", "Content.", _t(100))
+
+        index = self._make_chroma_index()
+
+        agent = ReindexAgent()  # embed_fn=None
+
+        with caplog.at_level(logging.WARNING, logger="monocle.agents.reindex"):
+            count = await agent.run(vault, index, force=True)
+
+        assert count == 0, (
+            "force=True must still be blocked by embed guard when embed_fn is None"
+        )
+        assert any(
+            "embed_fn" in r.message and r.levelno >= logging.WARNING
+            for r in caplog.records
+        ), "Expected a WARNING message containing 'embed_fn'"
+
+    async def test_run_proceeds_for_memory_backend_without_embed_fn(self, tmp_path: Path):
+        """MemoryIndex accepts any embedding size, so the guard must NOT fire
+        when backend='memory'.  run() must index the note normally."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+        _write_vault_note(tmp_path, "work/note.md", "Memory backend note.", _t(100))
+
+        agent = ReindexAgent()  # embed_fn=None, memory backend → no guard
+        count = await agent.run(vault, index)
+
+        assert count == 1, (
+            "run() must proceed normally for MemoryIndex even without embed_fn; "
+            f"got count={count}"
+        )
+
+    async def test_run_proceeds_for_non_memory_backend_when_embed_fn_provided(
+        self, tmp_path: Path
+    ):
+        """When an embed_fn IS provided, run() must proceed for any backend,
+        including non-memory ones."""
+        vault = VaultLayer(str(tmp_path))
+        _write_vault_note(tmp_path, "work/note.md", "Content.", _t(100))
+
+        index = self._make_chroma_index()
+
+        agent = ReindexAgent(embed_fn=lambda t: [0.1])  # embed_fn provided
+        count = await agent.run(vault, index)
+
+        assert count == 1, (
+            "run() must proceed when embed_fn is provided, regardless of backend; "
+            f"got count={count}"
+        )

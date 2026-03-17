@@ -173,3 +173,15 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - `DEBOUNCE_S = 2.0` retained as explicit fallback default and for tests that instantiate `InboxWatcher` without settings
   - Added 2 tests: `test_debounce_s_from_constructor_overrides_class_default` (verifies storage and end-to-end timer firing at custom interval), `test_debounce_s_none_uses_class_default` (verifies `DEBOUNCE_S` fallback)
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **271 passed** (all tests), EXIT 0
+- **`reindex.py` / `main.py` � embed_fn=None guard + prepare-then-swap reorder**
+  - Root cause: `ReindexAgent()` in `main.py` is constructed without `embed_fn` (M6 not yet built). ChromaIndex rejects `len([]) != 1536` with `ValueError`. `_reindex_note()` previously called `delete_file()` first, then built chunks, then called `upsert_chunks()` � so when `upsert_chunks` raised (every note, on every startup_check or scheduled run), existing index data was silently wiped with nothing to replace it.
+  - Fix 1 � Guard in `run()`: At the top of `run()`, before `if force:`, calls `index.get_stats()` to check backend. If `embed_fn is None` and `backend != "memory"`, logs a WARNING and returns 0 immediately. Prevents the delete-everything-fails-nothing cycle for all ChromaDB deployments until M6.
+  - Fix 2 � Prepare-then-swap in `_reindex_note()`: All chunks are now fully built (including any embedding calls) before `delete_file()` is called, so chunk-preparation failures cannot corrupt the index.
+  - `main.py` annotation: Added 4-line TODO comment above `ReindexAgent()` call noting that `embed_fn=ai_provider.embed` must be wired in M6.
+  - Added `TestReindexAgentEmbedGuard` class (4 tests): guard fires for non-memory backend + no embed_fn (returns 0, no delete_file, WARNING emitted); guard fires for force=True too; guard does NOT fire for MemoryIndex + no embed_fn (count=1); guard does NOT fire when embed_fn is provided regardless of backend.
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` -> **275 passed** (all tests), EXIT 0- **`main.py` — respect `cfg.vault.watch` flag for InboxWatcher**
+  - `InboxWatcher` was started unconditionally; `VaultConfig.watch: bool = True` was ignored by the lifespan hook
+  - Wrapped InboxWatcher import, construction, and `start()` in `if cfg.vault.watch:`; added `else:` branch that logs `[WATCHER] vault.watch=false — inbox watcher disabled`
+  - `watcher` local variable initialised to `None` before the conditional; shutdown guard changed from `await watcher.stop()` to `if watcher is not None: await watcher.stop()` to match
+  - `app.state.watcher` is set in both branches (`InboxWatcher` instance or `None`) for consistent downstream access
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **275 passed** (all tests), EXIT 0

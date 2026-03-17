@@ -106,6 +106,24 @@ class ReindexAgent:
         int
             Number of notes re-indexed.
         """
+        # Guard: without embed_fn, upsert_chunks will produce empty embeddings
+        # that non-memory backends (e.g. ChromaDB) reject with a dimension
+        # mismatch error.  _reindex_note deletes existing chunks before upserting,
+        # so a systematic failure here would wipe the entire index on every run.
+        # Skip early and warn so the operator knows action is needed (M6 wires
+        # a real AIProvider embed function).
+        if self._embed_fn is None:
+            _stats = await asyncio.to_thread(index.get_stats)
+            if _stats.backend != "memory":
+                logger.warning(
+                    "[INGEST] ReindexAgent.run: embed_fn is not configured and index "
+                    "backend is %r (requires real embeddings). Re-indexing skipped to "
+                    "prevent data loss. Wire an AIProvider embed function to enable "
+                    "full re-indexing.",
+                    _stats.backend,
+                )
+                return 0
+
         if force:
             logger.info("[INGEST] ReindexAgent.run(force=True): clearing index")
             await asyncio.to_thread(index.delete_all)
@@ -207,20 +225,27 @@ class ReindexAgent:
     ) -> bool:
         """Chunk, embed (if embed_fn configured), and upsert a single note.
 
+        Uses a **prepare-then-swap** pattern: all chunks are built and embedded
+        *before* the existing index entry is touched.  If chunk preparation or
+        embedding fails the existing index data for this note is preserved.
+
         Returns
         -------
         bool
             ``True`` if at least one chunk was upserted, ``False`` if the note
             body was empty/whitespace-only (existing chunks were still deleted).
         """
-        # Remove existing chunks so stale chunk count doesn't accumulate
-        await asyncio.to_thread(index.delete_file, vault_rel)
-
         texts = chunk_text(body, chunk_size=self._chunk_size, overlap=self._chunk_overlap)
         if not texts:
+            # Note is empty — safe to remove existing chunks now.
+            await asyncio.to_thread(index.delete_file, vault_rel)
             logger.debug("[INGEST] ReindexAgent: empty body, removed existing chunks for %s", vault_rel)
             return False
 
+        # Build all chunks (including embeddings) BEFORE touching the index.
+        # This ensures that if embedding fails the existing index data for this
+        # note is not lost.  Only once the replacement chunks are ready do we
+        # perform the delete-then-upsert swap.
         chunks: list[NoteChunk] = []
         for i, text in enumerate(texts):
             embedding: list[float] = []
@@ -244,6 +269,10 @@ class ReindexAgent:
                 )
             )
 
+        # Safe swap: delete stale chunks then upsert the freshly-built ones.
+        # run() guards against embed_fn=None + non-memory backends before
+        # here, so upsert_chunks should not raise in normal operation.
+        await asyncio.to_thread(index.delete_file, vault_rel)
         await asyncio.to_thread(index.upsert_chunks, chunks)
         logger.debug(
             "[INGEST] ReindexAgent: upserted %d chunk(s) for %s", len(chunks), vault_rel
