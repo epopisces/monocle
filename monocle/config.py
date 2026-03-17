@@ -29,10 +29,11 @@ class AIConfig(BaseModel):
     chat_model: str = "llama3.2"
     transcribe_model: str = "whisper"
     # Transcription back-end — pluggable at config time:
-    #   "native"      providers with built-in transcription (Foundry, Azure) use their own
-    #                 API; Ollama falls back to subprocess.
+    #   "native"      providers with built-in transcription (e.g. Foundry, Azure) use their
+    #                 own API. Ollama does not support "native" and requires an explicit
+    #                 backend like "whisper_cpp" or "subprocess".
     #   "whisper_cpp" all providers delegate to a local whisper.cpp HTTP server.
-    #   "subprocess" all providers call the openai-whisper CLI as a subprocess.
+    #   "subprocess"  all providers call the openai-whisper CLI as a subprocess.
     transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] = "native"
     transcribe_url: str = "http://localhost:9000"  # whisper_cpp server URL
     ollama_base_url: str = "http://localhost:11434"
