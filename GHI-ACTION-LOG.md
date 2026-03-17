@@ -74,7 +74,7 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Created `monocle/index/__init__.py`: `get_index(settings) -> IndexLayer` factory; re-exports `IndexLayer` and `DimensionMismatch`
   - Created `monocle/tests/test_index.py`: 43 tests including parametrized suite (memory + chroma), dimension mismatch, factory, and MemoryIndex-specific tests; ChromaDB `PersistentClient` replaced with `_FakeChromaClient`/`_FakeCollection` (pure-Python, cosine distance, where-clause evaluation) via `monkeypatch` to work around ChromaDB Rust-backend access-violation on this Windows + Python 3.14 environment
   - Added `test: index` task to `.vscode/tasks.json`
-  - Created `.python-version` pinning to Python 3.12 (ChromaDB 1.5.5 Rust bindings compiled for cp39-abi3 crash on Python 3.14 with access violation during any write operation; Python 3.12 is the correct runtime for this stack)
+  - Created `.python-version` pinning to Python 3.14 to align local development and CI with the target runtime for this stack
   - `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q` → 43 passed, EXIT 0
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **179 passed** (all tests), EXIT 0
   - Updated `docs/build-plan.md`: all M4 deliverables and acceptance criteria marked `[x]`; Active Milestone → M5; M4 → COMPLETE in tracker
