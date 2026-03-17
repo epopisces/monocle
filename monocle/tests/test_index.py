@@ -354,6 +354,27 @@ class TestGetStats:
         assert stats.total_files == 1
 
 
+class TestChromaIndexStats:
+    """ChromaIndex-specific stats fields (backend label + collection_name)."""
+
+    def test_backend_label_is_chroma(self, monkeypatch):
+        index = _make_fake_chroma_index(monkeypatch, collection_name="my_notes")
+        stats = index.get_stats()
+        assert stats.backend == "chroma"
+
+    def test_collection_name_matches_config(self, monkeypatch):
+        index = _make_fake_chroma_index(monkeypatch, collection_name="custom_col")
+        # After upsert we go through the non-zero branch
+        index.upsert_chunks([_chunk("a.md::0", "a.md", "hello", _E_A)])
+        stats = index.get_stats()
+        assert stats.collection_name == "custom_col"
+
+    def test_collection_name_in_empty_stats(self, monkeypatch):
+        index = _make_fake_chroma_index(monkeypatch, collection_name="empty_col")
+        stats = index.get_stats()
+        assert stats.collection_name == "empty_col"
+
+
 class TestDeleteAll:
     def test_delete_all_empties_index(self, index):
         index.upsert_chunks([
@@ -397,6 +418,44 @@ class TestChromaDimensionMismatch:
         shared_client = _FakeChromaClient()
         _make_fake_chroma_index(monkeypatch, embed_dimensions=3, collection_name="dim_match", fake_client=shared_client)
         _make_fake_chroma_index(monkeypatch, embed_dimensions=3, collection_name="dim_match", fake_client=shared_client)
+
+    def test_upsert_raises_on_wrong_embedding_size(self, monkeypatch):
+        """Chunks whose embedding length != embed_dimensions must raise ValueError."""
+        index = _make_fake_chroma_index(monkeypatch, embed_dimensions=3)
+        bad_chunk = NoteChunk(
+            chunk_id="a.md::0",
+            file_path="a.md",
+            chunk_index=0,
+            text="hello",
+            embedding=[0.1, 0.2],  # length 2, expects 3
+        )
+        with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+            index.upsert_chunks([bad_chunk])
+
+    def test_upsert_raises_on_empty_embedding(self, monkeypatch):
+        """Chunks with the default empty embedding (NoteChunk default) must raise ValueError."""
+        index = _make_fake_chroma_index(monkeypatch, embed_dimensions=3)
+        bad_chunk = NoteChunk(
+            chunk_id="b.md::0",
+            file_path="b.md",
+            chunk_index=0,
+            text="world",
+            # embedding omitted → default []
+        )
+        with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+            index.upsert_chunks([bad_chunk])
+
+    def test_search_raises_on_wrong_query_embedding_size(self, monkeypatch):
+        """Search with a query vector of the wrong length must raise ValueError."""
+        index = _make_fake_chroma_index(monkeypatch, embed_dimensions=3)
+        with pytest.raises(ValueError, match="Query embedding dimension mismatch"):
+            index.search([0.1, 0.2], n_results=5)  # length 2, expects 3
+
+    def test_search_raises_on_empty_query_embedding(self, monkeypatch):
+        """Search with an empty query vector must raise ValueError."""
+        index = _make_fake_chroma_index(monkeypatch, embed_dimensions=3)
+        with pytest.raises(ValueError, match="Query embedding dimension mismatch"):
+            index.search([], n_results=5)
 
 
 # ---------------------------------------------------------------------------

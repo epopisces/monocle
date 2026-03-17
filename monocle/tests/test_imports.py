@@ -6,6 +6,8 @@ No business logic is tested here — that comes in later milestones.
 """
 from __future__ import annotations
 
+import pytest
+
 
 def test_config_import() -> None:
     from monocle.config import Settings  # noqa: F401
@@ -72,3 +74,44 @@ def test_settings_defaults() -> None:
     assert s.server.port == 8000
     assert s.ai.embed_dimensions == 1536
     assert s.review.confidence_weights.template_match == 0.35
+
+
+def test_server_config_invalid_host_raises() -> None:
+    """ServerConfig must reject hosts outside the allowed set."""
+    from pydantic import ValidationError
+
+    from monocle.config import ServerConfig
+
+    with pytest.raises(ValidationError):
+        ServerConfig(host="192.168.1.1")
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "0.0.0.0", "localhost"])
+def test_server_config_valid_hosts_accepted(host: str) -> None:
+    """All three explicitly allowed hosts must not raise."""
+    from monocle.config import ServerConfig
+
+    cfg = ServerConfig(host=host)
+    assert cfg.host == host
+
+
+async def test_inbox_watcher_stub_running_flag() -> None:
+    """InboxWatcher.start() sets running=True; stop() clears it."""
+    from monocle.watcher import InboxWatcher
+
+    watcher = InboxWatcher()
+    assert watcher.status()["running"] is False
+    await watcher.start()
+    assert watcher.status()["running"] is True
+    await watcher.stop()
+    assert watcher.status()["running"] is False
+
+
+async def test_reindex_queue_stub_does_not_raise() -> None:
+    """ReindexQueue stub methods must not raise."""
+    from monocle.watcher import ReindexQueue
+
+    q = ReindexQueue()
+    await q.start()
+    q.push("vault/inbox/test.md")  # no-op but must not raise
+    await q.stop()

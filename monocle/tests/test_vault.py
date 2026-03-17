@@ -43,7 +43,7 @@ def _write_md(root: Path, rel: str, fm: dict, body: str = "") -> Path:
     """Write a minimal YAML-frontmatter note to `root / rel`."""
     path = root / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     merged = {"created": now, "updated": now, **fm}
     content = f"---\n{yaml.dump(merged, default_flow_style=False)}---\n\n{body}\n"
     path.write_text(content, encoding="utf-8")
@@ -488,6 +488,13 @@ class TestVaultLayerMoveNote:
             vault.move_note("inbox/a.md", "ideas/b.md")
         assert exc_info.value.status_code == 409
 
+    def test_destination_path_traversal_raises_403(self, tmp_path: Path):
+        _write_md(tmp_path, "inbox/draft.md", {})
+        vault = VaultLayer(tmp_path)
+        with pytest.raises(Exception) as exc_info:
+            vault.move_note("inbox/draft.md", "../../escaped.md")
+        assert exc_info.value.status_code == 403
+
 
 # ============================================================================
 # VaultLayer: create_from_template
@@ -765,6 +772,29 @@ class TestVaultLayerListNotes:
         page = vault.list_notes()
         assert page.total == 0
         assert page.items == []
+
+    def test_sort_by_title_ascending(self, tmp_path: Path):
+        vault = VaultLayer(tmp_path)
+        for title in ["Zara", "Alice", "Mike"]:
+            n = Note(
+                file_path=f"people/{title.lower()}.md",
+                title=title,
+                body="",
+                metadata=NoteMetadata(type="person_note"),
+            )
+            vault.write_note(n.file_path, n)
+        page = vault.list_notes(sort="title")
+        titles = [ref.title for ref in page.items]
+        assert titles == sorted(titles, key=str.lower)
+
+    def test_noteref_review_status_propagated(self, tmp_vault: Path):
+        """review_status from frontmatter must appear in the returned NoteRef."""
+        vault = VaultLayer(tmp_vault)
+        page = vault.list_notes()
+        statuses = {ref.review_status for ref in page.items}
+        # tmp_vault has both "approved" and "pending" notes
+        assert "approved" in statuses
+        assert "pending" in statuses
 
 
 # ============================================================================

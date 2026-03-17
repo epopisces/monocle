@@ -90,7 +90,7 @@ def _write_note(vault_root: Path, path: str, frontmatter: dict, body: str) -> No
     note_path = vault_root / path
     note_path.parent.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.datetime.utcnow().isoformat() + "Z"
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
     fm = {"created": now, "updated": now, **frontmatter}
     content = f"---\n{yaml.dump(fm, default_flow_style=False)}---\n\n{body}\n"
     note_path.write_text(content, encoding="utf-8")

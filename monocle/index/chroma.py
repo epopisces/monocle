@@ -66,6 +66,20 @@ class ChromaIndex(IndexLayer):
     def upsert_chunks(self, chunks: list[NoteChunk]) -> None:
         if not chunks:
             return
+
+        # Validate embedding dimensions before touching ChromaDB.  Catching this
+        # early produces a clear error rather than an opaque ChromaDB exception.
+        expected = self._embed_dimensions
+        for c in chunks:
+            actual = len(c.embedding)
+            if actual != expected:
+                raise ValueError(
+                    f"Embedding dimension mismatch for chunk '{c.chunk_id}': "
+                    f"expected {expected} but got {actual}. "
+                    "Ensure the embedding was produced by the same model/settings "
+                    "as settings.ai.embed_dimensions."
+                )
+
         t0 = time.perf_counter()
 
         ids = [c.chunk_id for c in chunks]
@@ -109,6 +123,15 @@ class ChromaIndex(IndexLayer):
         filters: dict | None = None,
         query_text: str = "",
     ) -> list[ScoredChunk]:
+        actual = len(query_embedding)
+        if actual != self._embed_dimensions:
+            raise ValueError(
+                f"Query embedding dimension mismatch: "
+                f"expected {self._embed_dimensions} but got {actual}. "
+                "Ensure the query was embedded with the same model/settings "
+                "as settings.ai.embed_dimensions."
+            )
+
         t0 = time.perf_counter()
         count = self._collection.count()
         if count == 0:
