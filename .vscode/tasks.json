@@ -59,6 +59,14 @@
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
+    },
+    {
+      "label": "test: index",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
     }
   ]
 }
