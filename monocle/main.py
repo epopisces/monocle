@@ -61,9 +61,88 @@ async def lifespan(app: FastAPI):
     cfg = get_settings()
     configure_telemetry(cfg)
     logger.info("[API] Monocle starting — provider=%s port=%d", cfg.ai.provider, cfg.server.port)
-    # Future milestones wire in: IndexLayer, VaultLayer, InboxWatcher, APScheduler
+
+    # ------------------------------------------------------------------
+    # Core layers
+    # ------------------------------------------------------------------
+    from monocle.index import get_index
+    from monocle.vault import VaultLayer
+
+    vault = VaultLayer(cfg.vault.path)
+    index = get_index(cfg)
+    app.state.vault = vault
+    app.state.index = index
+    app.state.settings = cfg
+
+    # ------------------------------------------------------------------
+    # Re-index queue (used by write routes in M8+)
+    # ------------------------------------------------------------------
+    from monocle.watcher import ReindexQueue
+
+    reindex_queue = ReindexQueue()
+    await reindex_queue.start()
+    app.state.reindex_queue = reindex_queue
+
+    # ------------------------------------------------------------------
+    # Scheduler (cron jobs — weekly summary + re-index)
+    # ------------------------------------------------------------------
+    from monocle.agents.reindex import ReindexAgent
+    from monocle.agents.scheduler import MonocleScheduler
+
+    reindex_agent = ReindexAgent()
+    app.state.reindex_agent = reindex_agent
+
+    scheduler = MonocleScheduler(cfg)
+    await scheduler.start()
+    app.state.scheduler = scheduler
+
+    # Register scheduled re-index job (incremental)
+    if cfg.agents.reindex.enabled:
+
+        async def _scheduled_reindex() -> None:
+            logger.info("[SCHEDULER] Scheduled re-index starting")
+            await reindex_agent.run(vault, index)
+            logger.info("[SCHEDULER] Scheduled re-index complete")
+
+        scheduler.add_cron_job(
+            "reindex",
+            _scheduled_reindex,
+            cfg.agents.reindex.cron,
+        )
+
+    # Weekly summary job stub — implemented in M11
+    if cfg.agents.weekly_summary.enabled:
+        logger.info(
+            "[SCHEDULER] Weekly summary job registered (cron=%s) — active in M11",
+            cfg.agents.weekly_summary.cron,
+        )
+
+    # ------------------------------------------------------------------
+    # Inbox watcher (async task — Phase 1 integration)
+    # ------------------------------------------------------------------
+    from monocle.watcher import InboxWatcher
+
+    watcher = InboxWatcher(inbox_path=cfg.vault.inbox_path)
+    # Ingest callback is wired in M7 when IngestPipeline is implemented
+    await watcher.start()
+    app.state.watcher = watcher
+
+    # ------------------------------------------------------------------
+    # Startup re-index (runs if index is empty and vault has notes)
+    # ------------------------------------------------------------------
+    await reindex_agent.startup_check(vault, index)
+
+    logger.info("[API] Monocle ready")
     yield
+
+    # ------------------------------------------------------------------
+    # Shutdown
+    # ------------------------------------------------------------------
     logger.info("[API] Monocle shutting down")
+    await watcher.stop()
+    await reindex_queue.stop()
+    await scheduler.stop()
+    logger.info("[API] Monocle shutdown complete")
 
 
 # ---------------------------------------------------------------------------

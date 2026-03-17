@@ -95,11 +95,13 @@ def test_server_config_valid_hosts_accepted(host: str) -> None:
     assert cfg.host == host
 
 
-async def test_inbox_watcher_stub_running_flag() -> None:
+async def test_inbox_watcher_stub_running_flag(tmp_path) -> None:
     """InboxWatcher.start() sets running=True; stop() clears it."""
     from monocle.watcher import InboxWatcher
 
-    watcher = InboxWatcher()
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    watcher = InboxWatcher(inbox_path=str(inbox))
     assert watcher.status()["running"] is False
     await watcher.start()
     assert watcher.status()["running"] is True

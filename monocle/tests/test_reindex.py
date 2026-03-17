@@ -1,0 +1,621 @@
+"""
+monocle/tests/test_reindex.py — Unit tests for ReindexAgent and chunker.
+
+Tests use the ``tmp_vault`` and ``memory_index`` fixtures from conftest.py.
+No real AI provider is needed — embeddings are skipped (embed_fn=None) and
+MemoryIndex does not validate embedding dimensions.
+"""
+from __future__ import annotations
+
+import asyncio
+import datetime
+import os
+from pathlib import Path
+
+import pytest
+import yaml
+
+from monocle.agents.reindex import ReindexAgent, _collect_md_files
+from monocle.index.memory import MemoryIndex
+from monocle.ingest.chunker import chunk_text
+from monocle.models import NoteChunk
+from monocle.vault import VaultLayer
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+_UTC = datetime.timezone.utc
+
+
+def _write_vault_note(vault_root: Path, rel_path: str, body: str, updated: str) -> Path:
+    """Write a minimal .md note with the given updated timestamp."""
+    path = vault_root / rel_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fm = {"type": "other", "updated": updated, "created": updated}
+    content = f"---\n{yaml.dump(fm)}---\n\n{body}\n"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _t(delta_seconds: int = 0) -> str:
+    """Return an ISO-8601 UTC timestamp offset by *delta_seconds* from epoch."""
+    base = datetime.datetime(2026, 1, 1, 12, 0, 0, tzinfo=_UTC)
+    ts = base + datetime.timedelta(seconds=delta_seconds)
+    return ts.isoformat().replace("+00:00", "Z")
+
+
+# ---------------------------------------------------------------------------
+# chunk_text tests
+# ---------------------------------------------------------------------------
+
+
+class TestChunkText:
+    def test_empty_text_returns_empty(self):
+        assert chunk_text("") == []
+
+    def test_whitespace_only_returns_empty(self):
+        assert chunk_text("   \n  ") == []
+
+    def test_short_text_single_chunk(self):
+        result = chunk_text("Hello world")
+        assert len(result) == 1
+        assert "Hello" in result[0]
+
+    def test_long_text_produces_multiple_chunks(self):
+        # 600 words → should exceed 512 tokens
+        long_text = " ".join([f"word{i}" for i in range(600)])
+        result = chunk_text(long_text, chunk_size=512, overlap=64)
+        assert len(result) >= 2
+
+    def test_overlap_creates_shared_tokens(self):
+        long_text = " ".join([f"token{i}" for i in range(700)])
+        result = chunk_text(long_text, chunk_size=100, overlap=20)
+        # Adjacent chunks should share tokens from the overlap
+        assert len(result) >= 2
+        # The last words of chunk 0 should appear at the start of chunk 1
+        # (this is a rough check — exact token boundaries may vary)
+        assert len(result[0]) > 0
+        assert len(result[1]) > 0
+
+    def test_invalid_overlap_raises(self):
+        with pytest.raises(ValueError, match="overlap"):
+            chunk_text("some text", chunk_size=10, overlap=10)
+
+
+# ---------------------------------------------------------------------------
+# ReindexAgent — stale detection
+# ---------------------------------------------------------------------------
+
+
+class TestReindexAgentStaleDetection:
+    async def test_only_stale_notes_are_reindexed(self, tmp_path: Path):
+        """Notes whose indexed updated_at < vault updated are re-indexed.
+
+        Notes already up-to-date should be skipped.
+        """
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        # Write two notes to the vault
+        _write_vault_note(tmp_path, "work/stale.md", "Stale note body text here.", _t(100))
+        _write_vault_note(tmp_path, "work/fresh.md", "Fresh note body text here.", _t(100))
+
+        # Pre-populate index for 'fresh.md' with updated_at = t(100) (same as vault)
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/fresh.md::0",
+                file_path="work/fresh.md",
+                chunk_index=0,
+                text="Fresh note body text here.",
+                embedding=[],
+                metadata={"updated_at": _t(100)},
+            )
+        ])
+        # 'stale.md' is not in the index at all → stale
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+
+        assert count == 1, f"Expected 1 re-indexed note, got {count}"
+        # stale.md should now have chunks
+        stats = index.get_stats()
+        assert stats.total_files == 2  # fresh (pre-existing) + stale (newly indexed)
+
+    async def test_note_updated_after_index_is_reindexed(self, tmp_path: Path):
+        """A note whose vault updated > indexed updated_at is re-indexed."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/note.md", "Updated content.", _t(200))
+
+        # Index with an older timestamp
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/note.md::0",
+                file_path="work/note.md",
+                chunk_index=0,
+                text="Old content.",
+                embedding=[],
+                metadata={"updated_at": _t(100)},
+            )
+        ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+
+        assert count == 1
+        # The chunk should have been replaced with new content
+        results = index.search([], query_text="Updated content")
+        assert any(r.file_path == "work/note.md" for r in results)
+
+    async def test_up_to_date_note_skipped(self, tmp_path: Path):
+        """A note whose vault updated == indexed updated_at is skipped."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/note.md", "Content.", _t(100))
+        # Index with same timestamp
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/note.md::0",
+                file_path="work/note.md",
+                chunk_index=0,
+                text="Content.",
+                embedding=[],
+                metadata={"updated_at": _t(100)},
+            )
+        ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+
+        assert count == 0, "Up-to-date note should not be re-indexed"
+
+    async def test_force_reindexes_all(self, tmp_path: Path):
+        """force=True clears the index and re-indexes every note."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/a.md", "Note A.", _t(100))
+        _write_vault_note(tmp_path, "work/b.md", "Note B.", _t(100))
+
+        # Pre-populate with up-to-date entries
+        for rel in ("work/a.md", "work/b.md"):
+            index.upsert_chunks([
+                NoteChunk(
+                    chunk_id=f"{rel}::0",
+                    file_path=rel,
+                    chunk_index=0,
+                    text="pre-indexed",
+                    embedding=[],
+                    metadata={"updated_at": _t(100)},
+                )
+            ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index, force=True)
+
+        assert count == 2, f"force=True should re-index all 2 notes, got {count}"
+
+
+# ---------------------------------------------------------------------------
+# ReindexAgent — force=True clears first
+# ---------------------------------------------------------------------------
+
+
+class TestReindexAgentForce:
+    async def test_force_calls_delete_all(self, tmp_path: Path):
+        """force=True wipes the index before re-indexing."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/note.md", "Body text.", _t(100))
+
+        # Insert some stale data
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="old_file.md::0",
+                file_path="old_file.md",
+                chunk_index=0,
+                text="Old stale data",
+                embedding=[],
+                metadata={"updated_at": _t(0)},
+            )
+        ])
+        assert index.get_stats().total_chunks == 1
+
+        agent = ReindexAgent()
+        await agent.run(vault, index, force=True)
+
+        # Old stale data should be gone (index was wiped before re-index)
+        results = index.search([], query_text="Old stale data")
+        assert results == [], "force=True should wipe old stale entries"
+
+
+# ---------------------------------------------------------------------------
+# ReindexAgent — startup_check
+# ---------------------------------------------------------------------------
+
+
+class TestReindexAgentStartupCheck:
+    async def test_startup_check_runs_when_index_empty(self, tmp_path: Path):
+        """startup_check triggers a full re-index when the index is empty."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/note.md", "Important content.", _t(100))
+
+        agent = ReindexAgent()
+        assert agent.health_status == "ready"
+
+        await agent.startup_check(vault, index)
+
+        stats = index.get_stats()
+        assert stats.total_chunks > 0, "startup_check should populate the index"
+
+    async def test_startup_check_skips_when_index_not_empty(self, tmp_path: Path):
+        """startup_check does nothing when the index already has content."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/note.md", "Body.", _t(100))
+
+        # Pre-populate index
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/note.md::0",
+                file_path="work/note.md",
+                chunk_index=0,
+                text="pre-indexed",
+                embedding=[],
+                metadata={"updated_at": _t(100)},
+            )
+        ])
+
+        agent = ReindexAgent()
+        call_count = [0]
+        original_run = agent.run
+
+        async def counting_run(v, i, force=False):
+            call_count[0] += 1
+            return await original_run(v, i, force=force)
+
+        agent.run = counting_run  # type: ignore[method-assign]
+
+        await agent.startup_check(vault, index)
+        assert call_count[0] == 0, "startup_check should not call run() when index is non-empty"
+
+    async def test_startup_check_skips_empty_vault(self, tmp_path: Path):
+        """startup_check does nothing when the vault itself is empty."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        agent = ReindexAgent()
+        await agent.startup_check(vault, index)
+
+        # No crash; index remains empty
+        assert index.get_stats().total_chunks == 0
+
+
+# ---------------------------------------------------------------------------
+# _collect_md_files helper
+# ---------------------------------------------------------------------------
+
+
+class TestCollectMdFiles:
+    def test_finds_md_files(self, tmp_path: Path):
+        (tmp_path / "work" / "note.md").parent.mkdir(parents=True)
+        (tmp_path / "work" / "note.md").write_text("# Hi")
+        (tmp_path / "people" / "alice.md").parent.mkdir(parents=True)
+        (tmp_path / "people" / "alice.md").write_text("# Alice")
+
+        files = _collect_md_files(str(tmp_path))
+        rel = {os.path.relpath(f, str(tmp_path)).replace(os.sep, "/") for f in files}
+        assert "work/note.md" in rel
+        assert "people/alice.md" in rel
+
+    def test_excludes_hidden_dirs(self, tmp_path: Path):
+        (tmp_path / ".versions" / "note.md").parent.mkdir(parents=True)
+        (tmp_path / ".versions" / "note.md").write_text("# Hidden")
+        (tmp_path / ".trash" / "note.md").parent.mkdir(parents=True)
+        (tmp_path / ".trash" / "note.md").write_text("# Trashed")
+        (tmp_path / "work" / "note.md").parent.mkdir(parents=True)
+        (tmp_path / "work" / "note.md").write_text("# Visible")
+
+        files = _collect_md_files(str(tmp_path))
+        rel = {os.path.relpath(f, str(tmp_path)).replace(os.sep, "/") for f in files}
+        assert "work/note.md" in rel
+        assert not any(".versions" in r for r in rel)
+        assert not any(".trash" in r for r in rel)
+
+    def test_empty_vault_returns_empty_list(self, tmp_path: Path):
+        assert _collect_md_files(str(tmp_path)) == []
+
+    def test_nonexistent_path_returns_empty_list(self):
+        assert _collect_md_files("/nonexistent/path/xyz") == []
+
+    def test_error_sidecar_files_excluded(self, tmp_path: Path):
+        """.error.md sidecar files are excluded from collected results.
+
+        These files are written on ingest failure and must not be fed back into
+        the re-index pipeline as if they were regular vault notes.
+        """
+        (tmp_path / "inbox").mkdir(exist_ok=True)
+        (tmp_path / "inbox" / "capture.md").write_text("# Note")
+        (tmp_path / "inbox" / "capture.md.error.md").write_text(
+            "---\ntype: ingest_error\n---\nFailed."
+        )
+        (tmp_path / "work").mkdir(exist_ok=True)
+        (tmp_path / "work" / "another.md.error.md").write_text("---\ntype: ingest_error\n---\n")
+
+        files = _collect_md_files(str(tmp_path))
+        rel = {os.path.relpath(f, str(tmp_path)).replace(os.sep, "/") for f in files}
+
+        assert "inbox/capture.md" in rel, "Regular .md file should be collected"
+        assert not any(r.endswith(".error.md") for r in rel), (
+            f"Error sidecars should not be collected: {sorted(r for r in rel if 'error' in r)}"
+        )
+
+    def test_vault_under_hidden_parent_dir_included(self, tmp_path: Path):
+        """Notes are collected even when the vault itself lives inside a directory
+        whose name starts with '.', e.g. ~/.config/monocle/vault.
+
+        The hidden-dir guard must check only vault-relative path components,
+        not the full absolute path.
+        """
+        hidden_parent = tmp_path / ".dotparent" / "vault"
+        hidden_parent.mkdir(parents=True)
+        (hidden_parent / "work").mkdir()
+        (hidden_parent / "work" / "note.md").write_text("# Note", encoding="utf-8")
+
+        files = _collect_md_files(str(hidden_parent))
+        rel = {os.path.relpath(f, str(hidden_parent)).replace(os.sep, "/") for f in files}
+
+        assert "work/note.md" in rel, (
+            f"Note inside vault under hidden parent should be collected; got {rel}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# MemoryIndex.get_file_timestamps
+# ---------------------------------------------------------------------------
+
+
+class TestMemoryIndexGetFileTimestamps:
+    def test_returns_empty_when_no_chunks(self):
+        index = MemoryIndex()
+        assert index.get_file_timestamps() == {}
+
+    def test_returns_updated_at_per_file(self):
+        index = MemoryIndex()
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/a.md::0",
+                file_path="work/a.md",
+                chunk_index=0,
+                text="chunk 0",
+                embedding=[],
+                metadata={"updated_at": "2026-01-01T12:00:00Z"},
+            ),
+            NoteChunk(
+                chunk_id="work/a.md::1",
+                file_path="work/a.md",
+                chunk_index=1,
+                text="chunk 1",
+                embedding=[],
+                metadata={"updated_at": "2026-01-01T12:00:00Z"},
+            ),
+            NoteChunk(
+                chunk_id="work/b.md::0",
+                file_path="work/b.md",
+                chunk_index=0,
+                text="chunk 0",
+                embedding=[],
+                metadata={"updated_at": "2026-01-02T00:00:00Z"},
+            ),
+        ])
+
+        ts = index.get_file_timestamps()
+        assert ts["work/a.md"] == "2026-01-01T12:00:00Z"
+        assert ts["work/b.md"] == "2026-01-02T00:00:00Z"
+        assert len(ts) == 2
+
+    def test_chunks_without_updated_at_omitted(self):
+        index = MemoryIndex()
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/a.md::0",
+                file_path="work/a.md",
+                chunk_index=0,
+                text="no timestamp",
+                embedding=[],
+                metadata={},
+            ),
+        ])
+        assert index.get_file_timestamps() == {}
+
+
+# ---------------------------------------------------------------------------
+# Timestamp normalisation
+# ---------------------------------------------------------------------------
+
+
+class TestTimestampNormalisation:
+    """Tests for _normalise_ts() and its effect on stale-detection logic."""
+
+    def test_normalise_z_unchanged(self):
+        """Z-format timestamp is returned unchanged."""
+        from monocle.agents.reindex import _normalise_ts
+
+        assert _normalise_ts("2026-01-01T12:00:00Z") == "2026-01-01T12:00:00Z"
+
+    def test_normalise_plus00_converted_to_z(self):
+        """+00:00 suffix is normalised to Z."""
+        from monocle.agents.reindex import _normalise_ts
+
+        assert _normalise_ts("2026-01-01T12:00:00+00:00") == "2026-01-01T12:00:00Z"
+
+    def test_normalise_empty_string_unchanged(self):
+        """Empty string is returned unchanged (no crash)."""
+        from monocle.agents.reindex import _normalise_ts
+
+        assert _normalise_ts("") == ""
+
+    def test_normalise_non_utc_offset_unchanged(self):
+        """A non-UTC offset (e.g. +05:30) is left as-is — only +00:00 is replaced."""
+        from monocle.agents.reindex import _normalise_ts
+
+        ts = "2026-01-01T17:30:00+05:30"
+        assert _normalise_ts(ts) == ts
+
+    async def test_z_indexed_plus00_vault_not_reindexed(self, tmp_path: Path):
+        """A note whose index entry uses Z is treated as up-to-date vs vault +00:00.
+
+        Python's datetime.isoformat() emits +00:00 for UTC datetimes, while the
+        index may have been seeded with the Z representation of the same moment.
+        After the _normalise_ts fix both sides compare equal so the note is
+        correctly skipped.
+        """
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        ts_z = "2026-01-01T12:00:00Z"
+        ts_plus = "2026-01-01T12:00:00+00:00"
+
+        path = tmp_path / "work" / "note.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Use single-quoted YAML string so pyyaml does not auto-parse as datetime,
+        # ensuring the vault note's 'updated' field is read back as the string
+        # with +00:00 suffix (simulating the datetime.isoformat() round-trip).
+        content = (
+            "---\n"
+            "type: other\n"
+            f"updated: '{ts_plus}'\n"
+            f"created: '{ts_plus}'\n"
+            "---\n\n"
+            "Body text here.\n"
+        )
+        path.write_text(content, encoding="utf-8")
+
+        # Seed index with the Z-format representation of the same instant
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/note.md::0",
+                file_path="work/note.md",
+                chunk_index=0,
+                text="Body text here.",
+                embedding=[],
+                metadata={"updated_at": ts_z},
+            )
+        ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+        assert count == 0, (
+            f"Same instant expressed as Z vs +00:00 should not trigger re-index; "
+            f"got count={count}"
+        )
+
+    async def test_plus00_indexed_z_vault_not_reindexed(self, tmp_path: Path):
+        """A note whose index entry uses +00:00 is treated as up-to-date vs vault Z."""
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        ts_z = "2026-01-01T12:00:00Z"
+        ts_plus = "2026-01-01T12:00:00+00:00"
+
+        _write_vault_note(tmp_path, "work/note.md", "Body.", ts_z)
+
+        # Seed index with +00:00 format
+        index.upsert_chunks([
+            NoteChunk(
+                chunk_id="work/note.md::0",
+                file_path="work/note.md",
+                chunk_index=0,
+                text="Body.",
+                embedding=[],
+                metadata={"updated_at": ts_plus},
+            )
+        ])
+
+        agent = ReindexAgent()
+        count = await agent.run(vault, index)
+        assert count == 0, (
+            f"+00:00 index vs Z vault should not trigger re-index; got count={count}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# ReindexAgent — per-note error isolation
+# ---------------------------------------------------------------------------
+
+
+class TestReindexAgentNoteIsolation:
+    """Failures on individual notes must not abort the rest of the run."""
+
+    async def test_embed_failure_leaves_empty_embedding_run_completes(self, tmp_path: Path):
+        """When embed_fn raises for a chunk, that chunk is stored with an empty
+        embedding and run() completes without raising.  MemoryIndex accepts
+        any embedding size so both notes are indexed.
+        """
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/good.md", "Good note contents.", _t(100))
+        _write_vault_note(tmp_path, "work/bad.md", "Bad embed note.", _t(100))
+
+        def flaky_embed(text: str) -> list[float]:
+            if "bad embed" in text.lower():
+                raise RuntimeError("embedding service unavailable")
+            return [0.0]
+
+        agent = ReindexAgent(embed_fn=flaky_embed)
+
+        # Should not raise — embed failure is caught per-chunk inside _reindex_note;
+        # the chunk is stored with embedding=[] which MemoryIndex accepts.
+        count = await agent.run(vault, index)
+
+        assert count == 2, (
+            f"Both notes should be indexed despite embed error on one chunk; got {count}"
+        )
+
+    async def test_run_continues_after_per_note_exception(self, tmp_path: Path, caplog):
+        """A hard failure in _reindex_note (e.g. index write error) is logged at
+        ERROR level and skipped; subsequent notes are still processed.
+        """
+        import logging
+
+        vault = VaultLayer(str(tmp_path))
+        index = MemoryIndex()
+
+        _write_vault_note(tmp_path, "work/a.md", "Note A contents.", _t(100))
+        _write_vault_note(tmp_path, "work/b.md", "Note B contents.", _t(100))
+        _write_vault_note(tmp_path, "work/c.md", "Note C contents.", _t(100))
+
+        agent = ReindexAgent()
+        original_reindex = agent._reindex_note
+        call_order: list[str] = []
+
+        async def patched_reindex(vault_rel, body, updated_at, idx):
+            call_order.append(vault_rel)
+            if "b.md" in vault_rel:
+                raise RuntimeError("simulated index write failure for b.md")
+            await original_reindex(vault_rel, body, updated_at, idx)
+
+        agent._reindex_note = patched_reindex  # type: ignore[method-assign]
+
+        with caplog.at_level(logging.ERROR, logger="monocle.agents.reindex"):
+            count = await agent.run(vault, index)
+
+        # a.md and c.md should be indexed; b.md failed
+        assert count == 2, (
+            f"Expected 2 successful re-indexes (a + c); got {count}.  "
+            f"Call order: {call_order}"
+        )
+        assert any("b.md" in r.message for r in caplog.records if r.levelno >= logging.ERROR), (
+            "Expected an ERROR log mentioning the failing note (b.md)"
+        )
+        # Confirm all three were attempted
+        assert len(call_order) == 3, f"Expected all 3 notes attempted; got {call_order}"

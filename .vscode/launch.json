@@ -24,7 +24,7 @@
       "args": ["monocle/tests/", "-x", "--tb=short", "-q", "-s"],
       "cwd": "${workspaceFolder}",
       "jinja": true,
-      "justMyCode": false,
+      "justMyCode": true,
       "presentation": {
         "group": "monocle",
         "order": 2

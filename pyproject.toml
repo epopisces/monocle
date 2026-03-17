@@ -16,7 +16,7 @@ dependencies = [
     # File watcher
     "watchdog>=4",
     # Task scheduler
-    "apscheduler>=3.10",
+    "apscheduler>=3.10,<4",
     # Agent framework (versions pinned — identifiers change between preview builds)
     "agent-framework-azure-ai==1.0.0b260107",
     "agent-framework-core==1.0.0b260107",

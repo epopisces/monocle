@@ -93,3 +93,44 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - → 195 passed, EXIT 0
 - Fixed `DeprecationWarning: datetime.datetime.utcnow()` in `test_vault.py` and `conftest.py`; replaced with `datetime.datetime.now(datetime.timezone.utc)` — warnings eliminated
 - SPIKE-4 resolved: Re-validated ChromaDB 1.5.5 Rust `PersistentClient` on Python 3.14.3 — full smoke test (upsert, query, delete) passes without workaround; investigated [chroma-core/chroma#5937](https://github.com/chroma-core/chroma/issues/5937) `SegmentAPI` workaround (not needed); updated `.python-version` from `3.12` → `3.14`; 195 tests pass on Python 3.14.3; updated SPIKE-4 in `docs/build-plan.md` as RESOLVED
+- **Executed M5 — File Watcher & Re-index Queue (COMPLETE)**
+  - Created `monocle/ingest/chunker.py`: `chunk_text(text, chunk_size=512, overlap=64)` using tiktoken `cl100k_base`; handles empty text, overlap validation
+  - Implemented `monocle/watcher.py` (replaced stub): `ReindexQueue` — asyncio per-file coalescing queue (10-second idle window), thread-safe `push()` via `loop.call_soon_threadsafe`; `InboxWatcher` — watchdog.Observer (non-recursive) on inbox dir, 2-second per-file debounce via `threading.Timer`, `_InboxEventHandler` with dynamic watchdog base-class inheritance, `.error.md` sidecar writing on failure; `_write_error_sidecar()` helper
+  - Implemented `monocle/agents/reindex.py` (replaced stub): `ReindexAgent` with `run(vault, index, force=False)` (stale detection via `get_file_timestamps()`, force clears before re-index), `startup_check(vault, index)` (triggers full re-index when index empty), `health_status` attribute; `_collect_md_files()` helper (excludes hidden dirs)
+  - Created `monocle/agents/scheduler.py`: `MoocleScheduler` wrapping APScheduler `AsyncIOScheduler`; `add_cron_job()` from 5-field cron string; start/stop/status interface
+  - Extended `monocle/index/base.py` with `get_file_timestamps() -> dict[str, str]` abstract method; implemented in `MemoryIndex` and `ChromaIndex` (ChromaDB `collection.get()` metadata scan)
+  - Updated `monocle/main.py` lifespan: wires VaultLayer, IndexLayer (via factory), ReindexQueue, ReindexAgent, MoocleScheduler (with reindex cron job), InboxWatcher (ingest callback wired in M7), and runs `startup_check` on startup
+  - Created `monocle/tests/test_watcher.py`: 17 tests — ReindexQueue coalescing (6), InboxWatcher _on_stable_file logic (3), _InboxEventHandler dispatch+debounce (4), _write_error_sidecar (2), lifecycle (2)
+  - Created `monocle/tests/test_reindex.py`: 21 tests — `chunk_text` (6), stale detection (4), force flag (1), startup_check (3), `_collect_md_files` (4), `MemoryIndex.get_file_timestamps` (3)
+  - Updated `test_imports.py`: fixed `test_inbox_watcher_stub_running_flag` to use `tmp_path` for real `InboxWatcher` constructor
+  - Added `test: watcher` task to `.vscode/tasks.json`
+  - `uv run python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q` → **38 passed**, EXIT 0
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **233 passed** (all tests), EXIT 0
+  - Updated `docs/build-plan.md`: all M5 deliverables and acceptance criteria marked `[x]`; Active Milestone → M6; M5 → COMPLETE in tracker
+- **M5 post-completion code review — 14 issues resolved (bugs, testing gaps, security)**
+  - **Bug fixes (5):**
+    - `reindex.py`: added `_normalise_ts()` helper; normalised both sides of the `updated_at` comparison to `Z` format to prevent `+00:00` vs `Z` false-staleness (bug 1)
+    - `reindex.py` / `_collect_md_files()`: added `.error.md` suffix exclusion to prevent sidecar files being fed to VaultLayer as regular notes (bug 2)
+    - `watcher.py` / `InboxWatcher.status()`: now reads `_timers` under `_timer_lock` to prevent `RuntimeError: dict changed size during iteration` under concurrent timer callbacks (bug 3)
+    - `watcher.py` / `ReindexQueue._debounced_reindex()`: added `except Exception` handler that logs callback errors at ERROR level instead of silently swallowing them (bug 4)
+    - `agents/scheduler.py`: renamed `MoocleScheduler` → `MonocleScheduler`; added `MoocleScheduler = MonocleScheduler` backward-compat alias; updated `main.py` import/usage (bug 5)
+  - **Testing gaps resolved (6):**
+    - Created `monocle/tests/test_scheduler.py` (16 tests): lifecycle start/stop, double-stop safety, status() structure, add_cron_job happy path, replace_existing, RuntimeError before start, ValueError on invalid cron, backward-compat alias (gap 6)
+    - Added `test_callback_exception_is_logged_not_silenced` to `TestReindexQueue` (gap 7)
+    - Added `test_moved_event_uses_dest_path` to `TestInboxEventHandlerDispatch` (gap 8)
+    - Added `test_error_sidecar_files_excluded` to `TestCollectMdFiles` (gap 9)
+    - Added `TestTimestampNormalisation` class (6 tests): unit tests for `_normalise_ts()` and two integration tests proving Z/+00:00 cross-format equality prevents spurious re-indexes (gap 10)
+    - `ingest/chunker.py`: added module-level `_cl100k_enc` cache; tiktoken encoder is now constructed once per process rather than on every `chunk_text()` call (gap 11)
+  - **Security hardening (3):**
+    - `reindex.py` / `_collect_md_files()`: added `os.path.realpath` + `Path.relative_to()` symlink-traversal guard; paths resolving outside the vault root are skipped with a WARNING log (sec 12)
+    - `watcher.py` / `_write_error_sidecar()`: replaced raw string interpolation of the filename into YAML with `yaml.dump()` to prevent YAML injection via filenames containing colons or newlines (sec 13)
+    - `watcher.py` / `ReindexQueue.push()`: added docstring trust-boundary note explaining that callers must validate paths against the vault root before enqueueing (sec 14)
+  - **Dependency fix:** pinned `apscheduler>=3.10,<4` in `pyproject.toml`; APScheduler v4.0.0a6 (API-incompatible) was resolved; downgraded to v3.11.2
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **254 passed** (all tests), EXIT 0
+- **M5 second-pass code review — 4 additional issues resolved**
+  - **Bug A — `.error.md` cascade loop (already applied in prior edit pass):** `_InboxEventHandler.dispatch()` now rejects `src_path.endswith(".error.md")` with a combined short-circuit filter, preventing an ingest failure from writing a sidecar that re-triggers a new failing ingest indefinitely
+  - **Bug B — vault under hidden parent dir silently empty:** `_collect_md_files()` hidden-dir guard now checks `f.relative_to(root).parts` (vault-relative) instead of `f.parts` (full absolute path), so a vault installed under `~/.config/...` or any `.`-prefixed ancestor is no longer silently treated as empty
+  - **Bug C — embed failure aborts entire `run()` batch:** `ReindexAgent.run()` now wraps `await self._reindex_note(...)` in a per-note `try/except` that logs at ERROR and `continue`s; a single failing note no longer raises and aborts re-indexing of all subsequent notes
+  - **Smell D — redundant `os.path.basename` (already applied in prior edit pass):** `_write_error_sidecar()` computes `basename` once before building the `fm` dict
+  - Added 4 tests: `test_error_sidecar_not_dispatched` (cascade prevention), `test_vault_under_hidden_parent_dir_included` (Bug B), `test_embed_failure_leaves_empty_embedding_run_completes` (Bug C — per-chunk), `test_run_continues_after_per_note_exception` (Bug C — per-note)
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **258 passed** (all tests), EXIT 0

@@ -206,6 +206,19 @@ class ChromaIndex(IndexLayer):
             self._collection_name,
         )
 
+    def get_file_timestamps(self) -> dict[str, str]:
+        count = self._collection.count()
+        if count == 0:
+            return {}
+        all_items = self._collection.get(include=["metadatas"])
+        result: dict[str, str] = {}
+        for meta in all_items["metadatas"]:
+            fp = meta.get("file_path", "")
+            ts = meta.get("updated_at", "")
+            if fp and ts and fp not in result:
+                result[fp] = str(ts)
+        return result
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
