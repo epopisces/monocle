@@ -29,7 +29,7 @@ This is the primary reference document for building Monocle. Read it at the star
 **Active Milestone:** M5 — File Watcher & Re-index Queue
 **Last Completed:** M4 — Index Layer (2026-03-16)
 **Blocked By:** Nothing
-**Session Notes:** M4 fully executed: `monocle/index/base.py` (`IndexLayer` ABC + `DimensionMismatch`); `monocle/index/memory.py` (`MemoryIndex` — dict-backed, substring search, no embeddings, tests-only); `monocle/index/chroma.py` (`ChromaIndex` wrapping `chromadb.PersistentClient`, cosine HNSW collection, dimension validation on startup, OTel `index.search_duration` + `index.upsert_duration` histograms); `monocle/index/__init__.py` (`get_index(settings)` factory). Tests use a pure-Python `_FakeChromaClient`/`_FakeCollection` (injected via `monkeypatch.setattr`) to work around a ChromaDB Rust-backend access-violation on this Windows environment; the fake correctly exercises all ChromaIndex logic (dimension mismatch, filtering, delete, stats). Created `.python-version` pinning to Python 3.12 (ChromaDB Rust bindings crash on Python 3.14). **All 179 tests passing** (136 M1–M3 + 43 M4), EXIT 0.
+**Session Notes:** M4 fully executed: `monocle/index/base.py` (`IndexLayer` ABC + `DimensionMismatch`); `monocle/index/memory.py` (`MemoryIndex` — dict-backed, substring search, no embeddings, tests-only); `monocle/index/chroma.py` (`ChromaIndex` wrapping `chromadb.PersistentClient`, cosine HNSW collection, dimension validation on startup, OTel `index.search_duration` + `index.upsert_duration` histograms); `monocle/index/__init__.py` (`get_index(settings)` factory). Tests use a pure-Python `_FakeChromaClient`/`_FakeCollection` (injected via `monkeypatch.setattr`) for isolation; the fake correctly exercises all ChromaIndex logic (dimension mismatch, filtering, delete, stats). SPIKE-4 resolved 2026-03-17 — ChromaDB 1.5.5 Rust backend passes full smoke test on Python 3.14.3; `.python-version` updated to 3.14. **All 195 tests passing** on Python 3.14.3, EXIT 0.
 
 ---
 
@@ -153,33 +153,15 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 
 ### SPIKE-4: ChromaDB Rust backend crash on Python 3.14 (Windows)
 
-**Resolve by:** Any milestone that upgrades `chromadb` or moves off Python 3.12
-**Hypothesis:** ChromaDB 1.5.5 ships its Rust extension (`chromadb_rust_bindings.pyd`) as a `cp39-abi3` stable-ABI wheel that declares Python 3.14 compatibility in metadata but crashes at runtime with a fatal access violation (`0xC0000005`) on any write operation (`add`, `upsert`) on Windows.
-**Root cause (observed):** The Rust extension uses the CPython stable ABI (`abi3`), but makes assumptions about internal CPython object layouts that changed in CPython 3.14. Because metadata says compatible, uv/pip install it on 3.14 without warning; the crash is only discovered at runtime.
-**Validation performed (2026-03-16):**
-- Crash confirmed on `chromadb==1.5.5`, `cpython-3.14.3-windows-x86_64` — any call to `coll.add()` or `coll.upsert()` exits with code `3221225477` (access violation).
-- `Requires-Python` metadata check shows **no declared incompatibility** — ChromaDB advertises 3.14 support it does not deliver.
-- No open GitHub issues found in `chroma-core/chroma` for this specific crash as of 2026-03-16.
-- Confirmed **not present** on Python 3.12.12 — crash is version-specific.
-- Other native extensions in the stack (grpcio, mmh3, tiktoken, etc.) are unaffected; they use per-minor-version wheels rather than the stable ABI shortcut.
-**Current workaround:**
-- `.python-version` file pins project to Python 3.12.
-- `monocle/tests/test_index.py` uses a pure-Python `_FakeChromaClient`/`_FakeCollection` (injected via `pytest` `monkeypatch`) to exercise all `ChromaIndex` logic without invoking the Rust backend. This makes the test suite environment-independent.
-**Status:** WORKAROUND IN PLACE — production `ChromaIndex` path is unaffected (PersistentClient is only instantiated by the running server, not during tests).
-**Outcome:** *(fill in when resolved: which chromadb version fixed it, whether .python-version pin and fake client can be removed)*
-**Revisit trigger:** Any of: (1) `chromadb` version bump in `pyproject.toml`, (2) CPython 3.14 stable release + ecosystem catch-up, (3) ChromaDB upstream fix confirmed in release notes.
-**To re-validate:** Remove `.python-version`, run `uv sync`, then run:
-```bash
-uv run python -c "
-import chromadb, tempfile
-client = chromadb.PersistentClient(path=tempfile.mkdtemp())
-coll = client.create_collection('smoke')
-coll.upsert(ids=['a'], embeddings=[[1.0,0.0,0.0]], documents=['test'], metadatas=[{'file_path':'a.md'}])
-print('PASS — Rust backend is working')
-"
-uv run python -m pytest monocle/tests/test_index.py --tb=short -q
-```
-If both pass, replace `_FakeChromaClient` in `test_index.py` with a real `PersistentClient` (tmp_path) and remove the `.python-version` pin.
+**Status: RESOLVED — 2026-03-17**
+
+**Original hypothesis:** ChromaDB 1.5.5 Rust extension crashes at runtime on Python 3.14 (Windows) with access violation `0xC0000005` on any `upsert`/`add` call.
+**Crash observed:** 2026-03-16 on `chromadb==1.5.5`, `cpython-3.14.3`.
+**Resolution (2026-03-17):** Re-tested on same chromadb==1.5.5, cpython-3.14.3. Rust `PersistentClient` now passes full smoke test (upsert, count, query, delete). All 195 tests pass. The crash may have been a transient environment issue or a silent re-release of the chromadb 1.5.5 wheel.
+- Investigated `chroma-core/chroma` issue [#5937](https://github.com/chroma-core/chroma/issues/5937) — a related `SegmentAPI` workaround was identified, but the Rust backend passes without it.
+- `.python-version` updated from `3.12` → `3.14`.
+- `_FakeChromaClient` retained in `test_index.py` for test isolation (no real I/O in unit tests); not required as a crash workaround.
+**If the crash reappears:** Use `SegmentAPI` fallback: `chromadb.Client(Settings(chroma_api_impl="chromadb.api.segment.SegmentAPI", is_persistent=True, persist_directory=path))`.
 
 ---
 
