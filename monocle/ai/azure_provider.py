@@ -83,6 +83,7 @@ class AzureOpenAIProvider(AIProvider):
         meter = get_meter("monocle.ai")
         self._embed_hist = meter.create_histogram("ai.embed_duration", unit="ms")
         self._chat_hist = meter.create_histogram("ai.chat_duration", unit="ms")
+        self._transcribe_hist = meter.create_histogram("ai.transcribe_duration", unit="ms")
 
     # ------------------------------------------------------------------
     # AIProvider implementation

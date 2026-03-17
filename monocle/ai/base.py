@@ -189,7 +189,12 @@ class AIProvider(ABC):
                 "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess' in config.yaml, "
                 "or start a whisper.cpp server and set ai.transcribe_url."
             )
-        return await self._transcription_provider.transcribe(audio_bytes, mime_type)  # type: ignore[attr-defined]
+        from monocle.telemetry import span, timed
+
+        attrs = {"ai.provider": self._provider_name}
+        async with span("ai.transcribe", **attrs):
+            async with timed(self._transcribe_hist, **{"provider": self._provider_name}):
+                return await self._transcription_provider.transcribe(audio_bytes, mime_type)  # type: ignore[attr-defined]
 
     # ------------------------------------------------------------------
     # Concrete helper (shared across all providers)

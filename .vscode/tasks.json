@@ -96,16 +96,11 @@
     },
     {
       // Start a local whisper.cpp HTTP server for transcription.
-      // Prerequisites:
-      //   1. Build whisper.cpp: https://github.com/ggerganov/whisper.cpp
-      //   2. Download a GGUF model, e.g. ggml-base.en.bin
-      //   3. Set WHISPER_CPP_SERVER env var to the server binary path, or
-      //      place the binary at tools/whisper-server (tools/whisper-server.exe on Windows).
-      //   4. Set WHISPER_CPP_MODEL env var to the .bin model path.
-      // Then set  ai.transcribe_backend: whisper_cpp  in config.yaml.
+      // Prerequisites and usage: see scripts/start_whisper_server.py
+      // Override binary/model paths via WHISPER_CPP_SERVER / WHISPER_CPP_MODEL env vars.
       "label": "whisper.cpp: start server",
       "type": "shell",
-      "command": "& \"${env:WHISPER_CPP_SERVER:=${workspaceFolder}/tools/whisper-server.exe}\" --model \"${env:WHISPER_CPP_MODEL:=${workspaceFolder}/tools/models/ggml-base.en.bin}\" --host 127.0.0.1 --port 9000",
+      "command": "uv run python scripts/start_whisper_server.py",
       "isBackground": true,
       "group": "build",
       "presentation": { "reveal": "always", "panel": "dedicated" },

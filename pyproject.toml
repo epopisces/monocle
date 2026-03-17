@@ -58,7 +58,7 @@ packages = ["monocle"]
 [tool.pytest.ini_options]
 testpaths = ["monocle/tests"]
 asyncio_mode = "auto"
-addopts = "-m 'not integration'"
+addopts = ["-m", "not integration"]
 markers = [
     "integration: marks tests as requiring a live external service (deselect with '-m not integration')",
 ]
