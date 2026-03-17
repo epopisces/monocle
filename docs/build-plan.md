@@ -575,7 +575,7 @@ tests/e2e/            Playwright tests (require running server)
 - [x] `monocle/index/__init__.py` — `get_index(settings) -> IndexLayer` factory
 - [x] `monocle/tests/test_index.py` — parametrized tests (`@pytest.mark.parametrize`) against both `MemoryIndex` and `ChromaIndex` (real ChromaIndex via fake in-memory ChromaDB client)
 - [x] Extend `.vscode/tasks.json`:
-  - `test: index` — `python -m pytest monocle/tests/test_index.py -x --tb=short -q`
+  - `test: index` — `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q`
 
 **Acceptance Criteria:**
 - [x] `MemoryIndex` and `ChromaIndex` both pass identical parametrized test cases
