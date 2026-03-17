@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-16
-active-milestone: M4
+last-updated: 2026-03-17
+active-milestone: M6
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,10 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M5 — File Watcher & Re-index Queue
-**Last Completed:** M4 — Index Layer (2026-03-17)
+**Active Milestone:** M6 — AI Provider Abstraction
+**Last Completed:** M5 — File Watcher & Re-index Queue (2026-03-17)
 **Blocked By:** Nothing
-**Session Notes:** M4 fully executed: `monocle/index/base.py` (`IndexLayer` ABC + `DimensionMismatch`); `monocle/index/memory.py` (`MemoryIndex` — dict-backed, substring search, no embeddings, tests-only); `monocle/index/chroma.py` (`ChromaIndex` wrapping `chromadb.PersistentClient`, cosine HNSW collection, dimension validation on startup, OTel `index.search_duration` + `index.upsert_duration` histograms); `monocle/index/__init__.py` (`get_index(settings)` factory). Tests use a pure-Python `_FakeChromaClient`/`_FakeCollection` (injected via `monkeypatch.setattr`) for isolation; the fake correctly exercises all ChromaIndex logic (dimension mismatch, filtering, delete, stats). SPIKE-4 resolved 2026-03-17 — ChromaDB 1.5.5 Rust backend passes full smoke test on Python 3.14.3; `.python-version` updated to 3.14. **All 195 tests passing** on Python 3.14.3, EXIT 0.
+**Session Notes:** M5 fully executed: `monocle/ingest/chunker.py` (`chunk_text()` via tiktoken cl100k_base, 512-token chunks, 64-token overlap); `monocle/watcher.py` (`ReindexQueue` — asyncio-based per-file coalescing queue with 10-second idle window, thread-safe `push()` via `call_soon_threadsafe`; `InboxWatcher` — watchdog.Observer non-recursive on inbox dir, 2-second per-file debounce via threading.Timer, `_InboxEventHandler` with dynamic watchdog base-class inheritance, `.error.md` sidecar on failure); `monocle/agents/reindex.py` (`ReindexAgent` — stale detection via `get_file_timestamps()`, `run(vault, index, force=False)`, `startup_check(vault, index)`, `health_status` attribute); `monocle/agents/scheduler.py` (`MonocleScheduler` wrapping `AsyncIOScheduler`, `add_cron_job()` from 5-field cron string); `monocle/index/base.py`, `memory.py`, `chroma.py` extended with `get_file_timestamps() -> dict[str, str]`; `monocle/main.py` lifespan wired with VaultLayer, IndexLayer, ReindexQueue, ReindexAgent, MonocleScheduler, InboxWatcher, and startup_check. Post-M5 code review resolved 14 issues: timestamp Z/+00:00 normalisation (`_normalise_ts()`), `.error.md` exclusion from `_collect_md_files()`, `status()` timer-lock race, ReindexQueue callback exception logging, `MonocleScheduler` typo rename (alias retained), symlink traversal guard in `_collect_md_files()`, YAML injection fix in `_write_error_sidecar()`, `push()` trust-boundary doc, tiktoken encoder caching; 21 new tests in `test_scheduler.py` + additions to `test_watcher.py` and `test_reindex.py`; pinned `apscheduler<4`. Second-pass review resolved 4 more issues: `.error.md` cascade dispatch filter, vault-relative hidden-dir guard in `_collect_md_files()`, per-note try/except in `ReindexAgent.run()`, `os.path.basename` dedup; 4 more tests added. Post-review hardening: `_fire()` shutdown-race (loop.is_running() guard + RuntimeError TOCTOU catch + coroutine close) and unobserved-Future fix (`_log_future_exception` done-callback); 5 more tests. `ReindexQueue.stop()` now gathers cancelled tasks to completion (no pending-task teardown warnings); 1 more test. `ChromaIndex.get_file_timestamps()` now pages through chunks in batches of 1 000 (`_GET_PAGE_SIZE`) instead of one unbounded `collection.get()`; fake updated; 2 pagination tests. `_reindex_note()` now returns `bool` (`True`=chunks upserted, `False`=empty body); `run()` gates `reindexed += 1` on the return value so empty-body notes (chunk-deleted but nothing written) no longer inflate the count; 1 new test. `_collect_md_files()` hidden-dir check narrowed to `rel_parts[:-1]` so dotfiles (e.g. `.frontmatter.md`) are no longer silently excluded — only hidden *directory* components are filtered; docstring updated; 1 new test. Staleness comparison fix: skip condition now requires `note_updated` to be non-empty so notes without an `updated` frontmatter field are always re-indexed rather than frozen in the index; 1 new test. `InboxWatcher` now accepts `debounce_s` constructor arg; `main.py` passes `cfg.vault.debounce_ms / 1000` eliminating drift between the class constant and `vault.debounce_ms` config; 2 new tests. `ReindexAgent.run()` now guards against `embed_fn=None` + non-memory backend at the top of `run()`: if `get_stats().backend != "memory"` and no `embed_fn`, it logs a WARNING and returns 0 immediately — preventing the delete-before-upsert wipe cycle that would silently destroy all indexed chunks on every startup_check/scheduled run until M6 wires a real AIProvider. `_reindex_note()` reordered to **prepare-then-swap**: all chunks are built (and embedded) before `delete_file()` is called, so if chunk preparation fails the existing index data is preserved; `main.py` `ReindexAgent()` call annotated with TODO comment for M6 embed_fn wiring; 4 new tests in `TestReindexAgentEmbedGuard`. `main.py` lifespan now respects `cfg.vault.watch`: `InboxWatcher` creation, `start()`, and `stop()` are all gated behind `if cfg.vault.watch`; when disabled a `[WATCHER]` INFO log is emitted and `app.state.watcher` is set to `None`; shutdown guard changed to `if watcher is not None`. No new tests needed (covered by existing watcher tests and API lifecycle tests). **All 275 tests passing** on Python 3.14.3, EXIT 0.
 
 ---
 
@@ -91,7 +91,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M2 | API Skeleton — all route stubs + OpenAPI | COMPLETE |
 | M3 | Vault Layer | COMPLETE |
 | M4 | Index Layer (ChromaDB + MemoryIndex) | COMPLETE |
-| M5 | File Watcher & Re-index Queue | NOT STARTED |
+| M5 | File Watcher & Re-index Queue | COMPLETE |
 | M6 | AI Provider Abstraction | NOT STARTED |
 | M7 | Ingest Pipeline & Plugin Registry | NOT STARTED |
 | M8 | REST API Wiring — Core | NOT STARTED |
@@ -591,8 +591,8 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** Inbox file watcher integration (Phase 1: async task in unified process), scheduled full-vault re-indexing, chunk utility, and foundation for optional standalone processes in Phase 3.
 
 **Deliverables:**
-- [ ] `monocle/ingest/chunker.py` — `chunk_text(text, chunk_size=512, overlap=64) -> list[str]` using `tiktoken cl100k_base`
-- [ ] `monocle/watcher.py` — `InboxWatcher` class + `ReindexQueue`:
+- [x] `monocle/ingest/chunker.py` — `chunk_text(text, chunk_size=512, overlap=64) -> list[str]` using `tiktoken cl100k_base`
+- [x] `monocle/watcher.py` — `InboxWatcher` class + `ReindexQueue`:
   - `watchdog.Observer` on `vault/inbox/` only (not recursive into subdirs)
   - 2-second debounce per file path *(inbox watcher context only — prevents double-trigger on multi-write saves to the inbox; distinct from the editor-save coalescing idle window, which is 10 seconds per file and is wired into PUT/PATCH routes in M8 per FR-WTCH-04a)*
   - On new file: calls `IngestPipeline.run(request)` directly (in-process for testability and dev mode)
@@ -602,29 +602,29 @@ tests/e2e/            Playwright tests (require running server)
   - On failure: writes `.error.md` sidecar alongside the source file
   - `start()` / `stop()` / `status() -> dict` interface designed for future ProcessManager (currently unused in Phase 1)
   - `ReindexQueue` — asyncio-based per-file coalescing queue; `push(file_path)` schedules a background re-index with a 10-second idle window per file (multiple pushes for the same file within the window collapse into one re-index job); used by PUT/PATCH route handlers (M8) and the ingest pipeline (M7)
-- [ ] `monocle/agents/reindex.py` — `ReindexAgent`:
+- [x] `monocle/agents/reindex.py` — `ReindexAgent`:
   - `run(vault, index, force=False)` — scans all `.md` files in vault; compares frontmatter `updated` to ChromaDB `updated_at` metadata; re-embeds only changed files (`force` clears all first)
   - `startup_check(vault, index)` — triggers full re-index if `index.get_stats().total_chunks == 0` and vault has notes; sets `health.status = "indexing"` during this
-- [ ] `monocle/agents/scheduler.py` — APScheduler setup for scheduled tasks (Phase 1: integrated in main process lifespan)
-- [ ] `monocle/tests/test_watcher.py` — mock filesystem events; verify:
+- [x] `monocle/agents/scheduler.py` — APScheduler setup for scheduled tasks (Phase 1: integrated in main process lifespan)
+- [x] `monocle/tests/test_watcher.py` — mock filesystem events; verify:
   - New file in inbox triggers exactly one ingest call (with 2s debounce)
   - Failed ingest writes `.error.md` sidecar
   - Files outside inbox (e.g., `vault/people/`) do NOT trigger the watcher
-- [ ] `monocle/tests/test_reindex.py` — mock vault + `MemoryIndex`; assert stale-detection logic and `--force` full re-index
-- [ ] Extend `.vscode/tasks.json`:
+- [x] `monocle/tests/test_reindex.py` — mock vault + `MemoryIndex`; assert stale-detection logic and `--force` full re-index
+- [x] Extend `.vscode/tasks.json`:
   - `test: watcher` — `python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q`
 
 **Acceptance Criteria:**
-- [ ] Creating a `.md` file in `vault/inbox/` triggers exactly one ingest call (two rapid saves = one call)
-- [ ] `ReindexQueue.push(path)` called multiple times for the same `file_path` within the 10-second idle window results in exactly one background re-index job (coalescing verified via mock)
-- [ ] A failed ingest leaves a `.error.md` sidecar adjacent to the source file
-- [ ] Files in `vault/people/`, `vault/work/` (outside inbox) produce no watcher events
-- [ ] Watcher integration in main process: log prefixed `[WATCHER]`; stops cleanly on app shutdown
-- [ ] `ReindexAgent.run()` only re-embeds notes where frontmatter `updated` > ChromaDB `updated_at`
-- [ ] `ReindexAgent.run(force=True)` re-embeds all notes regardless
-- [ ] `startup_check` triggers full re-index when index is empty; health reports `"indexing"`
-- [ ] APScheduler runs weekly_summary and re-index crons; scheduled tasks execution is logged
-- [ ] `uv run python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q` passes
+- [x] Creating a `.md` file in `vault/inbox/` triggers exactly one ingest call (two rapid saves = one call)
+- [x] `ReindexQueue.push(path)` called multiple times for the same `file_path` within the 10-second idle window results in exactly one background re-index job (coalescing verified via mock)
+- [x] A failed ingest leaves a `.error.md` sidecar adjacent to the source file
+- [x] Files in `vault/people/`, `vault/work/` (outside inbox) produce no watcher events
+- [x] Watcher integration in main process: log prefixed `[WATCHER]`; stops cleanly on app shutdown
+- [x] `ReindexAgent.run()` only re-embeds notes where frontmatter `updated` > ChromaDB `updated_at`
+- [x] `ReindexAgent.run(force=True)` re-embeds all notes regardless
+- [x] `startup_check` triggers full re-index when index is empty; health reports `"indexing"`
+- [x] APScheduler runs weekly_summary and re-index crons; scheduled tasks execution is logged
+- [x] `uv run python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q` passes
 
 ---
 

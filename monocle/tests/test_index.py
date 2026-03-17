@@ -80,11 +80,21 @@ class _FakeCollection:
             for id_ in to_delete:
                 del self._store[id_]
 
-    def get(self, include: list[str] | None = None) -> dict:
+    def get(
+        self,
+        include: list[str] | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+    ) -> dict:
+        items = list(self._store.items())
+        start = offset or 0
+        items = items[start:]
+        if limit is not None:
+            items = items[:limit]
         return {
-            "ids": list(self._store.keys()),
-            "metadatas": [item["metadata"] for item in self._store.values()],
-            "documents": [item["document"] for item in self._store.values()],
+            "ids": [id_ for id_, _ in items],
+            "metadatas": [item["metadata"] for _, item in items],
+            "documents": [item["document"] for _, item in items],
         }
 
     def query(
@@ -505,6 +515,76 @@ def test_memory_index_query_text_is_case_insensitive():
     idx.upsert_chunks([_chunk("x.md::0", "x.md", "Hello World")])
     results = idx.search([], query_text="hello world")
     assert len(results) == 1
+
+
+# ---------------------------------------------------------------------------
+# ChromaIndex.get_file_timestamps() pagination
+# ---------------------------------------------------------------------------
+
+
+class TestChromaIndexGetFileTimestampsPagination:
+    """get_file_timestamps() must page through results so peak memory is
+    bounded by _GET_PAGE_SIZE rather than total collection size.
+    """
+
+    def _make_chunks_for_files(
+        self, n_files: int, chunks_per_file: int = 2
+    ) -> list[NoteChunk]:
+        chunks = []
+        for i in range(n_files):
+            fp = f"work/note_{i:03d}.md"
+            ts = f"2026-01-{(i % 28) + 1:02d}T12:00:00Z"
+            for j in range(chunks_per_file):
+                chunks.append(
+                    NoteChunk(
+                        chunk_id=f"{fp}::{j}",
+                        file_path=fp,
+                        chunk_index=j,
+                        text=f"content {i} chunk {j}",
+                        embedding=_E_A,
+                        metadata={"updated_at": ts},
+                    )
+                )
+        return chunks
+
+    def test_all_files_returned_across_multiple_pages(self, monkeypatch):
+        """With page_size=3 and 5 files (10 chunks), all 5 files are collected."""
+        import monocle.index.chroma as chroma_mod
+
+        original_page_size = chroma_mod._GET_PAGE_SIZE
+        monkeypatch.setattr(chroma_mod, "_GET_PAGE_SIZE", 3)
+        try:
+            idx = _make_fake_chroma_index(monkeypatch, embed_dimensions=3)
+            chunks = self._make_chunks_for_files(n_files=5, chunks_per_file=2)
+            idx.upsert_chunks(chunks)
+
+            ts = idx.get_file_timestamps()
+
+            assert len(ts) == 5, f"Expected 5 files, got {len(ts)}: {list(ts.keys())}"
+            for i in range(5):
+                fp = f"work/note_{i:03d}.md"
+                assert fp in ts, f"Missing {fp}"
+        finally:
+            monkeypatch.setattr(chroma_mod, "_GET_PAGE_SIZE", original_page_size)
+
+    def test_exact_page_boundary_returns_all_files(self, monkeypatch):
+        """Edge case: chunk count exactly equals page_size still loops correctly."""
+        import monocle.index.chroma as chroma_mod
+
+        original_page_size = chroma_mod._GET_PAGE_SIZE
+        # 4 files × 1 chunk = 4 chunks; page size = 4 → first page full, needs
+        # a second empty page to confirm exhaustion.
+        monkeypatch.setattr(chroma_mod, "_GET_PAGE_SIZE", 4)
+        try:
+            idx = _make_fake_chroma_index(monkeypatch, embed_dimensions=3)
+            chunks = self._make_chunks_for_files(n_files=4, chunks_per_file=1)
+            idx.upsert_chunks(chunks)
+
+            ts = idx.get_file_timestamps()
+
+            assert len(ts) == 4, f"Expected 4 files, got {len(ts)}"
+        finally:
+            monkeypatch.setattr(chroma_mod, "_GET_PAGE_SIZE", original_page_size)
 
 
 def test_memory_index_no_query_text_returns_all():

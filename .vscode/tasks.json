@@ -67,6 +67,14 @@
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
+    },
+    {
+      "label": "test: watcher",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
     }
   ]
 }

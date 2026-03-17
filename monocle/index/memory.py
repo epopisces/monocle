@@ -93,6 +93,15 @@ class MemoryIndex(IndexLayer):
         self._chunks.clear()
         logger.debug("MemoryIndex.delete_all: index cleared")
 
+    def get_file_timestamps(self) -> dict[str, str]:
+        result: dict[str, str] = {}
+        for chunk in self._chunks.values():
+            if chunk.file_path not in result:
+                ts = chunk.metadata.get("updated_at")
+                if ts:
+                    result[chunk.file_path] = str(ts)
+        return result
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

@@ -58,3 +58,15 @@ class IndexLayer(ABC):
     @abstractmethod
     def delete_all(self) -> None:
         """Wipe the entire index (all chunks for all files)."""
+
+    @abstractmethod
+    def get_file_timestamps(self) -> dict[str, str]:
+        """Return a mapping of ``{file_path: updated_at}`` for every indexed file.
+
+        ``updated_at`` is the ISO-8601 string stored in chunk metadata during
+        upsert (key ``"updated_at"``).  Files that have no ``updated_at`` in
+        their chunk metadata are omitted.
+
+        Used by :class:`~monocle.agents.reindex.ReindexAgent` to detect which
+        vault files have changed since they were last indexed.
+        """
