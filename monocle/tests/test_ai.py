@@ -603,13 +603,44 @@ class TestNativeOpenAITranscriptionProvider:
         assert call_kwargs["model"] == "whisper-1"
 
 
+class TestAIConfigValidation:
+    """Tests for AIConfig model-validator logic."""
+
+    def test_ollama_native_explicit_raises(self):
+        """Explicitly setting native+ollama must fail at config construction time."""
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError, match="native.*ollama|ollama.*native"):
+            _make_settings(ai={"provider": "ollama", "transcribe_backend": "native"})
+
+    def test_ollama_default_gets_subprocess(self):
+        """When provider=ollama and transcribe_backend is omitted, default is 'subprocess'."""
+        settings = _make_settings(ai={"provider": "ollama"})
+        assert settings.ai.transcribe_backend == "subprocess"
+
+    def test_foundry_local_native_valid(self):
+        """provider=foundry_local with transcribe_backend=native is allowed."""
+        settings = _make_settings(ai={"provider": "foundry_local", "transcribe_backend": "native"})
+        assert settings.ai.transcribe_backend == "native"
+
+    def test_ollama_whisper_cpp_valid(self):
+        settings = _make_settings(ai={"provider": "ollama", "transcribe_backend": "whisper_cpp"})
+        assert settings.ai.transcribe_backend == "whisper_cpp"
+
+    def test_ollama_subprocess_valid(self):
+        settings = _make_settings(ai={"provider": "ollama", "transcribe_backend": "subprocess"})
+        assert settings.ai.transcribe_backend == "subprocess"
+
+
 class TestGetTranscriptionProvider:
     """Tests for the get_transcription_provider factory."""
 
     def test_native_returns_none(self):
         from monocle.ai.transcription import get_transcription_provider
 
-        settings = _make_settings(ai={"provider": "ollama", "transcribe_backend": "native"})
+        # "native" is valid with foundry_local / azure (they have a built-in endpoint).
+        settings = _make_settings(ai={"provider": "foundry_local", "transcribe_backend": "native"})
         result = get_transcription_provider(settings)
         assert result is None
 
@@ -646,7 +677,7 @@ class TestGetTranscriptionProvider:
         from monocle.ai.transcription import get_transcription_provider
 
         settings = _make_settings(
-            ai={"provider": "ollama", "transcribe_backend": "native"}
+            ai={"provider": "foundry_local", "transcribe_backend": "native"}
         )
         # Monkeypatch the backend value to an unknown string
         settings.ai.transcribe_backend = "invalid_backend"  # type: ignore[assignment]

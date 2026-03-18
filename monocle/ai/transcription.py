@@ -211,7 +211,8 @@ class SubprocessTranscriptionProvider(TranscriptionProvider):
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str) -> str:
         ext = _EXT_MAP.get(mime_type, ".webm")
-        return await asyncio.get_event_loop().run_in_executor(
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
             None, _run_whisper_subprocess, audio_bytes, ext, self._model
         )
 
