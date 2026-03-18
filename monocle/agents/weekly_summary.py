@@ -233,7 +233,7 @@ class WeeklySummaryAgent:
             "[AGENT] Weekly summary: %d notes found for domain=%s", len(notes), domain
         )
 
-        # Step 2 — build note text summaries (title + first 200 chars of body)
+        # Step 2 — build note text summaries (title + first 300 chars of body)
         note_summaries = [self._note_summary(n) for n in notes]
 
         # Step 3 — attempt clustering or fallback
