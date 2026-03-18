@@ -1,12 +1,51 @@
-"""monocle/routers/graph.py — Knowledge graph endpoint (stub)."""
-from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+"""monocle/routers/graph.py — Knowledge graph endpoint."""
+from __future__ import annotations
+
+import asyncio
+import logging
+from typing import Annotated
+
+from fastapi import APIRouter, Query, Request
+
+from monocle.models import GraphData
 
 router = APIRouter(tags=["graph"])
+logger = logging.getLogger(__name__)
 
-_501 = JSONResponse(status_code=501, content={"detail": "Not implemented"})
 
+@router.get("/graph", response_model=GraphData)
+async def get_graph(
+    request: Request,
+    focus: str | None = Query(None, description="Vault-relative path of the focal note"),
+    max_degree: int = Query(3, ge=1, le=6, description="Max BFS hops from focus"),
+    types: Annotated[list[str] | None, Query()] = None,
+    n: int = Query(500, ge=1, le=2000, description="Max notes to include"),
+) -> GraphData:
+    """Return the knowledge graph, optionally centred on a focal note.
 
-@router.get("/graph")
-async def get_graph():
-    return _501
+    - **focus** — vault-relative path (e.g. ``people/sarah.md``).  When
+      omitted, the full-vault graph is returned.
+    - **max_degree** — maximum BFS distance from the focus node (default 3).
+    - **types** — note type filter.  Repeat the parameter for multiple values
+      (e.g. ``?types=person_note&types=meeting_note``).  A single value may
+      also contain comma-separated types (e.g. ``?types=person_note,meeting_note``).
+      When omitted all types are included.
+    - **n** — maximum number of vault notes considered (default 500).
+    """
+    graph_builder = request.app.state.graph_builder
+
+    # Normalise types: each Query value may itself be a comma-separated string
+    # (e.g. ?types=person_note,meeting_note), so split and flatten.
+    resolved_types: list[str] | None = None
+    if types:
+        resolved_types = [t.strip() for raw in types for t in raw.split(",") if t.strip()]
+        if not resolved_types:
+            resolved_types = None
+
+    return await asyncio.to_thread(
+        graph_builder.build,
+        focus=focus,
+        max_degree=max_degree,
+        types=resolved_types,
+        n=n,
+    )

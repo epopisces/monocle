@@ -510,8 +510,6 @@ class TestStats:
 # ===========================================================================
 
 STILL_STUB_ROUTES: list[tuple[str, str]] = [
-    # graph
-    ("GET", "/api/graph"),
     # chat
     ("POST", "/api/chat"),
     # agents
