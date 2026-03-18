@@ -258,7 +258,6 @@ class TestDuplicateDetection:
             metadata={"created": "2099-01-01T00:00:00+00:00"},
         )
 
-        original_search = index.search
         def _mocked_search(*a, **kw):
             return [high_score_chunk]
 
