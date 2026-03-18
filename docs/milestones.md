@@ -14,17 +14,26 @@ This document archives full details for completed milestones (M1–M11) and reso
 ## Table of Contents
 
 ### Completed Milestones
-- [M1: Foundation & Project Skeleton](#m1-foundation--project-skeleton)
-- [M2: API Skeleton — All Route Stubs + OpenAPI](#m2-api-skeleton--all-route-stubs--openapi)
-- [M3: Vault Layer](#m3-vault-layer)
-- [M4: Index Layer — ChromaDB + MemoryIndex](#m4-index-layer--chromedb--memoryindex)
-- [M5: Inbox Watcher & Scheduled Re-Index](#m5-inbox-watcher--scheduled-re-index)
-- [M6: AI Provider Abstraction](#m6-ai-provider-abstraction)
-- [M7: Ingest Pipeline & Plugin Registry](#m7-ingest-pipeline--plugin-registry)
-- [M8: REST API Wiring — Core](#m8-rest-api-wiring--core)
-- [M9: Graph Layer](#m9-graph-layer)
-- [M10: Agent Framework & Chat API](#m10-agent-framework--chat-api)
-- [M11: Scheduled Agents](#m11-scheduled-agents)
+- [Monocle — Completed Milestones \& Technical Spike Resolutions](#monocle--completed-milestones--technical-spike-resolutions)
+  - [Table of Contents](#table-of-contents)
+    - [Completed Milestones](#completed-milestones)
+    - [Resolved Technical Spikes](#resolved-technical-spikes)
+  - [Completed Milestones](#completed-milestones-1)
+    - [M1: Foundation \& Project Skeleton](#m1-foundation--project-skeleton)
+    - [M2: API Skeleton — All Route Stubs + OpenAPI](#m2-api-skeleton--all-route-stubs--openapi)
+    - [M3: Vault Layer](#m3-vault-layer)
+    - [M4: Index Layer — ChromaDB + MemoryIndex](#m4-index-layer--chromadb--memoryindex)
+    - [M5: Inbox Watcher \& Scheduled Re-Index](#m5-inbox-watcher--scheduled-re-index)
+    - [M6: AI Provider Abstraction](#m6-ai-provider-abstraction)
+    - [M7: Ingest Pipeline \& Plugin Registry](#m7-ingest-pipeline--plugin-registry)
+    - [M8: REST API Wiring — Core](#m8-rest-api-wiring--core)
+    - [M9: Graph Layer](#m9-graph-layer)
+    - [M10: Agent Framework \& Chat API](#m10-agent-framework--chat-api)
+    - [M11: Scheduled Agents](#m11-scheduled-agents)
+  - [Resolved Technical Spikes](#resolved-technical-spikes-1)
+    - [SPIKE-1: Ollama Whisper audio transcription](#spike-1-ollama-whisper-audio-transcription)
+    - [SPIKE-3: Microsoft Agent Framework SSE streaming through FastAPI](#spike-3-microsoft-agent-framework-sse-streaming-through-fastapi)
+    - [SPIKE-4: ChromaDB Rust backend crash on Python 3.14 (Windows)](#spike-4-chromadb-rust-backend-crash-on-python-314-windows)
 
 ### Resolved Technical Spikes
 - [SPIKE-1: Ollama Whisper audio transcription](#spike-1-ollama-whisper-audio-transcription)
@@ -306,15 +315,14 @@ This document archives full details for completed milestones (M1–M11) and reso
   1. Retrieve notes from vault modified in last 7 days (via `vault.list_notes`, filtering by `updated`)
   2. Optionally segment by `domain` (`agents.weekly_summary.domains` config list)
   3. Fetch pre-computed embeddings from ChromaDB via new `IndexLayer.get_embeddings_by_file()` method — no re-embedding
-  4. Build numpy matrix; cluster with scikit-learn `AgglomerativeClustering` (cosine/average linkage); n_clusters = `max(2, min(n//3, 5, 8))`
+  4. Build numpy matrix; cluster with scikit-learn `AgglomerativeClustering` (cosine/average linkage); n_clusters = `min(max(2, n//3, 5), 8)` (floor 2, target 5, cap 8)
   5. Fallback to LLM JSON grouping when batch < `_MIN_NOTES_FOR_CLUSTERING` (4) or no embeddings available (MemoryIndex)
   6. For each cluster: `AIProvider.chat` with `prompts/weekly_review.md` generates a paragraph summary
   7. Write `summaries/YYYY-WW.md` (ISO week) with `confidence: 1.0`, `review_status: approved`, `approval_mode: auto`, `approved_by: "system:weekly-summary"`
 - `IndexLayer.get_embeddings_by_file(file_paths) -> dict[str, list[float]]` added to base, ChromaIndex, MemoryIndex
   - ChromaIndex: pages through collection in batches of `_GET_PAGE_SIZE`, returns first-chunk (chunk_index=0) embedding per file
   - MemoryIndex: returns `{}` — triggers LLM fallback in weekly summary
-- `monocle/agents/scheduler.py` — weekly summary cron job wired from `agents.weekly_summary.cron` (default `"0 17 * * 5"`); replaces M5 stub
-- `monocle/main.py` — weekly summary job fully registered in lifespan; `app.state.weekly_summary_agent` set
+- `monocle/main.py` — weekly summary cron job registered in lifespan from `agents.weekly_summary.cron` config (default `"0 17 * * 5"`); `WeeklySummaryAgent` instance stored in `app.state.weekly_summary_agent`
 - `routers/agents.py` — `POST /api/agents/weekly-summary` (SSE streaming, emits `start`/`done`/`error`); `POST /api/agents/reindex` (202 + BackgroundTasks)
 - `monocle/tests/test_scheduler.py` — 12 new tests (24 total): `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests)
 - `.vscode/tasks.json` — `test: scheduler` task added
