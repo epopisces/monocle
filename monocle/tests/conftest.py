@@ -238,6 +238,9 @@ def api_client(tmp_path: Path, mock_ai):
         app.state.failed_registry = failed_reg
         app.state.watcher = None
 
+        from monocle.graph import GraphBuilder
+        app.state.graph_builder = GraphBuilder(vault)
+
         yield
 
         await rq.stop()

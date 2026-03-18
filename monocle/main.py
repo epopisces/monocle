@@ -77,6 +77,14 @@ async def lifespan(app: FastAPI):
     app.state.settings = cfg
 
     # ------------------------------------------------------------------
+    # Graph builder (in-memory cache; invalidated on any vault file change)
+    # ------------------------------------------------------------------
+    from monocle.graph import GraphBuilder
+
+    graph_builder = GraphBuilder(vault)
+    app.state.graph_builder = graph_builder
+
+    # ------------------------------------------------------------------
     # AI Provider
     # ------------------------------------------------------------------
     from monocle.ai import get_provider
@@ -105,6 +113,9 @@ async def lifespan(app: FastAPI):
         from monocle.ingest.chunker import chunk_text
 
         logger.debug("[API] ReindexQueue: re-indexing %s", file_path)
+        # Always invalidate the graph cache when a vault file changes,
+        # regardless of whether re-indexing succeeds or the file is gone.
+        graph_builder.invalidate()
         try:
             note = await asyncio.to_thread(vault.read_note, file_path)
         except Exception:
