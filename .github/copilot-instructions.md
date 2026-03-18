@@ -12,7 +12,17 @@
 ## Session Housekeeping (required)
 
 1. **Update `docs/build-plan.md`** — mark each deliverable `[x]` as completed; update `## Current Status` and `## Milestone Tracker` when a milestone finishes. Never mark a deliverable complete without running the appropriate test command first.
-2. **Append to `GHI-ACTION-LOG.md`** (project root) — under a `## YYYY-MM-DD – <Model Name>` heading, summarize meaningful action taken (files created/modified, decisions made, milestones completed). Use a new heading per calendar day and subheading per model.  Like actions on the same day by the same model can be summarized together. Example:
+
+2. **Archive completed milestone details** — When a milestone is complete, **do not add verbose details to `docs/build-plan.md`**. Instead:
+   - Add complete milestone details (all deliverables, acceptance criteria, implementation notes) to `docs/milestones.md` under a new `### M{N}: Title` section
+   - Replace the verbose section in `docs/build-plan.md` with a brief **4-line summary** containing:
+     - `**Status:** COMPLETE ({date})`
+     - 1–2 sentence summary of goal and scope
+     - Link to full details: `**Full details:** [docs/milestones.md#{anchor}](milestones.md#{anchor})`
+   - Similarly, archive resolved spike details to the `## Resolved Spikes` section of `docs/milestones.md` and replace in `docs/build-plan.md` with condensed pointer
+   - **Rationale:** Keeps `docs/build-plan.md` lean (navigable in one session) while preserving full historical details for future reference
+
+3. **Append to `GHI-ACTION-LOG.md`** (project root) — under a `## YYYY-MM-DD – <Model Name>` heading, summarize meaningful action taken (files created/modified, decisions made, milestones completed). Use a new heading per calendar day and subheading per model.  Like actions on the same day by the same model can be summarized together. Example:
    ```markdown
    ## 2026-03-15 
    ### Claude Sonnet 4.6

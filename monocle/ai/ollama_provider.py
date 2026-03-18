@@ -13,6 +13,7 @@ Transcription:
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -114,6 +115,7 @@ class OllamaProvider(AIProvider):
         self,
         messages: list[dict],
         stream: bool = False,
+        tools: list[dict] | None = None,
     ) -> str | AsyncIterator[str]:
         """Send *messages* to the Ollama chat model."""
         attrs = {"ai.provider": self._provider_name, "ai.model": self._chat_model}
@@ -121,16 +123,33 @@ class OllamaProvider(AIProvider):
             async with span("ai.chat", **attrs):
                 async with timed(self._chat_hist, **{"provider": self._provider_name}):
                     await self._ensure_model(self._chat_model)
-                    response = await self._client.chat(
-                        model=self._chat_model,
-                        messages=messages,
-                        stream=False,
-                    )
-                    return response.message.content  # type: ignore[return-value]
+                    kwargs: dict = {"model": self._chat_model, "messages": messages, "stream": False}
+                    if tools:
+                        kwargs["tools"] = tools
+                    response = await self._client.chat(**kwargs)
+                    if response.message.tool_calls:
+                        return json.dumps({
+                            "tool_calls": [
+                                {
+                                    "id": str(i),
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": (
+                                            json.dumps(dict(tc.function.arguments))
+                                            if hasattr(tc.function.arguments, "items")
+                                            else tc.function.arguments or "{}"
+                                        ),
+                                    },
+                                }
+                                for i, tc in enumerate(response.message.tool_calls)
+                            ]
+                        })
+                    return response.message.content or ""  # type: ignore[return-value]
         else:
-            return self._stream_chat(messages)
+            return self._stream_chat(messages, tools)
 
-    async def _stream_chat(self, messages: list[dict]) -> AsyncIterator[str]:  # type: ignore[override]
+    async def _stream_chat(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[str]:  # type: ignore[override]
         await self._ensure_model(self._chat_model)
         # Use the synchronous OTel span directly — async context managers are not
         # compatible with async generator functions.
@@ -141,14 +160,36 @@ class OllamaProvider(AIProvider):
         ):
             # ollama.AsyncClient.chat() with stream=True is an async generator;
             # it must NOT be awaited — iterate directly.
-            async for chunk in self._client.chat(
-                model=self._chat_model,
-                messages=messages,
-                stream=True,
-            ):
+            chat_kwargs: dict = {"model": self._chat_model, "messages": messages, "stream": True}
+            if tools:
+                chat_kwargs["tools"] = tools
+            tool_calls_buf: list = []
+            async for chunk in self._client.chat(**chat_kwargs):
                 content = chunk.message.content
                 if content:
                     yield content
+                if chunk.message.tool_calls:
+                    tool_calls_buf.extend(chunk.message.tool_calls)
+            # Emit accumulated tool calls as a single JSON chunk (non-streaming
+            # detection via _try_parse_tool_calls in the adapter layer).
+            if tool_calls_buf:
+                yield json.dumps({
+                    "tool_calls": [
+                        {
+                            "id": str(i),
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": (
+                                    json.dumps(dict(tc.function.arguments))
+                                    if hasattr(tc.function.arguments, "items")
+                                    else tc.function.arguments or "{}"
+                                ),
+                            },
+                        }
+                        for i, tc in enumerate(tool_calls_buf)
+                    ]
+                })
 
     # transcribe() is inherited from AIProvider.transcribe() which delegates to
     # self._transcription_provider.  No override needed here.

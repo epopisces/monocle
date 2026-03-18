@@ -12,6 +12,7 @@ transcription.  Credentials are injected from ``Settings`` env fields:
 """
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING, AsyncIterator
 
@@ -116,21 +117,36 @@ class AzureOpenAIProvider(AIProvider):
         self,
         messages: list[dict],
         stream: bool = False,
+        tools: list[dict] | None = None,
     ) -> str | AsyncIterator[str]:
         attrs = {"ai.provider": self._provider_name, "ai.model": self._chat_deployment}
         if not stream:
             async with span("ai.chat", **attrs):
                 async with timed(self._chat_hist, **{"provider": self._provider_name}):
-                    response = await self._client.chat.completions.create(
-                        model=self._chat_deployment,
-                        messages=messages,  # type: ignore[arg-type]
-                        stream=False,
-                    )
-                    return response.choices[0].message.content or ""
+                    kwargs: dict = {"model": self._chat_deployment, "messages": messages, "stream": False}  # type: ignore[assignment]
+                    if tools:
+                        kwargs["tools"] = tools
+                    response = await self._client.chat.completions.create(**kwargs)
+                    message = response.choices[0].message
+                    if message.tool_calls:
+                        return json.dumps({
+                            "tool_calls": [
+                                {
+                                    "id": tc.id,
+                                    "type": "function",
+                                    "function": {
+                                        "name": tc.function.name,
+                                        "arguments": tc.function.arguments,
+                                    },
+                                }
+                                for tc in message.tool_calls
+                            ]
+                        })
+                    return message.content or ""
         else:
-            return self._stream_chat(messages)
+            return self._stream_chat(messages, tools)
 
-    async def _stream_chat(self, messages: list[dict]) -> AsyncIterator[str]:  # type: ignore[override]
+    async def _stream_chat(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[str]:  # type: ignore[override]
         # Use the synchronous OTel span directly — async context managers are not
         # compatible with async generator functions.
         with _open_span(
@@ -138,15 +154,38 @@ class AzureOpenAIProvider(AIProvider):
             provider=self._provider_name,
             model=self._chat_deployment,
         ):
-            stream = await self._client.chat.completions.create(
-                model=self._chat_deployment,
-                messages=messages,  # type: ignore[arg-type]
-                stream=True,
-            )
+            create_kwargs: dict = {"model": self._chat_deployment, "messages": messages, "stream": True}  # type: ignore[assignment]
+            if tools:
+                create_kwargs["tools"] = tools
+            stream = await self._client.chat.completions.create(**create_kwargs)
+            accumulated: dict[int, dict] = {}
             async for chunk in stream:
-                content = chunk.choices[0].delta.content
+                delta = chunk.choices[0].delta
+                content = delta.content
                 if content:
                     yield content
+                if delta.tool_calls:
+                    for tc_delta in delta.tool_calls:
+                        idx = tc_delta.index
+                        if idx not in accumulated:
+                            accumulated[idx] = {"id": "", "name": "", "args": ""}
+                        if tc_delta.id:
+                            accumulated[idx]["id"] = tc_delta.id
+                        if tc_delta.function and tc_delta.function.name:
+                            accumulated[idx]["name"] += tc_delta.function.name
+                        if tc_delta.function and tc_delta.function.arguments:
+                            accumulated[idx]["args"] += tc_delta.function.arguments
+            if accumulated:
+                yield json.dumps({
+                    "tool_calls": [
+                        {
+                            "id": v["id"],
+                            "type": "function",
+                            "function": {"name": v["name"], "arguments": v["args"]},
+                        }
+                        for v in accumulated.values()
+                    ]
+                })
 
     # transcribe() is inherited from AIProvider.transcribe() which delegates to
     # self._transcription_provider (NativeOpenAITranscriptionProvider by default).
