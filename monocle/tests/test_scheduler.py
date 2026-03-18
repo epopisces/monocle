@@ -462,6 +462,41 @@ class TestWeeklySummaryAgent:
         file_path = await agent.run(vault, index, ai, settings)
         assert file_path.startswith("summaries/")
 
+    async def test_llm_empty_groups_fallback_to_single_group(self):
+        """_llm_group_notes falls back to a single group when the model returns
+        {"groups": []} (empty list), preventing run() from raising RuntimeError."""
+        from monocle.agents.weekly_summary import _llm_group_notes
+
+        ai = AsyncMock()
+        ai.chat = AsyncMock(
+            return_value=type("R", (), {"content": '{"groups": []}'})()
+        )
+        summaries = ["Note A summary", "Note B summary", "Note C summary"]
+        result = await _llm_group_notes(ai, summaries)
+
+        assert len(result) == 1, f"Expected single fallback group, got {result}"
+        assert result[0] == summaries
+
+    async def test_llm_out_of_range_indices_fallback_to_single_group(self):
+        """_llm_group_notes falls back to a single group when every group contains
+        only out-of-range indices (all filtered to empty), rather than propagating
+        empty inner groups to _summarise_cluster."""
+        from monocle.agents.weekly_summary import _llm_group_notes
+
+        ai = AsyncMock()
+        # All indices are out of range for a 3-note list
+        ai.chat = AsyncMock(
+            return_value=type("R", (), {"content": '{"groups": [[99, 100]]}'})()
+        )
+        summaries = ["Note A summary", "Note B summary", "Note C summary"]
+        result = await _llm_group_notes(ai, summaries)
+
+        # Every returned group must be non-empty
+        assert all(len(g) > 0 for g in result), f"Empty groups found in result: {result}"
+        # Should have fallen back to single group
+        assert len(result) == 1
+        assert result[0] == summaries
+
     async def test_iso_week_label(self):
         """_iso_week_label returns YYYY-WW format."""
         from monocle.agents.weekly_summary import _iso_week_label
@@ -607,6 +642,51 @@ class TestWeeklySummaryAgent:
         assert path1 == path2, "Both runs should write to the same weekly path"
         full_path = tmp_path / path2
         assert full_path.exists(), "Summary file should exist after second run"
+
+    async def test_single_configured_domain_used_in_summary_metadata(self, tmp_path: Path):
+        """When only one domain is configured, the summary note's domain matches it."""
+        import yaml
+        from monocle.agents.weekly_summary import WeeklySummaryAgent
+        from monocle.index.memory import MemoryIndex
+
+        vault = _make_vault_with_recent_notes(tmp_path)
+        index = MemoryIndex()
+        ai = _make_mock_ai()
+        settings = _make_mock_settings()
+        settings.agents.weekly_summary.domains = ["personal"]
+        agent = WeeklySummaryAgent()
+
+        file_path = await agent.run(vault, index, ai, settings)
+
+        full_path = tmp_path / file_path
+        content = full_path.read_text(encoding="utf-8")
+        fm_text = content.split("---")[1]
+        fm = yaml.safe_load(fm_text)
+        assert fm.get("domain") == "personal", f"Expected domain='personal', got {fm.get('domain')!r}"
+
+    async def test_multi_domain_summary_uses_mixed_domain(self, tmp_path: Path):
+        """When multiple domains produce content, the summary note's domain is 'mixed'."""
+        import yaml
+        from monocle.agents.weekly_summary import WeeklySummaryAgent
+        from monocle.index.memory import MemoryIndex
+
+        vault = _make_vault_with_recent_notes(tmp_path)
+        index = MemoryIndex()
+        ai = _make_mock_ai()
+        settings = _make_mock_settings()
+        settings.agents.weekly_summary.domains = ["work", "personal"]
+        agent = WeeklySummaryAgent()
+
+        # _make_vault_with_recent_notes creates notes without a domain filter;
+        # _run_domain with domain="work" or "personal" fetches via search (MemoryIndex returns all).
+        # Both domain passes will produce content, so domain should be "mixed".
+        file_path = await agent.run(vault, index, ai, settings)
+
+        full_path = tmp_path / file_path
+        content = full_path.read_text(encoding="utf-8")
+        fm_text = content.split("---")[1]
+        fm = yaml.safe_load(fm_text)
+        assert fm.get("domain") == "mixed", f"Expected domain='mixed', got {fm.get('domain')!r}"
 
 
 # ---------------------------------------------------------------------------

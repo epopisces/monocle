@@ -109,13 +109,20 @@ async def _llm_group_notes(
             raise ValueError("No JSON object in LLM response")
         data = json.loads(match.group(0))
         groups_indices: list[list[int]] = data.get("groups", [[]])
-        # Convert to groups of summaries
+        # Convert indices to groups of summaries; skip groups that become empty
+        # after discarding out-of-range indices.
         n = len(note_summaries)
-        return [
-            [note_summaries[i - 1] for i in grp if 1 <= i <= n]
-            for grp in groups_indices
-            if grp
-        ]
+        groups: list[list[str]] = []
+        for grp in groups_indices:
+            if not grp:
+                continue
+            filtered = [note_summaries[i - 1] for i in grp if 1 <= i <= n]
+            if filtered:
+                groups.append(filtered)
+        # Guarantee at least one group — if the model returned empty/garbage
+        # groups, treat all notes as a single group rather than propagating an
+        # empty list that would cause run() to raise "No notes modified".
+        return groups if groups else [note_summaries]
     except Exception as exc:
         logger.warning("LLM grouping failed, using single group: %s", exc)
         return [note_summaries]
@@ -180,6 +187,7 @@ class WeeklySummaryAgent:
         domains: list[str | None] = settings.agents.weekly_summary.domains or [None]
 
         all_section_texts: list[str] = []
+        producing_domains: list[str] = []
 
         for domain in domains:
             section = await self._run_domain(
@@ -193,6 +201,7 @@ class WeeklySummaryAgent:
             if section:
                 if domain:
                     all_section_texts.append(f"# {domain.capitalize()} Notes\n\n{section}")
+                    producing_domains.append(domain)
                 else:
                     all_section_texts.append(section)
 
@@ -201,9 +210,10 @@ class WeeklySummaryAgent:
                 f"No notes modified in the last 7 days — skipping summary for week {week_label}"
             )
 
+        summary_domain = producing_domains[0] if len(producing_domains) == 1 else "mixed"
         body = "\n\n---\n\n".join(all_section_texts)
         file_path = await asyncio.to_thread(
-            self._write_summary, vault, week_label, now, body
+            self._write_summary, vault, week_label, now, body, summary_domain
         )
         logger.info("[AGENT] Weekly summary written: %s", file_path)
         return file_path
@@ -332,6 +342,7 @@ class WeeklySummaryAgent:
         week_label: str,
         now: datetime,
         body: str,
+        domain: str,
     ) -> str:
         """Write the summary note to the vault. Returns the vault-relative file path."""
         from monocle.models import Note, NoteMetadata
@@ -340,7 +351,7 @@ class WeeklySummaryAgent:
         metadata = NoteMetadata(
             type="weekly_summary",
             template="weekly_summary",
-            domain="work",
+            domain=domain,
             confidence=1.0,
             review_status="approved",
             approval_mode="auto",

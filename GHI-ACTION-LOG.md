@@ -367,3 +367,8 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - Updated `TestMoocleSchedulerAlias` to assert the alias is **gone** rather than equal
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **545 passed (3 new), 6 deselected**, EXIT 0
 
+- **M11 follow-up bug fixes**
+  - **Empty/invalid LLM groups**: `_llm_group_notes()` could falsely raise "No notes modified" when model returned `{"groups": []}` or all out-of-range indices. Replaced list comprehension with explicit loop + fallback guarantee (`groups if groups else [note_summaries]`). Added 2 tests: `test_llm_empty_groups_fallback_to_single_group`, `test_llm_out_of_range_indices_fallback_to_single_group`. → **29 scheduler tests**
+  - **Hardcoded domain in `_write_summary`**: Method always wrote `domain="work"` regardless of configured domains. Fixed by tracking `producing_domains` in `run()` loop, deriving `summary_domain` (single-domain pass → use it directly; multi-domain or unfiltered `None` → `"mixed"`), and passing it as a new parameter to `_write_summary`. Added 2 tests: `test_single_configured_domain_used_in_summary_metadata`, `test_multi_domain_summary_uses_mixed_domain`.
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **549 passed (4 new), 6 deselected**, EXIT 0
+
