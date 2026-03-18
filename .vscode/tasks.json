@@ -75,6 +75,45 @@
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
+    },
+    {
+      "label": "test: ai",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      // Run only the transcription provider tests (unit + integration if server is up).
+      // For integration tests pass: -m integration
+      "label": "test: transcription",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_ai.py -k transcription -x --tb=short -v",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      // Start a local whisper.cpp HTTP server for transcription.
+      // Prerequisites and usage: see scripts/start_whisper_server.py
+      // Override binary/model paths via WHISPER_CPP_SERVER / WHISPER_CPP_MODEL env vars.
+      "label": "whisper.cpp: start server",
+      "type": "shell",
+      "command": "uv run python scripts/start_whisper_server.py",
+      "isBackground": true,
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": [
+        {
+          "pattern": { "regexp": "^$" },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "whisper_print_timings",
+            "endsPattern": "listening on"
+          }
+        }
+      ]
     }
   ]
 }

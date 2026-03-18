@@ -33,6 +33,7 @@ dependencies = [
     # AI backends
     "ollama",
     "openai",
+    "httpx",  # whisper.cpp HTTP transcription provider
     # CLI
     "typer",
     # Rate limiting
@@ -57,6 +58,10 @@ packages = ["monocle"]
 [tool.pytest.ini_options]
 testpaths = ["monocle/tests"]
 asyncio_mode = "auto"
+addopts = ["-m", "not integration"]
+markers = [
+    "integration: marks tests as requiring a live external service (deselect with '-m not integration')",
+]
 
 [dependency-groups]
 dev = [

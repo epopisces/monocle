@@ -140,17 +140,36 @@ async def span(name: str, **attrs: Any) -> AsyncIterator[Any]:
             result = await route(text)
 
     Falls back to a no-op context if OTel is unavailable.
+
+    Design note — exception safety
+    --------------------------------
+    The ``try/except`` is scoped *only* to OTel setup (before the yield).
+    If setup fails (OTel unavailable / import error) we yield ``None`` and
+    return so the body still runs without tracing.
+
+    Once we have a real span, the ``yield`` lives inside the OTel
+    ``with start_as_current_span`` block.  Any exception thrown from the body
+    (via ``athrow()``) propagates through that ``with`` block's ``__exit__``,
+    which records it on the span and returns ``False`` (does not suppress).
+    The exception is then re-raised to the caller — nothing here swallows
+    application errors.
     """
+    # Phase 1 — OTel setup: errors here must never break application code.
     try:
         from opentelemetry import trace
 
         tracer = trace.get_tracer("monocle")
-        with tracer.start_as_current_span(name) as s:
-            for k, v in attrs.items():
-                s.set_attribute(k, str(v))
-            yield s
+        span_cm = tracer.start_as_current_span(name)
     except Exception:  # noqa: BLE001
         yield None
+        return
+
+    # Phase 2 — yield inside the real span.  Body exceptions propagate through
+    # start_as_current_span().__exit__ (recorded + re-raised); no suppression.
+    with span_cm as s:
+        for k, v in attrs.items():
+            s.set_attribute(k, str(v))
+        yield s
 
 
 @asynccontextmanager

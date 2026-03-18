@@ -27,8 +27,48 @@ class AIConfig(BaseModel):
     embed_model: str = "nomic-embed-text"
     embed_dimensions: int = 1536
     chat_model: str = "llama3.2"
+    transcribe_model: str = "whisper"
+    # Transcription back-end — pluggable at config time:
+    #   "native"      providers with built-in transcription (e.g. Foundry, Azure) use their
+    #                 own API. Ollama does not support "native" and requires an explicit
+    #                 backend like "whisper_cpp" or "subprocess".
+    #   "whisper_cpp" all providers delegate to a local whisper.cpp HTTP server.
+    #   "subprocess"  all providers call the openai-whisper CLI as a subprocess.
+    transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] = "native"
+    transcribe_url: str = "http://localhost:9000"  # whisper_cpp server URL
     ollama_base_url: str = "http://localhost:11434"
     foundry_local_base_url: str = "http://localhost:5272"
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_transcribe_backend_for_ollama(cls, data: object) -> object:
+        """Set transcribe_backend to 'subprocess' when provider is 'ollama' and
+        transcribe_backend was not explicitly supplied.
+
+        This prevents the default config (ollama + native) from being silently
+        invalid.  Users who explicitly set transcribe_backend='native' with
+        provider='ollama' will get a clear error from the after-validator below.
+        """
+        if isinstance(data, dict):
+            if data.get("provider", "ollama") == "ollama" and "transcribe_backend" not in data:
+                data = {**data, "transcribe_backend": "subprocess"}
+        return data
+
+    @model_validator(mode="after")
+    def validate_transcribe_backend(self) -> "AIConfig":
+        """Reject native transcription when provider is Ollama.
+
+        Ollama has no built-in audio-transcription API.  Catching this at
+        config-load time gives a clear error rather than a cryptic RuntimeError
+        at the first transcription call.
+        """
+        if self.provider == "ollama" and self.transcribe_backend == "native":
+            raise ValueError(
+                "ai.transcribe_backend='native' is not supported with ai.provider='ollama'. "
+                "Ollama has no built-in transcription API. "
+                "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess' in config.yaml."
+            )
+        return self
 
 
 class VaultConfig(BaseModel):
