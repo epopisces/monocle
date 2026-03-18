@@ -160,11 +160,15 @@ def _note_to_markdown(note: Note) -> str:
 
     if note.metadata:
         raw = note.metadata.model_dump()
-        # Serialize LinkRef objects → plain dicts (omit None values)
+        # Serialize LinkRef objects → plain dicts (omit None values).
+        # Iterate over note.metadata.links (live LinkRef objects) not raw["links"]
+        # which has already been converted to plain dicts by model_dump() and
+        # therefore doesn't have a .model_dump() method.
         fm["links"] = [
             {k: v for k, v in lnk.model_dump().items() if v is not None}
-            for lnk in (raw.pop("links", None) or [])
+            for lnk in note.metadata.links
         ]
+        raw.pop("links", None)  # prevent double-serialization via fm.update(raw)
         # Convert datetime objects → ISO strings
         for dt_field in ("created", "updated", "approved_at"):
             val = raw.get(dt_field)
@@ -391,9 +395,10 @@ class VaultLayer:
         self._atomic_write(target, content)
         logger.info("Written note: %s", file_path)
 
-    def patch_frontmatter(self, file_path: str, updates: dict[str, Any]) -> Note:
+    def patch_frontmatter(self, file_path: str, updates: dict[str, Any], if_mtime: float | None = None) -> Note:
         """Merge-update the frontmatter of a note, leaving the body intact.
 
+        If *if_mtime* is provided, raises 409 if the file's mtime does not match (optimistic concurrency).
         Shadow-versions the file before patching.
 
         Returns:
@@ -402,12 +407,21 @@ class VaultLayer:
         Raises:
             NoteNotFound(404): File does not exist.
             HTTPException(403): Path traversal.
+            HTTPException(409): Mtime conflict.
         """
         import frontmatter as _frontmatter
 
         resolved = self._safe_resolve(file_path)
         if not resolved.exists():
             raise NoteNotFound(file_path)
+
+        current_mtime = resolved.stat().st_mtime
+        if if_mtime is not None and abs(current_mtime - if_mtime) > 0.01:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Conflict: note modified (expected mtime={if_mtime:.3f}, "
+                f"actual={current_mtime:.3f})",
+            )
 
         text = resolved.read_text(encoding="utf-8")
         try:

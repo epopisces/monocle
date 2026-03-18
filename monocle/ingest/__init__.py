@@ -28,7 +28,8 @@ import logging
 import os
 import re
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
+from collections.abc import Awaitable
 
 from monocle.ingest.confidence import compute_approval_metadata, score_confidence
 from monocle.ingest.failed_registry import FailedIngestRegistry
@@ -174,8 +175,19 @@ class IngestPipeline:
     # Public API
     # ------------------------------------------------------------------
 
-    async def run(self, request: "IngestRequest") -> tuple["Note", IngestConfidence]:
+    async def run(
+        self,
+        request: "IngestRequest",
+        on_step: "Callable[[int], Awaitable[None]] | None" = None,
+    ) -> tuple["Note", IngestConfidence]:
         """Execute the full 8-step pipeline for *request*.
+
+        Args:
+            request:  The ``IngestRequest`` to process.
+            on_step:  Optional async callback invoked with the step number
+                      (1-8) immediately after each step completes.  Used by
+                      the SSE streaming endpoint to emit real-time progress
+                      events as work happens, not all at once upfront.
 
         Returns:
             ``(note, confidence)`` on success.
@@ -204,6 +216,8 @@ class IngestPipeline:
                     (time.perf_counter() - t0) * 1_000, {"step": "1"}
                 )
                 logger.debug("[INGEST] Step 1: resolved plugin %s", type(plugin).__name__)
+                if on_step:
+                    await on_step(1)
 
             # --------------------------------------------------------
             # Step 2: Content extraction
@@ -219,6 +233,8 @@ class IngestPipeline:
                     len(text),
                     type(plugin).__name__,
                 )
+                if on_step:
+                    await on_step(2)
 
             # --------------------------------------------------------
             # Steps 3 & 4: Routing + Metadata extraction (concurrent)
@@ -239,6 +255,9 @@ class IngestPipeline:
                         routing_decision.confidence,
                         routing_decision.fast_path,
                     )
+                    if on_step:
+                        await on_step(3)
+                        await on_step(4)
 
                 # --------------------------------------------------------
                 # Step 5: Note construction
@@ -257,6 +276,8 @@ class IngestPipeline:
                         note.file_path,
                         note.metadata.type,
                     )
+                    if on_step:
+                        await on_step(5)
 
             except DuplicateSuspected:
                 raise
@@ -276,6 +297,8 @@ class IngestPipeline:
                     (time.perf_counter() - t0) * 1_000, {"step": "6"}
                 )
                 logger.info("[INGEST] Step 6: note written and indexed → %s", note.file_path)
+                if on_step:
+                    await on_step(6)
 
             # --------------------------------------------------------
             # Step 7: Confidence scoring
@@ -304,6 +327,8 @@ class IngestPipeline:
                     confidence.score,
                     confidence.rationale,
                 )
+                if on_step:
+                    await on_step(7)
 
             # --------------------------------------------------------
             # Step 8: Frontmatter patch
@@ -321,6 +346,8 @@ class IngestPipeline:
                     "[INGEST] Step 8: patched frontmatter (review_status=%s)",
                     approval.get("review_status"),
                 )
+                if on_step:
+                    await on_step(8)
 
             # Re-read the note so callers get consistent frontmatter
             note = await asyncio.to_thread(self._vault.read_note, note.file_path)

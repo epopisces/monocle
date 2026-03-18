@@ -242,3 +242,43 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - **Idempotency: `register_default_plugins`** — calling twice duplicated all three plugins in the registry (first-match-wins made results correct but wasted memory/log noise); now checks `source_id` presence before registering each plugin (`monocle/ingest/plugins/__init__.py`)
   - **9 new tests added** to `monocle/tests/test_ingest.py`: 7-day cutoff (old note not flagged), `DuplicateSuspected` does not register in `FailedIngestRegistry`, step-8 failure propagates without sidecar, unparseable `created` date (conservative: still triggers dup), `register_default_plugins` idempotency, LLM-unknown-template falls back to blank, greedy-regex with nested JSON (2 variants); fixed no-op assertion in `test_sentence_starter_no_llm_routing_call`
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **394 passed, 6 deselected**, EXIT 0
+
+- **Executed M8 — REST API Wiring — Core (COMPLETE)**
+  - Rewrote `monocle/main.py` lifespan: `AIProvider` init (non-fatal on error), `FailedIngestRegistry`, `IngestPipeline`, `ReindexQueue` callback `_reindex_file` (embed chunks → upsert), `InboxWatcher` callback `_inbox_ingest_callback` (reads file → `IngestRequest` → pipeline), `ReindexAgent(embed_fn=ai.embed if ai else None)`
+  - Updated `monocle/models.py`: added `IngestResponse(note, confidence)`; added `latency_p50_ms`/`latency_p95_ms: dict[str, float]` to `BrainStats`; changed `audio_bytes` from `bytes | None` to custom `AudioBytesField` (`Annotated[bytes | None, BeforeValidator(_coerce_audio_bytes)]`) — decodes base64 JSON strings but passes raw `bytes` through unchanged (fixes Pydantic V2 `bytes` UTF-8 encoding vs base64 decode issue)
+  - Implemented `routers/health.py`: pings AI via `embed("ping")`, reads watcher status, returns `telemetry_endpoint` and `watcher_running` fields
+  - Implemented `routers/notes.py`: full CRUD wired to `VaultLayer`; `PUT`/`PATCH` push to `ReindexQueue`; backlinks endpoint scans structured links, wikilinks, and people co-mentions
+  - Implemented `routers/search.py`: semantic (`embed` → `index.search`) and keyword (vault text scan)
+  - Implemented `routers/ingest.py`: `POST /api/ingest` with `DuplicateSuspected → 409`; `POST /api/ingest/stream` SSE emitting step_start → done/duplicate/error
+  - Implemented `routers/ingest_failures.py`: GET (newest-first), POST /retry (reconstruct + re-run + mark_retried), DELETE (record only, not the sidecar file)
+  - Implemented `routers/transcribe.py`: multipart `UploadFile` + 25 MB guard
+  - Implemented `routers/stats.py`: vault counts by type/domain/pending, index chunk count, failed count; latency fields return `{}` pending OTel histogram readback
+  - Updated `monocle/tests/conftest.py`: added `mock_ai` (`AsyncMock` with embed/embed_batch/transcribe/chat/extract_note_metadata) and `api_client` (patches `monocle.main.lifespan` with `_test_lifespan` using temp VaultLayer + MemoryIndex + mock AI + FailedIngestRegistry)
+  - Rewrote `monocle/tests/test_api.py`: complete M8 integration test suite — `TestHealth`, `TestNotes`, `TestSearch`, `TestIngest`, `TestIngestFailures`, `TestTranscribe`, `TestStats`, plus stub-guard parametrized test for graph/chat/agents/review/settings/teams still returning 501
+  - Created `monocle/tests/test_security.py`: 17 tests across 5 classes — `TestPathTraversal` (5 tests using `%2e%2e` encoding), `TestAudioSizeLimits` (4 tests), `TestOptimisticConcurrency` (3 tests), `TestCORS` (3 tests), `TestDuplicateDetection` (2 tests)
+  - Updated `.vscode/tasks.json`: added `test: api` and `test: security` tasks
+  - Fixed path-traversal test: httpx normalises literal `../..` in URLs before routing; tests now use `%2e%2e` (percent-encoded dots) which httpx preserves; Starlette decodes to `..` in the path parameter so `_safe_resolve` still sees the traversal and returns 403
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **426 passed, 6 deselected**, EXIT 0
+  - Updated `docs/build-plan.md`: all M8 deliverables and acceptance criteria marked `[x]`; Active Milestone → M9; M8 → COMPLETE in tracker
+
+## 2026-03-17
+
+### Claude Sonnet 4.6
+- **M8 post-review hardening — resolved all high/medium issues and testing gaps (12 fixes, 10 new tests)**
+  - **Security**: replaced `str(exc)` leak with generic messages in `routers/ingest.py` (500 + SSE error event), `routers/transcribe.py` (502), `routers/ingest_failures.py` (422); internal details still logged at ERROR level
+  - **Bug — `_note_to_markdown` double-model-dump**: `vault/__init__.py` iterated over `raw["links"]` (already plain dicts from `model_dump()`) and called `.model_dump()` on them — raised `AttributeError` for any note with structured links; fixed to iterate over `note.metadata.links` (live `LinkRef` objects) then `raw.pop("links", None)` to prevent double-serialization
+  - **Bug — SSE steps fired before pipeline**: `routers/ingest.py` emitted all 8 `step_start` events synchronously before `pipeline.run()` was called; added optional `on_step: Callable[[int], Awaitable[None]]` parameter to `IngestPipeline.run()` (called after each step); SSE endpoint now uses a `asyncio.Queue` + task pattern to stream events in real-time; `_run_pipeline` task uses `try/finally` to always put sentinel on queue even on exception
+  - **Bug — health status not degraded**: `routers/health.py` returned `"ready"` even when `ai_reachable=False`; now returns `"degraded"` when AI is unreachable or enabled watcher is not running; also removed `__import__("asyncio")` in favour of top-level import
+  - **Bug — retry truncation undisclosed**: `routers/ingest_failures.py` silently re-ingested 200-char preview with no warning; retry response now includes `content_truncated: bool`
+  - **Bug — chunk `updated_at` drift**: `main.py` `_reindex_file` used re-index wall-clock time; now uses `note.metadata.updated` (falls back to `created`, then current time)
+  - **Cleanup — `routers/notes.py`**: moved `import re` to top-level (was inside inner `for person in ...` loop); removed unused `parse_links_field` import from inner function
+  - **Build-plan**: `stats.py` latency fields deferred explicitly to M11 with documented TODO
+  - **Tests added** (`test_api.py`): `test_backlinks_returns_list` assertion fixed (now checks source path); `test_backlinks_structured_link`; `test_backlinks_people_co_mention`; `test_ingest_stream_emits_step_and_done_events`; `test_semantic_search_type_filter`; `test_semantic_search_domain_filter`; `test_semantic_search_source_filter`; `test_keyword_search_domain_filter`; `test_retry_success_creates_note`
+  - **Tests added** (`test_security.py`): `test_cors_dev_origin_excluded_in_non_dev_mode`; `test_move_note_to_path_traversal_blocked`
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **436 passed, 6 deselected**, EXIT 0
+
+- **M8 post-review fix — `PUT /api/notes` returns 201 for resource creation**
+  - `routers/notes.py`: `put_note` now calls `vault._safe_resolve(path)` pre-write to check existence (traversal 403 still raised); sets `response.status_code = 201` when file did not exist; updates return 200 per RFC 7231 §4.3.4
+  - Updated test assertions: `test_put_creates_note`, `test_put_returns_note_with_mtime`, `test_put_conflict_stale_mtime` (initial create) → 201; `test_put_stale_mtime_returns_409` (security) → 201; `test_rapid_puts_coalesced_in_reindex_queue` → `in (200, 201)`
+  - Added `test_put_update_returns_200` test
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **437 passed, 6 deselected**, EXIT 0

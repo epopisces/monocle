@@ -6,7 +6,9 @@ from __future__ import annotations
 import datetime
 import os
 import tempfile
+from contextlib import asynccontextmanager
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -132,3 +134,117 @@ def memory_index():
         return MemoryIndex()
     except ImportError:
         return None
+
+
+# ---------------------------------------------------------------------------
+# Fixture: mock_ai
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def mock_ai():
+    """AsyncMock AIProvider with sensible default return values for unit tests."""
+    from monocle.models import NoteMetadata
+
+    ai = AsyncMock()
+    ai.embed = AsyncMock(return_value=[0.1] * 1536)
+    ai.embed_batch = AsyncMock(return_value=[[0.1] * 1536])
+    ai.transcribe = AsyncMock(return_value="transcribed audio content")
+    ai.chat = AsyncMock(return_value='{"type": "other", "domain": "personal", "tags": []}')
+    ai.extract_note_metadata = AsyncMock(return_value=NoteMetadata())
+    return ai
+
+
+# ---------------------------------------------------------------------------
+# Fixture: api_client
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def api_client(tmp_path: Path, mock_ai):
+    """TestClient with a real VaultLayer, MemoryIndex, and mock AIProvider.
+
+    Uses a patched lifespan so no real ChromaDB / AI / watcher is started.
+    """
+    from unittest.mock import patch
+    from fastapi.testclient import TestClient
+
+    from monocle.index.memory import MemoryIndex
+    from monocle.ingest.failed_registry import FailedIngestRegistry
+    from monocle.vault import VaultLayer
+    from monocle.watcher import ReindexQueue
+
+    vault_path = tmp_path / "vault"
+    vault_path.mkdir()
+    (vault_path / "inbox").mkdir()
+
+    vault = VaultLayer(str(vault_path))
+    index = MemoryIndex()
+    failed_reg = FailedIngestRegistry(path=tmp_path / "failed_ingests.json")
+
+    # Write a couple of fixture notes so list_notes returns real data
+    import yaml, datetime as _dt
+    now = _dt.datetime.now(_dt.timezone.utc).isoformat()
+    for fname, body, fm in [
+        ("people/alice.md", "Alice is an engineer.", {
+            "title": "Alice", "type": "person_note", "domain": "work",
+            "source": "web", "created": now, "updated": now,
+            "confidence": 0.9, "review_status": "approved", "tags": ["colleague"],
+        }),
+        ("work/decision-one.md", "We chose FastAPI.", {
+            "title": "Fast API Decision", "type": "decision", "domain": "work",
+            "source": "web", "created": now, "updated": now,
+            "confidence": 0.85, "review_status": "approved", "tags": [],
+        }),
+    ]:
+        note_file = vault_path / fname
+        note_file.parent.mkdir(parents=True, exist_ok=True)
+        note_file.write_text(
+            f"---\n{yaml.dump(fm, default_flow_style=False)}---\n\n{body}\n",
+            encoding="utf-8",
+        )
+
+    @asynccontextmanager
+    async def _test_lifespan(app):
+        from monocle.config import Settings
+        from monocle.ingest import IngestPipeline
+        from monocle.ingest.plugin import IngestPluginRegistry
+        from monocle.ingest.plugins import register_default_plugins
+
+        _reg = IngestPluginRegistry.get()
+        if not _reg.plugins:
+            register_default_plugins(_reg)
+
+        # Use default Settings but they won't be used for vault/index operations
+        # since those come directly from the vault/index objects we pass.
+        settings = Settings()
+
+        rq = ReindexQueue()
+        await rq.start()
+
+        pipeline = IngestPipeline(
+            vault=vault,
+            index=index,
+            ai=mock_ai,
+            settings=settings,
+            registry=_reg,
+            failed_registry=failed_reg,
+        )
+
+        app.state.vault = vault
+        app.state.index = index
+        app.state.ai = mock_ai
+        app.state.settings = settings
+        app.state.reindex_queue = rq
+        app.state.ingest_pipeline = pipeline
+        app.state.failed_registry = failed_reg
+        app.state.watcher = None
+
+        yield
+
+        await rq.stop()
+
+    from monocle.main import create_app
+
+    with patch("monocle.main.lifespan", new=_test_lifespan):
+        test_app = create_app()
+        with TestClient(test_app, raise_server_exceptions=False) as client:
+            yield client

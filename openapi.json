@@ -12,6 +12,7 @@
           "health"
         ],
         "summary": "Health",
+        "description": "Return current system health, AI reachability, and index status.",
         "operationId": "health_api_health_get",
         "responses": {
           "200": {
@@ -34,12 +35,107 @@
         ],
         "summary": "List Notes",
         "operationId": "list_notes_api_notes_get",
+        "parameters": [
+          {
+            "name": "folder",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Folder"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Type"
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "updated",
+              "title": "Sort"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Page_NoteRef_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -52,6 +148,7 @@
           "notes"
         ],
         "summary": "Get Note Backlinks",
+        "description": "Return all notes that link to `path` via structured links, wikilinks, or people co-mention.",
         "operationId": "get_note_backlinks_api_notes__path__backlinks_get",
         "parameters": [
           {
@@ -69,7 +166,13 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BacklinkRef"
+                  },
+                  "title": "Response Get Note Backlinks Api Notes  Path  Backlinks Get"
+                }
               }
             }
           },
@@ -109,7 +212,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Note"
+                }
               }
             }
           },
@@ -142,12 +247,24 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteWriteRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Note"
+                }
               }
             }
           },
@@ -180,12 +297,24 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotePatchRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Note"
+                }
               }
             }
           },
@@ -219,13 +348,8 @@
           }
         ],
         "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -258,12 +382,26 @@
             }
           }
         ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NoteMoveRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Move Note Api Notes  Path  Move Post"
+                }
               }
             }
           },
@@ -292,7 +430,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response List Templates Api Templates Get"
+                }
               }
             }
           }
@@ -306,12 +451,107 @@
         ],
         "summary": "Semantic Search",
         "operationId": "semantic_search_api_search_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Search query",
+              "title": "Q"
+            },
+            "description": "Search query"
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 10,
+              "title": "N"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by note type",
+              "title": "Type"
+            },
+            "description": "Filter by note type"
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by domain",
+              "title": "Domain"
+            },
+            "description": "Filter by domain"
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by source",
+              "title": "Source"
+            },
+            "description": "Filter by source"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SearchResult"
+                  },
+                  "title": "Response Semantic Search Api Search Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -324,13 +564,71 @@
           "search"
         ],
         "summary": "Keyword Search",
+        "description": "Scan vault notes for keyword matches (case-insensitive).",
         "operationId": "keyword_search_api_search_keyword_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Keyword(s) to search for",
+              "title": "Q"
+            },
+            "description": "Keyword(s) to search for"
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "N"
+            }
+          },
+          {
+            "name": "domain",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/KeywordResult"
+                  },
+                  "title": "Response Keyword Search Api Search Keyword Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -343,13 +641,36 @@
           "ingest"
         ],
         "summary": "Ingest",
+        "description": "Run the 8-step ingest pipeline and return the created note + confidence.",
         "operationId": "ingest_api_ingest_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/IngestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -362,75 +683,18 @@
           "ingest"
         ],
         "summary": "Ingest Stream",
+        "description": "Streaming ingest \u2014 emits SSE progress events for each pipeline step.",
         "operationId": "ingest_stream_api_ingest_stream_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IngestRequest"
               }
             }
-          }
-        }
-      }
-    },
-    "/api/ingest/failures": {
-      "get": {
-        "tags": [
-          "ingest"
-        ],
-        "summary": "List Failures",
-        "operationId": "list_failures_api_ingest_failures_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ingest/failures/retry": {
-      "post": {
-        "tags": [
-          "ingest"
-        ],
-        "summary": "Retry Failures",
-        "operationId": "retry_failures_api_ingest_failures_retry_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/ingest/failures/{failure_id}": {
-      "delete": {
-        "tags": [
-          "ingest"
-        ],
-        "summary": "Delete Failure",
-        "operationId": "delete_failure_api_ingest_failures__failure_id__delete",
-        "parameters": [
-          {
-            "name": "failure_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Failure Id"
-            }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -453,19 +717,149 @@
         }
       }
     },
+    "/api/ingest/failures": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "List Failures",
+        "description": "Return all failed-ingest records, newest first.",
+        "operationId": "list_failures_api_ingest_failures_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "additionalProperties": true,
+                    "type": "object"
+                  },
+                  "type": "array",
+                  "title": "Response List Failures Api Ingest Failures Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/failures/retry": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Retry Failure",
+        "description": "Retry a previously failed ingest using stored content preview.",
+        "operationId": "retry_failure_api_ingest_failures_retry_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Retry Failure Api Ingest Failures Retry Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/failures/{failure_id}": {
+      "delete": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Delete Failure",
+        "description": "Remove a failed-ingest record from the list.\n\nThe underlying ``.error.md`` sidecar file is NOT deleted.",
+        "operationId": "delete_failure_api_ingest_failures__failure_id__delete",
+        "parameters": [
+          {
+            "name": "failure_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Failure Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/transcribe": {
       "post": {
         "tags": [
           "transcribe"
         ],
         "summary": "Transcribe",
+        "description": "Transcribe an uploaded audio file using the configured provider.",
         "operationId": "transcribe_api_transcribe_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_transcribe_api_transcribe_post"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/TranscribeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -497,13 +891,16 @@
           "stats"
         ],
         "summary": "Get Stats",
+        "description": "Return aggregate vault and index statistics.",
         "operationId": "get_stats_api_stats_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/BrainStats"
+                }
               }
             }
           }
@@ -741,6 +1138,113 @@
   },
   "components": {
     "schemas": {
+      "BacklinkRef": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation"
+          },
+          "context": {
+            "type": "string",
+            "title": "Context",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "BacklinkRef"
+      },
+      "Body_transcribe_api_transcribe_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "description": "Audio file to transcribe"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type",
+            "description": "MIME type of the audio file",
+            "default": "audio/webm"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_transcribe_api_transcribe_post"
+      },
+      "BrainStats": {
+        "properties": {
+          "total_notes": {
+            "type": "integer",
+            "title": "Total Notes",
+            "default": 0
+          },
+          "total_chunks": {
+            "type": "integer",
+            "title": "Total Chunks",
+            "default": 0
+          },
+          "notes_by_type": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Notes By Type"
+          },
+          "notes_by_domain": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Notes By Domain"
+          },
+          "pending_review": {
+            "type": "integer",
+            "title": "Pending Review",
+            "default": 0
+          },
+          "failed_ingests": {
+            "type": "integer",
+            "title": "Failed Ingests",
+            "default": 0
+          },
+          "index": {
+            "$ref": "#/components/schemas/IndexStats"
+          },
+          "latency_p50_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Latency P50 Ms"
+          },
+          "latency_p95_ms": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Latency P95 Ms"
+          }
+        },
+        "type": "object",
+        "title": "BrainStats"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -771,6 +1275,21 @@
           "index_status": {
             "type": "string",
             "title": "Index Status"
+          },
+          "watcher_running": {
+            "type": "boolean",
+            "title": "Watcher Running"
+          },
+          "telemetry_endpoint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Telemetry Endpoint"
           }
         },
         "type": "object",
@@ -778,9 +1297,717 @@
           "status",
           "version",
           "ai_reachable",
-          "index_status"
+          "index_status",
+          "watcher_running"
         ],
         "title": "HealthResponse"
+      },
+      "IndexStats": {
+        "properties": {
+          "total_chunks": {
+            "type": "integer",
+            "title": "Total Chunks",
+            "default": 0
+          },
+          "total_files": {
+            "type": "integer",
+            "title": "Total Files",
+            "default": 0
+          },
+          "collection_name": {
+            "type": "string",
+            "title": "Collection Name",
+            "default": ""
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "default": "chroma"
+          }
+        },
+        "type": "object",
+        "title": "IndexStats"
+      },
+      "IngestConfidence": {
+        "properties": {
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "template_match": {
+            "type": "number",
+            "title": "Template Match"
+          },
+          "metadata_coverage": {
+            "type": "number",
+            "title": "Metadata Coverage"
+          },
+          "tag_plausibility": {
+            "type": "number",
+            "title": "Tag Plausibility"
+          },
+          "entity_match": {
+            "type": "number",
+            "title": "Entity Match"
+          },
+          "rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rationale"
+          },
+          "similar_note_detected": {
+            "type": "boolean",
+            "title": "Similar Note Detected",
+            "default": false
+          },
+          "similar_note_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Similar Note Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "score",
+          "template_match",
+          "metadata_coverage",
+          "tag_plausibility",
+          "entity_match"
+        ],
+        "title": "IngestConfidence",
+        "description": "Deterministic confidence score for an ingested note (no LLM call)."
+      },
+      "IngestRequest": {
+        "properties": {
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type",
+            "default": "text/plain"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "web",
+              "voice",
+              "teams",
+              "mcp",
+              "import"
+            ],
+            "title": "Source",
+            "default": "web"
+          },
+          "template_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Hint"
+          },
+          "audio_bytes": {
+            "anyOf": [
+              {
+                "type": "string",
+                "contentMediaType": "application/octet-stream"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Bytes",
+            "description": "Base64-encoded audio data (WAV, MP3, FLAC, etc.). Can also be raw bytes in multipart requests."
+          },
+          "audio_mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audio Mime Type"
+          },
+          "allow_duplicate": {
+            "type": "boolean",
+            "title": "Allow Duplicate",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "IngestRequest"
+      },
+      "IngestResponse": {
+        "properties": {
+          "note": {
+            "$ref": "#/components/schemas/Note"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/IngestConfidence"
+          }
+        },
+        "type": "object",
+        "required": [
+          "note",
+          "confidence"
+        ],
+        "title": "IngestResponse",
+        "description": "Response body for POST /api/ingest."
+      },
+      "KeywordResult": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "excerpt": {
+            "type": "string",
+            "title": "Excerpt"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "title",
+          "excerpt"
+        ],
+        "title": "KeywordResult"
+      },
+      "LinkRef": {
+        "properties": {
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target"
+        ],
+        "title": "LinkRef",
+        "description": "A structured link from a note's `links:` frontmatter field."
+      },
+      "Note": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body"
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/NoteMetadata"
+          },
+          "mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "title",
+          "body"
+        ],
+        "title": "Note",
+        "description": "Full note contents including frontmatter metadata and Markdown body."
+      },
+      "NoteMetadata": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "person_note",
+              "decision",
+              "idea",
+              "observation",
+              "reference",
+              "meeting_note",
+              "project",
+              "action_item",
+              "weekly_summary",
+              "other"
+            ],
+            "title": "Type",
+            "default": "other"
+          },
+          "template": {
+            "type": "string",
+            "title": "Template",
+            "default": "blank"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "default": "personal"
+          },
+          "people": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "People"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "web",
+              "voice",
+              "teams",
+              "mcp",
+              "import"
+            ],
+            "title": "Source",
+            "default": "web"
+          },
+          "action_items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Action Items"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "default": 1.0
+          },
+          "confidence_rationale": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Rationale"
+          },
+          "review_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved"
+            ],
+            "title": "Review Status",
+            "default": "approved"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approval_mode": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "auto",
+                  "manual"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Mode"
+          },
+          "links": {
+            "items": {
+              "$ref": "#/components/schemas/LinkRef"
+            },
+            "type": "array",
+            "title": "Links"
+          },
+          "org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "title": "NoteMetadata",
+        "description": "Parsed frontmatter of a note as written/read by the ingest pipeline."
+      },
+      "NoteMoveRequest": {
+        "properties": {
+          "to_path": {
+            "type": "string",
+            "title": "To Path"
+          }
+        },
+        "type": "object",
+        "required": [
+          "to_path"
+        ],
+        "title": "NoteMoveRequest"
+      },
+      "NotePatchRequest": {
+        "properties": {
+          "updates": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Updates"
+          },
+          "if_mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "If Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "updates"
+        ],
+        "title": "NotePatchRequest",
+        "description": "Body for PATCH /api/notes/{path} \u2014 frontmatter-only patch."
+      },
+      "NoteRef": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "person_note",
+              "decision",
+              "idea",
+              "observation",
+              "reference",
+              "meeting_note",
+              "project",
+              "action_item",
+              "weekly_summary",
+              "other"
+            ],
+            "title": "Type",
+            "default": "other"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "default": "personal"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "created": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence",
+            "default": 1.0
+          },
+          "review_status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "approved"
+            ],
+            "title": "Review Status",
+            "default": "approved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "title"
+        ],
+        "title": "NoteRef",
+        "description": "Lightweight reference to a note (used in listings and search results)."
+      },
+      "NoteWriteRequest": {
+        "properties": {
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "body": {
+            "type": "string",
+            "title": "Body",
+            "default": ""
+          },
+          "metadata": {
+            "$ref": "#/components/schemas/NoteMetadata",
+            "default": {
+              "type": "other",
+              "template": "blank",
+              "domain": "personal",
+              "people": [],
+              "tags": [],
+              "source": "web",
+              "action_items": [],
+              "confidence": 1.0,
+              "review_status": "approved",
+              "links": []
+            }
+          },
+          "if_mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "If Mtime"
+          }
+        },
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "title": "NoteWriteRequest",
+        "description": "Body for PUT /api/notes/{path} \u2014 full note write."
+      },
+      "Page_NoteRef_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/NoteRef"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "offset": {
+            "type": "integer",
+            "title": "Offset",
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 50
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "Page[NoteRef]"
+      },
+      "RetryRequest": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "RetryRequest"
+      },
+      "SearchResult": {
+        "properties": {
+          "chunk_id": {
+            "type": "string",
+            "title": "Chunk Id"
+          },
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "score": {
+            "type": "number",
+            "title": "Score"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "chunk_id",
+          "file_path",
+          "score",
+          "text"
+        ],
+        "title": "SearchResult"
+      },
+      "TranscribeResponse": {
+        "properties": {
+          "transcript": {
+            "type": "string",
+            "title": "Transcript"
+          },
+          "mime_type": {
+            "type": "string",
+            "title": "Mime Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "transcript",
+          "mime_type"
+        ],
+        "title": "TranscribeResponse"
       },
       "ValidationError": {
         "properties": {
