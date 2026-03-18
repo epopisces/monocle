@@ -85,6 +85,14 @@
       "problemMatcher": []
     },
     {
+      "label": "test: ingest",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_ingest.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
       // Run only the transcription provider tests (unit + integration if server is up).
       // For integration tests pass: -m integration
       "label": "test: transcription",

@@ -172,6 +172,9 @@ class IngestConfidence(BaseModel):
     tag_plausibility: float
     entity_match: float
     rationale: str | None = None
+    # Advisory duplicate-detection fields (FR-ING-11)
+    similar_note_detected: bool = False
+    similar_note_path: str | None = None
 
 
 # ---------------------------------------------------------------------------
