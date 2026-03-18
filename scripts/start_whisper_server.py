@@ -6,7 +6,8 @@ and Linux without any shell-specific syntax.
 
 Environment variables (both optional):
     WHISPER_CPP_SERVER   absolute path to the whisper-server binary
-    WHISPER_CPP_MODEL    absolute path to the GGUF model file (.bin)
+    WHISPER_CPP_MODEL    absolute path to the Whisper model file
+                         (e.g. GGML ``.bin`` or GGUF ``.gguf``)
 
 Defaults:
     Windows  — <workspace>/tools/whisper-server.exe
@@ -23,7 +24,7 @@ Prerequisites:
   1. Build whisper.cpp: https://github.com/ggerganov/whisper.cpp
      (``cmake -B build && cmake --build build --config Release``)
   2. Copy the resulting ``server`` / ``server.exe`` binary to ``tools/``.
-  3. Download a GGUF Whisper model, e.g.::
+  3. Download a Whisper model (GGML ``.bin`` example), e.g.::
        curl -L -o tools/models/ggml-base.en.bin \\
          https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin
   4. Set ``ai.transcribe_backend: whisper_cpp`` in ``config.yaml``.
