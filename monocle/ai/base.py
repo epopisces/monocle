@@ -158,12 +158,18 @@ class AIProvider(ABC):
         self,
         messages: list[dict],
         stream: bool = False,
+        tools: list[dict] | None = None,
     ) -> str | AsyncIterator[str]:
         """Send *messages* to the chat model.
 
         When *stream* is ``False`` (default), returns the full completion
         string.  When *stream* is ``True``, returns an ``AsyncIterator``
-        that yields text delta strings as they arrive.
+        that yields text delta strings as they arrive.  If *tools* is
+        provided the provider forwards them to the underlying API; when the
+        model makes a tool call in non-streaming mode the response is a
+        JSON string ``{"tool_calls": [...]}``; in streaming mode the
+        provider accumulates streaming tool-call deltas and emits the same
+        JSON string as a single final chunk so the adapter can detect it.
         """
 
     # Each provider sets this in __init__ to its configured TranscriptionProvider.

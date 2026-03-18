@@ -148,7 +148,7 @@ class TestOllamaProvider:
     async def test_chat_non_stream_returns_string(self):
         mock_client = AsyncMock()
         mock_client.chat.return_value = MagicMock(
-            message=MagicMock(content="Hello there!")
+            message=MagicMock(content="Hello there!", tool_calls=None)
         )
         provider = self._make_provider(mock_client)
 
@@ -209,7 +209,7 @@ class TestOllamaProvider:
             "people": ["Alice"],
             "tags": ["meeting"],
         })
-        mock_client.chat.return_value = MagicMock(message=MagicMock(content=payload))
+        mock_client.chat.return_value = MagicMock(message=MagicMock(content=payload, tool_calls=None))
         provider = self._make_provider(mock_client)
 
         result = await provider.extract_note_metadata(
@@ -293,7 +293,7 @@ class TestFoundryLocalProvider:
         provider = self._make_provider()
         provider._client.chat.completions.create = AsyncMock(
             return_value=MagicMock(
-                choices=[MagicMock(message=MagicMock(content="Hi there!"))]
+                choices=[MagicMock(message=MagicMock(content="Hi there!", tool_calls=None))]
             )
         )
 
@@ -365,7 +365,7 @@ class TestAzureOpenAIProvider:
         provider = self._make_provider()
         provider._client.chat.completions.create = AsyncMock(
             return_value=MagicMock(
-                choices=[MagicMock(message=MagicMock(content="Azure says hi!"))]
+                choices=[MagicMock(message=MagicMock(content="Azure says hi!", tool_calls=None))]
             )
         )
 
@@ -445,6 +445,196 @@ class TestAIProviderIsAbstract:
     def test_cannot_instantiate_abc_directly(self):
         with pytest.raises(TypeError):
             AIProvider()  # type: ignore[abstract]
+
+
+# ---------------------------------------------------------------------------
+# AIProvider.chat() with tools — regression tests for Bug #1/#2
+# ---------------------------------------------------------------------------
+
+
+class TestOllamaChatWithTools:
+    """OllamaProvider forwards tools to client and serialises tool_calls response."""
+
+    def _make_provider(self):
+        from monocle.ai.ollama_provider import OllamaProvider
+
+        mock_client = AsyncMock()
+        with patch("monocle.ai.ollama_provider.ollama.AsyncClient", return_value=mock_client):
+            provider = OllamaProvider(
+                embed_model="nomic-embed-text",
+                chat_model="llama3.2",
+            )
+        provider._client = mock_client
+        provider._ready_models.add("llama3.2")
+        return provider, mock_client
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_accepted_no_typeerror(self):
+        """Passing tools= kwarg must not raise TypeError."""
+        provider, mock_client = self._make_provider()
+        mock_client.chat.return_value = MagicMock(
+            message=MagicMock(content="plain text", tool_calls=None)
+        )
+
+        result = await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "search_vault", "description": "", "parameters": {}}}],
+        )
+        assert isinstance(result, str)
+
+    @pytest.mark.asyncio
+    async def test_chat_tool_call_response_is_json_string(self):
+        """When the model returns tool_calls, chat() returns a JSON string."""
+        import json as _json
+        provider, mock_client = self._make_provider()
+
+        fake_tc = MagicMock()
+        fake_tc.function.name = "search_vault"
+        fake_tc.function.arguments = {"query": "Alice"}
+        mock_client.chat.return_value = MagicMock(
+            message=MagicMock(content="", tool_calls=[fake_tc])
+        )
+
+        result = await provider.chat(
+            [{"role": "user", "content": "find Alice"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "search_vault", "description": "", "parameters": {}}}],
+        )
+        parsed = _json.loads(result)
+        assert "tool_calls" in parsed
+        assert parsed["tool_calls"][0]["function"]["name"] == "search_vault"
+
+    @pytest.mark.asyncio
+    async def test_chat_without_tools_still_works(self):
+        """chat() with tools=None must still return plain text (no regression)."""
+        provider, mock_client = self._make_provider()
+        mock_client.chat.return_value = MagicMock(
+            message=MagicMock(content="Hello there!", tool_calls=None)
+        )
+
+        result = await provider.chat([{"role": "user", "content": "hi"}], stream=False)
+        assert result == "Hello there!"
+
+
+class TestFoundryLocalChatWithTools:
+    """FoundryLocalProvider forwards tools and serialises tool_calls."""
+
+    def _make_provider(self):
+        from monocle.ai.foundry_local_provider import FoundryLocalProvider
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = FoundryLocalProvider(
+                base_url="http://localhost:5272",
+                api_key="local",
+                embed_model="nomic-embed-text",
+                chat_model="llama3.2",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_no_typeerror(self):
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        result = await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "read_note", "description": "", "parameters": {}}}],
+        )
+        assert isinstance(result, str)
+        # confirm tools was forwarded
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert "tools" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_chat_tool_call_serialised_to_json(self):
+        import json as _json
+        provider = self._make_provider()
+
+        fake_tc = MagicMock()
+        fake_tc.id = "call-1"
+        fake_tc.function.name = "read_note"
+        fake_tc.function.arguments = '{"file_path": "people/alice.md"}'
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="", tool_calls=[fake_tc]))]
+            )
+        )
+
+        result = await provider.chat(
+            [{"role": "user", "content": "read alice"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "read_note", "description": "", "parameters": {}}}],
+        )
+        parsed = _json.loads(result)
+        assert parsed["tool_calls"][0]["function"]["name"] == "read_note"
+
+
+class TestAzureChatWithTools:
+    """AzureOpenAIProvider forwards tools and serialises tool_calls."""
+
+    def _make_provider(self):
+        from monocle.ai.azure_provider import AzureOpenAIProvider
+
+        with patch("openai.AsyncAzureOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = AzureOpenAIProvider(
+                api_key="test-key",
+                endpoint="https://example.openai.azure.com",
+                api_version="2024-02-01",
+                embed_deployment="text-embedding-3-large",
+                chat_deployment="gpt-4o",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_no_typeerror(self):
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        result = await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "get_stats", "description": "", "parameters": {}}}],
+        )
+        assert isinstance(result, str)
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert "tools" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_chat_tool_call_serialised_to_json(self):
+        import json as _json
+        provider = self._make_provider()
+
+        fake_tc = MagicMock()
+        fake_tc.id = "call-2"
+        fake_tc.function.name = "get_stats"
+        fake_tc.function.arguments = "{}"
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="", tool_calls=[fake_tc]))]
+            )
+        )
+
+        result = await provider.chat(
+            [{"role": "user", "content": "stats"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "get_stats", "description": "", "parameters": {}}}],
+        )
+        parsed = _json.loads(result)
+        assert parsed["tool_calls"][0]["function"]["name"] == "get_stats"
 
 
 # ---------------------------------------------------------------------------

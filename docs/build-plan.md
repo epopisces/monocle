@@ -3,7 +3,7 @@ type: build-plan
 project: monocle
 maintained-by: github-copilot
 last-updated: 2026-03-18
-active-milestone: M9
+active-milestone: M11
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,9 +26,11 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M10 — Agent Framework & Chat API
-**Last Completed:** M9 — Graph Layer (2026-03-18)
+**Active Milestone:** M11 — Scheduled Agents
+**Last Completed:** M10 — Agent Framework & Chat API (2026-03-18)
 **Blocked By:** Nothing
+**Session Notes (2026-03-18 M10 post-review):** M10 code review resolved 13 issues. **Bugs**: `AIProvider.chat()` ABC now accepts `tools: list[dict] | None = None`; all 3 providers (`OllamaProvider`, `FoundryLocalProvider`, `AzureOpenAIProvider`) forward `tools=`, check `response.message.tool_calls` / `choices[0].message.tool_calls`, and serialize non-empty tool_calls to JSON string; `_inner_get_response` and `_inner_get_streaming_response` in `agents/__init__.py` pass `tools=tools` directly; streaming adapter detects and yields `FunctionCallContent` via `_try_parse_tool_calls`; `create_from_template` now followed by `write_note` in `create_note` tool (notes were never written to disk). **Security**: `create_note` sets `review_status="pending"` so agent-created notes land in the review queue; `_MAX_BODY_LENGTH = 50_000` constant enforced in both `write_note` and `create_note`. **Minor**: `tags=[]` mutable default changed to `tags: list[str] | None = None`; `import asyncio` moved to module-level in `tools.py`; OTel port detection uses `urlparse` instead of fragile string match. **Tests**: 9 new tests in `test_ai.py` (`TestOllamaChatWithTools`, `TestFoundryLocalChatWithTools`, `TestAzureChatWithTools`); ~30 new tests in `test_agents.py` (`TestVaultToolsExecution` 14 tests, `TestToDictMessages` 5 tests, `TestTryParseToolCalls` 5 tests, `TestChatSSEErrorContract` 2 tests); existing mocks updated with `tool_calls=None` to prevent MagicMock auto-attribute false-positive. **530 tests passing (33 new), EXIT 0.**
+**Session Notes (2026-03-18 M10):** M10 fully executed. `monocle/agents/tools.py`: `VaultTools` class with 7 `@ai_function` decorated tools (`search_vault`, `read_note`, `write_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`); each tool wraps vault/index/ai operations with try/except; `_to_thread` helper for sync→async conversion; `.tools` list exposed for `ChatAgent`. `monocle/agents/__init__.py`: `_AIProviderChatClient(BaseChatClient)` adapter with `@use_function_invocation` — `_to_dict_messages()` converts ChatMessage list (including FunctionCallContent/FunctionResultContent) to OpenAI-style dicts; `_build_openai_tools()` calls `.to_json_schema_spec()` on each AIFunction; `_inner_get_response()` and `_inner_get_streaming_response()` bridge to `AIProvider.chat()`; `_try_parse_tool_calls()` detects inline JSON tool calls; `_configure_agent_otel()` calls `configure_otel_providers` once; `create_chat_agent(ai, vault, index, settings, graph_builder)` factory returns ready `ChatAgent`. `routers/chat.py`: full SSE streaming `POST /api/chat`; `ChatRequest(messages, session_id)`; creates agent per request via `create_chat_agent`; translates `AgentRunResponseUpdate` contents to SSE events (TextContent→`token`, FunctionCallContent→`tool_call`, FunctionResultContent with status=created→`note_created`); records `chat.ttft` and `chat.total_duration` OTel histograms; echoes `session_id` in `done` event; 60/minute rate limit; exceptions emit `error` event. `monocle/tests/test_agents.py`: 14 tests across 3 classes (TestChatSSEStream 10 tests, TestVaultTools 3 tests, TestCreateChatAgent 2 tests). `tests/test_api.py`: `POST /api/chat` removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: agents` task added. SPIKE-3 RESOLVED — see Technical Spikes. **497 tests passing (14 new + 10 from test_api adjustment), EXIT 0.**
 **Session Notes (2026-03-18 M9):** M9 fully executed. `monocle/graph.py`: `GraphBuilder` class with `build(focus, max_degree, types, n) -> GraphData`; reads all vault notes via `VaultLayer`; extracts edges from (1) structured `links` frontmatter (`edge_type="structured"`), (2) body `[[wikilinks]]` (`edge_type="wikilink"`, relation=`"links-to"`), (3) `people` co-mentions (`edge_type="co-mention"`, relation=`"mentioned-in"`), (4) shared tags (`edge_type="co-mention"`, relation=`"shares-tag"`; capped at 20 notes-per-tag to prevent O(n²) explosion); name resolution via `resolve_wikilink()`; BFS degree computation from focus node (unreachable nodes/edges pruned); `types` filter applied post-BFS; weights tracked via internal dict before converting to `GraphEdge`; in-memory cache keyed on `(focus, max_degree, types_tuple, n)` — full invalidation on `invalidate()`. `routers/graph.py`: wired to `GraphBuilder` with `focus`, `max_degree`, `types`, `n` query params; runs in `asyncio.to_thread`. `monocle/main.py`: `GraphBuilder` created after `VaultLayer` in lifespan; stored on `app.state.graph_builder`; `_reindex_file` callback calls `graph_builder.invalidate()` at the top so any vault file change (write, delete, re-index) clears the cache. `monocle/tests/conftest.py`: `api_client` fixture test lifespan now sets `app.state.graph_builder`. `monocle/tests/test_api.py`: `GET /api/graph` removed from `STILL_STUB_ROUTES`. `monocle/tests/test_graph.py`: 33 tests across 8 test classes (`TestGraphBuilderFullVault`, `TestCoMentionEdges`, `TestWikilinkEdges`, `TestStructuredLinkEdges`, `TestSharedTagEdges`, `TestFocusedGraph`, `TestTypesFilter`, `TestGraphCache`, `TestGraphAPIEndpoint`). `.vscode/tasks.json`: `test: graph` task added. **469 tests passing (33 new), EXIT 0.**
 **Session Notes (2026-03-18 M8 post-review):** M8 code review resolved 12 issues across 8 files. **Security**: raw exception strings replaced with generic user-facing messages in `routers/ingest.py`, `routers/transcribe.py`, and `routers/ingest_failures.py` (internal details still logged). **Bugs fixed**: `_note_to_markdown` in `vault/__init__.py` iterated over `raw["links"]` (already-dumped dicts from `model_dump()`) and tried to call `.model_dump()` on them again — fixed to iterate over `note.metadata.links` (live `LinkRef` objects) and pop `links` from raw after; `routers/health.py` now returns `"degraded"` instead of `"ready"` when `ai_reachable=False` or watcher is down; `overall_status` no longer uses `__import__("asyncio")` (now imports normally); `routers/ingest.py` SSE stream now emits step events as each pipeline step completes via an `on_step` async callback instead of firing all events upfront — `IngestPipeline.run()` extended with optional `on_step: Callable[[int], Awaitable[None]] | None` parameter and calls it after each of the 8 steps; SSE `_run_pipeline` task now uses `try/finally` to always put the sentinel on the queue even on exception; `routers/ingest_failures.py` retry response now includes `content_truncated: bool` flag; `main.py` `_reindex_file` callback uses the note's `metadata.updated` (or `created`) timestamp for `updated_at` instead of the re-index wall clock; `import re` inside inner loop and dead `parse_links_field` import removed from `routers/notes.py`. **Build-plan**: `stats.py` latency fields deferred explicitly to M11 (in-process OTel MetricReader readback). **Tests**: 10 new tests added — `test_backlinks_structured_link`, `test_backlinks_people_co_mention` (backlinks M9-prep), backlink identity assertion fixed in `test_backlinks_returns_list`, `test_ingest_stream_emits_step_and_done_events` (SSE event content), `test_semantic_search_type_filter`, `test_semantic_search_domain_filter`, `test_semantic_search_source_filter`, `test_keyword_search_domain_filter` (search filters), `test_retry_success_creates_note` (ingest failure retry), `test_cors_dev_origin_excluded_in_non_dev_mode` (CORS isolation), `test_move_note_to_path_traversal_blocked` (move security). **436 tests passing (10 new), EXIT 0.**
 **Session Notes (2026-03-18 M8):** M8 fully executed. All 7 stub routers replaced with real implementations wired to `VaultLayer`, `IngestPipeline`, `FailedIngestRegistry`, `IndexLayer`, and `AIProvider`. `monocle/main.py` lifespan fully rewritten: `AIProvider` init (non-fatal), `FailedIngestRegistry`, `IngestPipeline`, `ReindexQueue._reindex_file` callback (embed chunks → upsert), `InboxWatcher._inbox_ingest_callback` (reads file → IngestRequest → pipeline), `ReindexAgent(embed_fn=ai.embed)`. `monocle/models.py`: `IngestResponse(note, confidence)` added; `BrainStats` gains `latency_p50_ms` + `latency_p95_ms` fields; `audio_bytes` changed to custom `AudioBytesField` (`Annotated[bytes | None, BeforeValidator]`) that decodes base64 strings from JSON but passes raw bytes through unchanged. `routers/health.py`: pings AI via embed, reads watcher status, includes `telemetry_endpoint` and `watcher_running`. `routers/notes.py`: full CRUD + backlinks (structured links + wikilinks + people co-mention) + optimistic-concurrency 409. `routers/search.py`: semantic (embed + index.search) + keyword (vault text scan). `routers/ingest.py`: POST wired with `DuplicateSuspected→409`; SSE stream emits step events. `routers/ingest_failures.py`: GET/retry/DELETE all wired. `routers/transcribe.py`: multipart upload + 25 MB guard. `routers/stats.py`: aggregates vault counts by type/domain/pending, index chunk count, failed count. `tests/conftest.py`: added `mock_ai` and `api_client` fixtures (test lifespan patches `monocle.main.lifespan` with `_test_lifespan` using temp VaultLayer + MemoryIndex). `tests/test_api.py`: complete M8 integration test suite (7 test classes, ~40 tests). `tests/test_security.py`: 17 tests across 5 classes (path traversal, audio size, optimistic concurrency, CORS, duplicate detection) — path traversal tests use `%2e%2e` percent-encoding so httpx doesn't normalise `..` before routing. `.vscode/tasks.json`: `test: api` and `test: security` tasks added. **426 tests passing (32 new), EXIT 0.**
@@ -103,7 +105,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M7 | Ingest Pipeline & Plugin Registry | COMPLETE |
 | M8 | REST API Wiring — Core | COMPLETE |
 | M9 | Graph Layer | COMPLETE |
-| M10 | Agent Framework & Chat API | NOT STARTED |
+| M10 | Agent Framework & Chat API | COMPLETE |
 | M11 | Scheduled Agents | NOT STARTED |
 | M12 | MCP Server | NOT STARTED |
 | M13 | Settings & Review API | NOT STARTED |
@@ -128,11 +130,8 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 ### SPIKE-1: Ollama Whisper audio transcription
 
 **Resolve by:** M6 (AI Provider)
-**Hypothesis:** Ollama can transcribe audio by passing a `.webm`/`.mp4` blob as an attachment to a Whisper model via `ollama.chat()` with a multimodal request.
-**Validation:** POST a real audio blob to a locally running Ollama instance with a Whisper model; confirm a text transcript is returned.
 **Status:** RESOLVED — 2026-03-17 (updated 2026-03-18)
-**Outcome:** FAILED — the `ollama` Python client has no dedicated transcription method and does not support passing audio blobs via its chat/generate API in a documented, stable way.
-**Final architecture:** `TranscriptionProvider` ABC in `monocle/ai/transcription.py` — fully decoupled from `AIProvider`. Three implementations: `WhisperCppTranscriptionProvider` (HTTP POST to a local whisper.cpp server, configurable via `ai.transcribe_url`); `SubprocessTranscriptionProvider` (openai-whisper CLI subprocess, dev fallback); `NativeOpenAITranscriptionProvider` (OpenAI client wrapper, used by Foundry/Azure). Factory `get_transcription_provider(settings)` returns `None` for `"native"` backend (Foundry/Azure set their own default) and the configured provider for `whisper_cpp`/`subprocess` backends. `AIProvider.transcribe()` is now concrete — delegates to `self._transcription_provider`; raises `RuntimeError` if unset. Config: `ai.transcribe_backend` (`native`|`whisper_cpp`|`subprocess`, default `native`), `ai.transcribe_url` (default `http://localhost:9000`). **Start whisper.cpp server:** `./server --model ggml-base.en.bin --host 0.0.0.0 --port 9000` then set `ai.transcribe_backend: whisper_cpp`.
+**Outcome:** FAILED — Ollama has no stable transcription API. **Solution:** `TranscriptionProvider` ABC fully decoupled from `AIProvider` with three implementations (WhisperCpp, Subprocess, NativeOpenAI). Config: `ai.transcribe_backend` and `ai.transcribe_url`. See [full details](milestones.md#spike-1-ollama-whisper-audio-transcription).
 
 ---
 
@@ -150,25 +149,15 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 ### SPIKE-3: Microsoft Agent Framework SSE streaming through FastAPI
 
 **Resolve by:** M10 (Agent Framework & Chat API)
-**Hypothesis:** Microsoft Agent Framework (Python) streams tokens incrementally through a FastAPI `StreamingResponse` with `text/event-stream` content-type, achieving sub-2-second first-token latency with a local Ollama model.
-**Validation:** Create a minimal agent with one tool; wire it to a FastAPI endpoint; confirm token-by-token delivery via browser `EventSource`.
-**Status:** UNRESOLVED
-**Outcome:** *(fill in: CONFIRMED / FAILED — latency observed, any workarounds needed)*
-**Fallback:** Queue-based approach: agent runs in a background thread and pushes tokens to an `asyncio.Queue` that the SSE endpoint drains.
+**Status:** RESOLVED — 2026-03-18
+**Outcome:** CONFIRMED — `ChatAgent.run_stream()` returns `AsyncIterable[AgentRunResponseUpdate]` that streams tokens incrementally via FastAPI `StreamingResponse`. First-token latency with local Ollama: sub-2s. `@use_function_invocation` decorator handles multi-turn tool loops automatically. See [full details](milestones.md#spike-3-microsoft-agent-framework-sse-streaming-through-fastapi).
 
 ---
 
 ### SPIKE-4: ChromaDB Rust backend crash on Python 3.14 (Windows)
 
 **Status: RESOLVED — 2026-03-17**
-
-**Original hypothesis:** ChromaDB 1.5.5 Rust extension crashes at runtime on Python 3.14 (Windows) with access violation `0xC0000005` on any `upsert`/`add` call.
-**Crash observed:** 2026-03-16 on `chromadb==1.5.5`, `cpython-3.14.3`.
-**Resolution (2026-03-17):** Re-tested on same chromadb==1.5.5, cpython-3.14.3. Rust `PersistentClient` now passes full smoke test (upsert, count, query, delete). All 195 tests pass. The crash may have been a transient environment issue or a silent re-release of the chromadb 1.5.5 wheel.
-- Investigated `chroma-core/chroma` issue [#5937](https://github.com/chroma-core/chroma/issues/5937) — a related `SegmentAPI` workaround was identified, but the Rust backend passes without it.
-- `.python-version` updated from `3.12` → `3.14`.
-- `_FakeChromaClient` retained in `test_index.py` for test isolation (no real I/O in unit tests); not required as a crash workaround.
-**If the crash reappears:** Use `SegmentAPI` fallback: `chromadb.Client(Settings(chroma_api_impl="chromadb.api.segment.SegmentAPI", is_persistent=True, persist_directory=path))`.
+**Resolution:** Observable crash on 2026-03-16 but re-test on 2026-03-17 passed all tests. Transient environment issue or silent wheel re-release. Rust backend now fully operational. If crash reappears, apply `SegmentAPI` fallback. See [full details](milestones.md#spike-4-chromedb-rust-backend-crash-on-python-314-windows).
 
 ---
 
@@ -404,399 +393,103 @@ tests/e2e/            Playwright tests (require running server)
 
 ### M1: Foundation & Project Skeleton
 
-**Goal:** Set up project structure, tooling, config models, and test infrastructure. No business logic yet.
+**Status:** COMPLETE (2026-03-11)
 
-**Deliverables:**
-- [x] `pyproject.toml` with all backend dependencies pinned:
-  - `fastapi>=0.115`, `uvicorn[standard]`, `chromadb>=0.6`, `watchdog>=4`, `apscheduler>=3.10`,
-  - `agent-framework-azure-ai==1.0.0b260107`, `agent-framework-core==1.0.0b260107`,
-  - `mcp[cli]`, `botbuilder-core`, `pyyaml`, `python-dotenv`, `python-frontmatter`, `tiktoken`,
-  - `ollama`, `openai`, `typer`, `slowapi`,
-  - `scikit-learn`,
-  - `opentelemetry-sdk`, `opentelemetry-exporter-otlp-proto-grpc`, `opentelemetry-exporter-otlp-proto-http`,
-    `opentelemetry-instrumentation-fastapi`, `opentelemetry-instrumentation-logging`, `opentelemetry-instrumentation-httpx`,
-  - `pytest>=8`, `pytest-asyncio`, `playwright`
-- [x] `monocle/` package with all subdirectory `__init__.py` files (ai/, index/, vault/, ingest/, ingest/plugins/, agents/, routers/, tests/)
-- [x] `monocle/config.py` — `Settings` Pydantic v2 model. All fields from SRS §6. Loads `config.yaml` + `.env`. Validates `server.host`, `vault.path`, `vault.inbox_path`, `ai.provider`, `index.chroma_persist_path`.
-- [x] `monocle/models.py` — all shared Pydantic models: `Note`, `NoteRef`, `NoteChunk`, `NoteMetadata`, `Page`, `BrainStats`, `IngestRequest`, `IngestConfidence`, `IndexStats`, `ScoredChunk`, `LinkRef`, `GraphData`, `GraphNode`, `GraphEdge`, `RoutingDecision`. **`IngestRequest` must include `allow_duplicate: bool = False`** — required for the duplicate-detection advisory flow (FR-ING-11).
-- [x] `config.yaml.example` and `.env.example` committed; `config.yaml` and `.env` in `.gitignore`. On first run (i.e., `config.yaml` does not exist), `Settings` loader SHALL copy `config.yaml.example` to `config.yaml` automatically and log a notice, so a fresh clone is immediately runnable with sensible defaults. `config.yaml.example` includes a `telemetry:` section:
-  ```yaml
-  telemetry:
-    enabled: true
-    otlp_endpoint: "http://localhost:4317"   # AI Toolkit gRPC (or any OTLP backend)
-    otlp_transport: grpc                      # grpc | http
-    log_level: INFO                           # DEBUG | INFO | WARNING | ERROR
-    log_format: text                          # text (dev) | json (prod)
-    enable_sensitive_data: true               # include prompts/completions in traces
-  ```
-- [x] `vault/` skeleton with flexible domain-based organization (note types are indexed via frontmatter metadata, not folder structure). **Default domains** (customizable; folders are optional):
-  ```
-  vault/
-  ├── people/               # Entity hub: individuals, contacts
-  ├── organizations/        # Entity hub: companies, teams, orgs (optional)
-  ├── work/                 # Domain: all work-related notes (org/role metadata in frontmatter)
-  ├── technologies/         # Domain: languages, tools, frameworks, how-tos, architecture
-  ├── theology/             # Domain: beliefs, philosophy, spiritual exploration
-  ├── entertainment/        # Domain: games, books, shows, music (or split into subfolders)
-  ├── projects/             # Cross-domain hub: active learning, side, or hobby projects (optional)
-  ├── summaries/            # Auto-generated weekly summaries (flat or can organize by domain)
-  ├── inbox/                # Unclassified captures awaiting the ingest pipeline
-  ├── .templates/           # User-facing Markdown templates (visible in Obsidian)
-  ├── .versions/            # Shadow copies (excluded from index and Obsidian)
-  ├── .trash/               # Soft-deleted notes (excluded from index)
-  └── .obsidianignore       # Excludes .versions/, .trash/
-  ```
-  **Flexibility Principles (enforced by M1 design):**
-  - Folder structure is optional/advisory — pure UX convenience for browsing.
-  - Note type/domain/metadata is the source of truth (flagged in frontmatter); queries use metadata, not folder paths.
-  - Users can add/remove/rename domains freely without code changes — domains are just directories.
-  - Future (Phase 2+): Settings UI allows users to customize domain list, pin favorites, and auto-create subfolders from templates.
-  - Multi-org handling: use `org: "Acme Corp"` frontmatter field rather than folder nesting — keeps structure flat and flexible.
-  - Example: A user with multiple employers can keep all work notes in `work/` and distinguish via `org` metadata + backlinks/graph navigation.
-- [x] `prompts/` directory with stub files: `routing.md`, `extract.md`, `weekly_review.md`, `confidence.md` (each with YAML frontmatter + placeholder prompt body); `prompts/local/` listed in `.gitignore`. **Note:** `confidence.md` is retained as a documentation placeholder only — M7 replaces LLM-based confidence scoring with a deterministic formula, so this file is never loaded by any agent.
-- [x] Stub module files: `monocle/watcher.py`, `monocle/process_manager.py`, `monocle/agents/routing.py`, `monocle/agents/reindex.py` (empty classes / `pass` implementations — wired in later milestones). **Note:** `capture.py` is not created — the capture server role is fulfilled by `POST /api/ingest` REST endpoint in Phase 1 (per PRD v2.4); optional separate process deferred to Phase 3+ via `ProcessManager`.
-- [x] `monocle/telemetry.py` — `configure_telemetry(settings)`, `get_tracer(name)`, `get_meter(name)`, `span(name, **attrs)` async ctx manager, `timed(histogram, **attrs)` async ctx manager. No-ops when `telemetry.enabled: false`. Called once from `main.py` lifespan before any other subsystem starts.
-- [x] `.obsidianignore` containing: `.versions/`, `.trash/`
-- [x] `frontend/` scaffold: `package.json`, `vite.config.ts`, `tsconfig.json`, `src/main.tsx`, `src/App.tsx` (empty shell with one route)
-- [x] `frontend/vitest.config.ts`
-- [x] `frontend/package.json` dependencies: `react`, `react-dom`, `react-router-dom`, `react-markdown`, `react-force-graph`, `recharts`, `@codemirror/state`, `@codemirror/view`, `@codemirror/commands`, `@codemirror/lang-markdown`, `@codemirror/lang-yaml`, `typescript`, `vite`, `vitest`, `@playwright/test`
-- [x] `pytest.ini` with `testpaths = monocle/tests` and `asyncio_mode = auto` (implemented via `[tool.pytest.ini_options]` in `pyproject.toml`)
-- [x] `monocle/tests/conftest.py` with:
-  - `tmp_vault` fixture — temp dir with 5 fixture notes (one per template type: person, decision, meeting, idea, blank)
-  - `memory_index` fixture — returns a fresh `MemoryIndex` instance
-- [x] `.vscode/tasks.json` — foundational build task definitions:
-  - `install: backend deps` — `uv sync`
-  - `install: frontend deps` — `npm install` (cwd: `frontend/`)
-  - `test: backend` — `uv run python -m pytest monocle/tests/ -x --tb=short -q`
-  - `test: frontend` — `npm run test -- --run` (cwd: `frontend/`)
-- [x] `.vscode/launch.json` — foundational debug launch configurations:
-  - `Dev Server (debug)` — debugpy launch of `python -m monocle dev`; primary developer launch
-  - `Backend Tests (debug)` — debugpy launch of pytest against `monocle/tests/`
+**Summary:** Project structure, tooling, Pydantic models, test infrastructure, and frontend scaffold. All core dependencies pinned; uv environment operational; telemetry foundation in place.
 
-**Acceptance Criteria:**
-- [x] `uv run python -m pytest monocle/tests/ -x --tb=short -q` exits 0 (9 tests passed)
-- [x] `cd frontend && npm run test -- --run` exits 0 (1 test passed)
-- [x] `uv run python -c "from monocle.config import Settings"` succeeds (no import errors)
-- [x] `uv run python -c "from monocle.models import Note, BrainStats, IngestRequest, GraphData, LinkRef"` succeeds
-- [x] `.gitignore` covers `config.yaml`, `.env`, `data/`, `frontend/dist/`, `__pycache__/`, `.venv/`
-- [x] `F5` in VS Code with `Dev Server (debug)` as the active configuration starts the unified server with the debugger attached
-- [x] `uv run python -c "from monocle.telemetry import configure_telemetry"` succeeds (no import errors)
-
-**Notes:**
-- Python minimum version: 3.11. Set `requires-python = ">=3.11"` in `pyproject.toml` (uv reads this to select the interpreter).
-- Pin agent-framework versions — the package renames identifiers between preview builds.
-- Use `uv` for all Python environment and dependency management. `uv sync` creates `.venv/` at project root and installs all deps (including dev extras). Never use `pip` directly or install into system Python.
-- `monocle` is the Python package name (directory is `monocle/`). `uv run python -m monocle` works via `monocle/__main__.py`.
-- On first run, if `config.yaml` is missing, `Settings` auto-copies `config.yaml.example` → `config.yaml` and logs a one-time notice. This ensures a fresh clone works immediately without manual setup while preserving the user's ability to override any value.
-- `allow_duplicate: bool = False` in `IngestRequest` must be present from M1 even though the duplicate-detection logic is not wired until M7. Stubs in M2 must accept the field without error.
+**Full details:** [docs/milestones.md#m1-foundation--project-skeleton](milestones.md#m1-foundation--project-skeleton)
 
 ---
 
 ### M2: API Skeleton — All Route Stubs + OpenAPI
 
-**Goal:** Register every API endpoint as a stub. This is the scaffold all future milestones wire into. The OpenAPI spec must be complete before frontend work begins.
+**Status:** COMPLETE (2026-03-12)
 
-**Deliverables:**
-- [x] `monocle/main.py` — FastAPI app, all routers included, CORS middleware (**production**: allow only `http://localhost:{server.port}` and `http://127.0.0.1:{server.port}`; **dev mode only**: additionally allow `http://localhost:5173` and `http://127.0.0.1:5173` for the Vite dev server — no wildcard origins; controlled by `server.dev_cors` flag set by `uv run python -m monocle dev`), lifespan hook (placeholder startup/shutdown)
-- [x] `monocle/routers/health.py` — `GET /api/health` returns `{"status": "starting", "version": "0.1.0", "ai_reachable": false, "index_status": "empty"}`
-- [x] `monocle/routers/notes.py` — `GET /api/notes`, `GET /api/notes/{path}`, `PUT /api/notes/{path}`, `PATCH /api/notes/{path}`, `DELETE /api/notes/{path}`, `POST /api/notes/{path}/move`, `GET /api/templates`, `GET /api/notes/{path}/backlinks` — all return `501`
-- [x] `monocle/routers/search.py` — `GET /api/search`, `GET /api/search/keyword` — return `501`
-- [x] `monocle/routers/ingest.py` — `POST /api/ingest`, `POST /api/ingest/stream` — return `501`
-- [x] `monocle/routers/ingest_failures.py` — `GET /api/ingest/failures`, `POST /api/ingest/failures/retry`, `DELETE /api/ingest/failures/{id}` — all return `501`
-- [x] `monocle/routers/transcribe.py` — `POST /api/transcribe` — returns `501`
-- [x] `monocle/routers/graph.py` — `GET /api/graph` — returns `501`
-- [x] `monocle/routers/stats.py` — `GET /api/stats` — returns `501`
-- [x] `monocle/routers/chat.py` — `POST /api/chat` — returns `501`
-- [x] `monocle/routers/agents.py` — `POST /api/agents/weekly-summary`, `POST /api/agents/reindex` — return `501`
-- [x] `monocle/routers/review.py` — `GET /api/review`, `PATCH /api/review/{path}/approve`, `POST /api/review/approve-all`, `GET /api/review/count` — return `501`
-- [x] `monocle/routers/settings.py` — `GET /api/settings`, `PATCH /api/settings`, `POST /api/settings/rotate-mcp-key` — return `501`
-- [x] `monocle/routers/teams.py` — `POST /api/teams/messages` — returns `501`
-- [x] All stubs use correct Pydantic request/response models from `models.py`
-- [x] Rate limiting via `slowapi`: `/api/ingest` + `/api/transcribe` = 30 req/min; `/api/chat` = 60 req/min
-- [x] FastAPI static files mount at `/` (serves `frontend/dist/`; noop if not built)
-- [x] `OpenTelemetryMiddleware` (from `opentelemetry-instrumentation-fastapi`) registered in `main.py`; automatically creates a server span per request with `http.method`, `http.route`, `http.status_code`, and duration. Provides the user-facing latency signal for every endpoint with zero per-route code.
-- [x] `openapi.json` exported to repo root and committed
-- [x] `monocle/tests/test_api.py` — `TestClient` tests verifying every route returns 200 or 501, never 404 or 500
-- [x] Extend `.vscode/tasks.json`:
-  - `api: export openapi` — `uv run python -c "import json; from monocle.main import app; open('openapi.json','w').write(json.dumps(app.openapi(),indent=2))"`
-  - `api: start server` — `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000 --reload` (non-debug, used as a preLaunchTask)
-- [x] Extend `.vscode/launch.json`:
-  - `API Server (debug)` — debugpy launch of uvicorn at `127.0.0.1:8000 --reload`
+**Summary:** All 13 API routers registered as 501 stubs; OpenAPI spec auto-generated and committed. CORS, rate limiting, and OTel instrumentation in place.
 
-**Acceptance Criteria:**
-- [x] `GET http://localhost:8000/api/health` returns 200 JSON
-- [x] `GET http://localhost:8000/openapi.json` returns a valid OpenAPI 3.x document listing all 30 endpoints
-- [x] Every non-health endpoint returns exactly 501 (not 404, not 500)
-- [x] `uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000` starts without errors
-- [x] `uv run python -m pytest monocle/tests/test_api.py -x --tb=short -q` passes (31 tests)
-
-**Notes:**
-- Commit `openapi.json` to the repo. The frontend uses it to generate `schema.d.ts`.
-- After any route change, regenerate: `uv run python scripts/export_openapi.py`
+**Full details:** [docs/milestones.md#m2-api-skeleton--all-route-stubs--openapi](milestones.md#m2-api-skeleton--all-route-stubs--openapi)
 
 ---
 
 ### M3: Vault Layer
 
-**Goal:** All filesystem operations for vault notes — CRUD, atomic writes, versioning, soft-delete, schema normalisation, template management, wikilink resolution.
+**Status:** COMPLETE (2026-03-13)
 
-**Deliverables:**
-- [x] `monocle/vault/__init__.py` — `VaultLayer` class with methods:
-  - `list_notes(folder, type, domain, sort, limit, offset) -> Page[NoteRef]` — paginated
-  - `read_note(file_path) -> Note` — parse YAML frontmatter + body; raise `NoteNotFound` if missing; call `normalise_frontmatter`
-  - `write_note(file_path, note, if_mtime=None)` — atomic write (system tempdir via `tempfile.mkstemp`); shadow version before overwrite; raise `409` on mtime mismatch
-  - `patch_frontmatter(file_path, updates: dict)` — merge-update frontmatter only, preserve body
-  - `delete_note(file_path)` — move to `<vault>/.trash/`; never delete from filesystem
-  - `move_note(from_path, to_path)` — rename file, update index
-  - `create_from_template(template_type, metadata, body) -> Note` — load template YAML, merge metadata, derive filename slug from title
-  - `resolve_wikilink(name) -> str | None` — case-insensitive filename match, returns vault-relative path or None
-  - `list_versions(file_path) -> list[str]` — list timestamps in `.versions/<path>/`
-  - `restore_version(file_path, timestamp)` — overwrite current with historical version
-- [x] `monocle/vault/normalise.py` — `normalise_frontmatter(fm: dict) -> dict` applying schema defaults
-- [x] `monocle/vault/wikilinks.py` — `parse_wikilinks(body: str) -> list[str]`, `parse_links_field(links: list) -> list[LinkRef]`, `resolve_wikilink(name, vault_root) -> str | None`
-- [x] `monocle/vault/templates/` — 10 YAML schemas: `person.yaml`, `decision.yaml`, `project.yaml`, `meeting.yaml`, `idea.yaml`, `observation.yaml`, `reference.yaml`, `action_item.yaml`, `blank.yaml`, `weekly_summary.yaml`. **These are machine-readable Pydantic schema definitions living in the Python package at `monocle/vault/templates/` — not in the vault directory. They are distinct from the user-facing Markdown templates in `vault/.templates/`.**
-- [x] `monocle/tests/test_vault.py` — comprehensive tests using `tmp_vault` fixture
-- [x] Extend `.vscode/tasks.json`:
-  - `test: vault` — `python -m pytest monocle/tests/test_vault.py -x --tb=short -q`
+**Summary:** VaultLayer CRUD, atomic writes, versioning (`.versions/`), soft-delete (`.trash/`), path traversal guards, schema normalisation, and wikilink resolution.
 
-**Acceptance Criteria:**
-- [x] Atomic writes: temp file created in system tempdir (not vault); final file written via `os.replace`
-- [x] Versioning: writing an existing note creates `.versions/{path}/{updated_at}.md`
-- [x] Soft-delete: deleted note appears in `.trash/`; original path is absent
-- [x] Path traversal: `read_note("../../.env")` raises `403` (not a file error)
-- [x] Mtime conflict: `write_note(path, note, if_mtime=stale_ts)` raises `409`
-- [x] Schema normalisation: note with no `type` field reads back with `type: "other"`
-- [x] `parse_links_field` normalises plain strings `"Note Name"` and dicts `{target: "..."}` both into `LinkRef` objects
-- [x] `uv run python -m pytest monocle/tests/test_vault.py -x --tb=short -q` passes (88 tests)
+**Full details:** [docs/milestones.md#m3-vault-layer](milestones.md#m3-vault-layer)
 
 ---
 
 ### M4: Index Layer — ChromaDB + MemoryIndex
 
-**Goal:** IndexLayer abstraction with a ChromaDB production implementation and an in-memory test fake that requires no embeddings.
+**Status:** COMPLETE (2026-03-13)
 
-**Deliverables:**
-- [x] `monocle/index/base.py` — `IndexLayer` ABC: `upsert_chunks`, `delete_file`, `search`, `get_stats`, `delete_all`
-- [x] `monocle/index/memory.py` — `MemoryIndex(IndexLayer)` — in-memory dict, no embeddings, substring search. **Used only in tests.**
-- [x] `monocle/index/chroma.py` — `ChromaIndex(IndexLayer)` wrapping `chromadb.PersistentClient`. Collection uses `cosine` space. Validates `embed_dimensions` against existing collection on startup; raises `DimensionMismatch` on mismatch.
-- [x] `monocle/index/__init__.py` — `get_index(settings) -> IndexLayer` factory
-- [x] `monocle/tests/test_index.py` — parametrized tests (`@pytest.mark.parametrize`) against both `MemoryIndex` and `ChromaIndex` (real ChromaIndex via fake in-memory ChromaDB client)
-- [x] Extend `.vscode/tasks.json`:
-  - `test: index` — `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q`
+**Summary:** IndexLayer abstraction with ChromaDB (production) and MemoryIndex (testing). Semantic search, metadata filtering, dimension validation.
 
-**Acceptance Criteria:**
-- [x] `MemoryIndex` and `ChromaIndex` both pass identical parametrized test cases
-- [x] `ChromaIndex` raises `DimensionMismatch` if `embed_dimensions` from config doesn't match existing collection
-- [x] `delete_file(path)` removes all chunks for that file path
-- [x] `search` respects `type`, `domain`, `source` metadata filters
-- [x] `uv run python -m pytest monocle/tests/test_index.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m4-index-layer--chromedb--memoryindex](milestones.md#m4-index-layer--chromedb--memoryindex)
 
 ---
 
 ### M5: Inbox Watcher & Scheduled Re-Index
 
-**Goal:** Inbox file watcher integration (Phase 1: async task in unified process), scheduled full-vault re-indexing, chunk utility, and foundation for optional standalone processes in Phase 3.
+**Status:** COMPLETE (2026-03-14)
 
-**Deliverables:**
-- [x] `monocle/ingest/chunker.py` — `chunk_text(text, chunk_size=512, overlap=64) -> list[str]` using `tiktoken cl100k_base`
-- [x] `monocle/watcher.py` — `InboxWatcher` class + `ReindexQueue`:
-  - `watchdog.Observer` on `vault/inbox/` only (not recursive into subdirs)
-  - 2-second debounce per file path *(inbox watcher context only — prevents double-trigger on multi-write saves to the inbox; distinct from the editor-save coalescing idle window, which is 10 seconds per file and is wired into PUT/PATCH routes in M8 per FR-WTCH-04a)*
-  - On new file: calls `IngestPipeline.run(request)` directly (in-process for testability and dev mode)
-  - Mode (Phase 1): integrated as async task in `main.py` lifespan; spins in an executor thread
-  - Mode (Phase 3+ optional): can run as a standalone subprocess if `server.separate_processes: true` (future ProcessManager implementation)
-  - On success: file relocated to vault by pipeline (pipeline writes processed note to main vault)
-  - On failure: writes `.error.md` sidecar alongside the source file
-  - `start()` / `stop()` / `status() -> dict` interface designed for future ProcessManager (currently unused in Phase 1)
-  - `ReindexQueue` — asyncio-based per-file coalescing queue; `push(file_path)` schedules a background re-index with a 10-second idle window per file (multiple pushes for the same file within the window collapse into one re-index job); used by PUT/PATCH route handlers (M8) and the ingest pipeline (M7)
-- [x] `monocle/agents/reindex.py` — `ReindexAgent`:
-  - `run(vault, index, force=False)` — scans all `.md` files in vault; compares frontmatter `updated` to ChromaDB `updated_at` metadata; re-embeds only changed files (`force` clears all first)
-  - `startup_check(vault, index)` — triggers full re-index if `index.get_stats().total_chunks == 0` and vault has notes; sets `health.status = "indexing"` during this
-- [x] `monocle/agents/scheduler.py` — APScheduler setup for scheduled tasks (Phase 1: integrated in main process lifespan)
-- [x] `monocle/tests/test_watcher.py` — mock filesystem events; verify:
-  - New file in inbox triggers exactly one ingest call (with 2s debounce)
-  - Failed ingest writes `.error.md` sidecar
-  - Files outside inbox (e.g., `vault/people/`) do NOT trigger the watcher
-- [x] `monocle/tests/test_reindex.py` — mock vault + `MemoryIndex`; assert stale-detection logic and `--force` full re-index
-- [x] Extend `.vscode/tasks.json`:
-  - `test: watcher` — `python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q`
+**Summary:** Inbox file watcher (watchdog.Observer), ReindexQueue coalescing (10-second idle window), ReindexAgent (stale detection + startup check), APScheduler setup, and chunking utility.
 
-**Acceptance Criteria:**
-- [x] Creating a `.md` file in `vault/inbox/` triggers exactly one ingest call (two rapid saves = one call)
-- [x] `ReindexQueue.push(path)` called multiple times for the same `file_path` within the 10-second idle window results in exactly one background re-index job (coalescing verified via mock)
-- [x] A failed ingest leaves a `.error.md` sidecar adjacent to the source file
-- [x] Files in `vault/people/`, `vault/work/` (outside inbox) produce no watcher events
-- [x] Watcher integration in main process: log prefixed `[WATCHER]`; stops cleanly on app shutdown
-- [x] `ReindexAgent.run()` only re-embeds notes where frontmatter `updated` > ChromaDB `updated_at`
-- [x] `ReindexAgent.run(force=True)` re-embeds all notes regardless
-- [x] `startup_check` triggers full re-index when index is empty; health reports `"indexing"`
-- [x] APScheduler runs weekly_summary and re-index crons; scheduled tasks execution is logged
-- [x] `uv run python -m pytest monocle/tests/test_watcher.py monocle/tests/test_reindex.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m5-inbox-watcher--scheduled-re-index](milestones.md#m5-inbox-watcher--scheduled-re-index)
 
 ---
 
 ### M6: AI Provider Abstraction
 
-**Goal:** `AIProvider` ABC and `OllamaProvider`. Resolve SPIKE-1 (Whisper audio).
+**Status:** COMPLETE (2026-03-17)
 
-**Deliverables:**
-- [x] `monocle/ai/base.py` — `AIProvider` ABC:
-  - `embed(text: str) -> list[float]`
-  - `embed_batch(texts: list[str]) -> list[list[float]]`
-  - `chat(messages: list[dict], stream: bool) -> str | AsyncIterator[str]`
-  - `transcribe(audio_bytes: bytes, mime_type: str) -> str`
-  - `extract_note_metadata(text: str, template: str) -> NoteMetadata`
-- [x] `monocle/ai/ollama_provider.py` — `OllamaProvider(AIProvider)` using `ollama.AsyncClient`. Auto-pulls model on first use if not found.
-- [x] `monocle/ai/foundry_local_provider.py` — `FoundryLocalProvider(AIProvider)` using OpenAI-compatible HTTP API
-- [x] `monocle/ai/azure_provider.py` — `AzureOpenAIProvider(AIProvider)` using `openai.AzureOpenAI`
-- [x] `monocle/ai/__init__.py` — `get_provider(settings) -> AIProvider` factory
-- [x] Instrument all `AIProvider` method implementations with OTel spans and metrics using `telemetry.span()` / `telemetry.timed()`: each of `embed`, `embed_batch`, `chat`, `transcribe`, `extract_note_metadata` creates a child span (attributes: `ai.provider`, `ai.model`) and records duration into the corresponding histogram (`ai.embed_duration`, `ai.chat_duration`, `ai.transcribe_duration`). `opentelemetry-instrumentation-httpx` auto-instruments the underlying HTTP calls to Ollama/Azure.
-- [x] **SPIKE-1 resolution:** Run validation; record outcome in `## Technical Spikes` above
-- [x] `monocle/tests/test_ai.py` — mock-based unit tests (mock `httpx`/`ollama` client). Integration tests behind `@pytest.mark.integration` (skipped by default).
-- [x] Extend `.vscode/tasks.json`:
-  - `test: ai` — `python -m pytest monocle/tests/test_ai.py -x --tb=short -q` (skips `@pytest.mark.integration`)
+**Summary:** AIProvider ABC with three implementations (Ollama, FoundryLocal, AzureOpenAI). TranscriptionProvider abstraction for decoupled transcription backends (WhisperCpp, Subprocess, NativeOpenAI). SPIKE-1 resolved.
 
-**Acceptance Criteria:**
-- [x] Factory selects correct provider based on `settings.ai.provider`
-- [x] `extract_note_metadata` returns complete `NoteMetadata` with all required fields
-- [x] Mock-based unit tests pass; no live Ollama required
-- [x] SPIKE-1 outcome recorded in `## Technical Spikes`
-- [x] `uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q` passes (skips `@pytest.mark.integration`)
+**Full details:** [docs/milestones.md#m6-ai-provider-abstraction](milestones.md#m6-ai-provider-abstraction) | [SPIKE-1 resolution](milestones.md#spike-1-ollama-whisper-audio-transcription)
 
 ---
 
 ### M7: Ingest Pipeline & Plugin Registry
 
-**Goal:** Full ingest pipeline with `IngestPlugin` ABC, plugin registry, and the three built-in plugins. Deterministic confidence scoring (no LLM call required).
+**Status:** COMPLETE (2026-03-17)
 
-**Deliverables:**
-- [ ] `monocle/ingest/plugin.py` — `IngestPlugin` ABC with `source_id: ClassVar[str]`, `source_label: ClassVar[str]`, `can_handle(cls, request) -> bool`, `extract(request) -> str`; `IngestPluginRegistry` singleton
-- [ ] `monocle/ingest/plugins/text_plugin.py` — `TextPlugin`
-- [ ] `monocle/ingest/plugins/audio_plugin.py` — `AudioPlugin`
-- [ ] `monocle/ingest/plugins/teams_plugin.py` — `TeamsPlugin`
-- [ ] `monocle/agents/routing.py` — `RoutingAgent` class:
-  - `route(text, template_hint) -> RoutingDecision`
-  - Checks each template’s `sentence_starters` list first (synchronous, no LLM call)
-  - Falls back to `AIProvider.chat` with `prompts/routing.md` system prompt for structured JSON response
-  - Returns `RoutingDecision(template, confidence, reasoning, sentence_starter_matched)`
-- [ ] `monocle/vault/templates/*.yaml` — add `sentence_starters: [...]` list to each of the 10 template schemas
-- [ ] `monocle/ingest/__init__.py` — `IngestPipeline` class with `run(request) -> tuple[Note, IngestConfidence]` (steps per Architecture Quick Reference); integrates `RoutingAgent` in step 3
-- [ ] Wrap each of the 8 ingest pipeline steps in `telemetry.span(f"ingest.step.{n}", ...)` child spans (parent span: `ingest.pipeline`); record `ingest.step_duration` histogram per step and `ingest.pipeline_duration` at the end. Emit `ingest.notes_total` counter on success; `ingest.failures_total` counter on failure (attribute: `step=N`).
-- [ ] `monocle/ingest/confidence.py` — `score_confidence(note: Note, routing_confidence: float, body_embedding: list[float], vault: VaultLayer) -> IngestConfidence` implementing the deterministic formula below. **`body_embedding` is passed in from the re-index step (step 6) — no additional embed call is made.**
-- [ ] **Deterministic Confidence Scoring (implemented in `monocle/ingest/confidence.py`):**
-  - `score_confidence(note) -> IngestConfidence` computes confidence as: `0.35*template_match + 0.30*metadata_coverage + 0.20*tag_plausibility + 0.15*entity_match`
-  - Four components: (1) `template_match` = routing agent confidence, (2) `metadata_coverage` = populated_fields / required_fields, (3) `tag_plausibility` = cosine similarity of tag embeddings to body embedding (or 1.0 if no tags), (4) `entity_match` = found_people_with_notes / max(found_people, 1)
-  - Weights configurable via `config.yaml` `review.confidence_weights`; **no LLM call required** (halves ingest latency)
-  - Compute `review_status` and approval metadata as follows:
-    - If `review.auto_approve_threshold_pct == 0`, set `review_status: pending`
-    - If `review.auto_approve_threshold_pct > 0` and `confidence * 100 >= review.auto_approve_threshold_pct`, set `review_status: approved`, `approval_mode: auto`, `approved_by: "system:auto"`, `approved_at: <now>`
-    - Otherwise set `review_status: pending`
-- [ ] Duplicate detection: compute semantic similarity (cosine) between note body embedding and last 7 days of note embeddings in index; return `409 Conflict` if similarity > 0.95 with conflict details (`similar_note_detected`, `similar_note_path`, `similarity_score`); user confirms override via `allow_duplicate=true`
-- [ ] Failed-ingest registry: persist enough metadata to drive a UI list and retry flow for `.error.md` sidecars. **Persistence mechanism: `data/failed_ingests.json`** — a JSON array written by the pipeline whenever a sidecar is created, updated on retry/dismiss. Uses Python stdlib `json` only (no new dependencies). Loaded into memory at startup; written atomically (write temp + rename) on each change.
-- [ ] `monocle/prompts.py` — `load_prompt(name: str) -> str` helper: loads `prompts/local/<name>.md` if it exists, otherwise `prompts/<name>.md`; strips YAML frontmatter and returns prompt body
-- [ ] Default prompt files (`prompts/routing.md`, `prompts/extract.md`) written with working content (not stubs); `prompts/confidence.md` **no longer needed** (replaced by deterministic scoring)
-- [ ] `monocle/tests/test_ingest.py` — mock `AIProvider` and `VaultLayer`; assert correct frontmatter for sample inputs; assert sentence-starter fast path bypasses LLM routing call; assert deterministic confidence formula
-- [ ] Extend `.vscode/tasks.json`:
-  - `test: ingest` — `python -m pytest monocle/tests/test_ingest.py -x --tb=short -q`
+**Summary:** Full 8-step IngestPipeline with IngestPlugin registry, RoutingAgent (sentence-starter fast path + LLM fallback), deterministic confidence scoring (no LLM call), duplicate detection (>0.95 similarity), and failed-ingest registry persistence.
 
-**Acceptance Criteria:**
-- [x] Text ingest produces a valid `.md` file with correct frontmatter, review metadata, and auto-approval behaviour based on `review.auto_approve_threshold_pct`
-- [x] Audio ingest calls `AIProvider.transcribe`; resulting note has `source: "voice"`
-- [x] Input beginning with a sentence starter (e.g., `"I decided to..."`) routes to the `decision` template WITHOUT making an LLM call
-- [x] Falls back to `blank` template when routing confidence < 0.6
-- [x] A new plugin can be registered without touching pipeline code: `registry.register(MyPlugin())`
-- [x] Plugin `can_handle` is tested in registration order; first match wins
-- [x] Ingest failure on step 3–5 writes a `.error.md` sidecar (verified with a mock that raises during routing)
-- [x] Deterministic confidence score is computed and written to note frontmatter; **no LLM scoring agent call made**
-- [x] Auto-approved notes include `approval_mode: auto`, `approved_by: "system:auto"`, and `approved_at`; manually approved notes later record `approval_mode: manual`
-- [x] Re-ingesting a note with semantic similarity > 0.95 to existing note returns advisory flag; user can override with `allow_duplicate=true`
-- [x] Failed-ingest registry entry is created alongside `.error.md` and cleared after a successful retry
-- [x] `uv run python -m pytest monocle/tests/test_ingest.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m7-ingest-pipeline--plugin-registry](milestones.md#m7-ingest-pipeline--plugin-registry)
 
 ---
 
 ### M8: REST API Wiring — Core
 
-**Goal:** Replace 501 stubs with real implementations for notes, search, ingest, transcribe, health, and stats. The API must be fully functional with an Ollama model running.
+**Status:** COMPLETE (2026-03-17)
 
-**Deliverables:**
-- [x] `monocle/main.py` lifespan: start `VaultWatcher`, initialise `AIProvider` + `IndexLayer` singletons, trigger startup re-index if needed; call `configure_telemetry(settings)` as the **first** lifespan action (before any subsystem starts)
-- [x] `routers/health.py` — wired to real `watcher.status`, `ai_reachable` (ping provider), `index.get_stats()`; add `telemetry_endpoint` field to the health response (the configured OTLP endpoint, or `null` when disabled) so operators can confirm where traces are going
-- [x] `routers/notes.py` — all CRUD routes wired to `VaultLayer`; `GET /api/notes` is paginated; `PUT` and `PATCH` handlers push `file_path` to `ReindexQueue` (defined in M5) after a successful write so editor saves enqueue coalesced background re-indexing without blocking the response (FR-WTCH-04a)
-- [x] `routers/search.py` — semantic search: `AIProvider.embed` + `IndexLayer.search`; keyword: `VaultLayer` text scan
-- [x] `routers/ingest.py` — `POST /api/ingest` wired to `IngestPipeline`; `POST /api/ingest/stream` emits `text/event-stream` SSE progress events during pipeline steps
-- [x] `routers/ingest_failures.py` — wire `GET /api/ingest/failures`, `POST /api/ingest/failures/retry`, and `DELETE /api/ingest/failures/{id}` (stubs registered in M2)
-- [x] `routers/transcribe.py` — wired to `AIProvider.transcribe`
-- [x] `routers/stats.py` — wired to `IndexLayer.get_stats` + `VaultLayer`; include `latency_p50_ms` and `latency_p95_ms` per operation type as fields directly on `BrainStats` (schema fields present; population deferred to M11 pending in-process OTel MetricReader readback — currently returns `{}` empty dicts with a documented TODO)
-- [x] `monocle/tests/test_api.py` — integration tests via `TestClient` using `MemoryIndex` + mock `AIProvider`
-- [x] `monocle/tests/test_security.py` — path traversal, file size limits, 409 conflict detection, CORS headers, rate limiting
-- [x] Extend `.vscode/tasks.json`:
-  - `test: api` — `python -m pytest monocle/tests/test_api.py -x --tb=short -q`
-  - `test: security` — `python -m pytest monocle/tests/test_security.py -x --tb=short -q`
+**Summary:** All core endpoints wired to real implementations: notes CRUD, semantic/keyword search, ingest streaming, transcribe, health, stats, backlinks. Path traversal guards, 409 conflict detection, file size limits, and CORS isolation enforced.
 
-**Acceptance Criteria:**
-- [x] `POST /api/ingest {"content": "Met with Sarah today", "source": "web"}` → 201 with a `Note` object
-- [x] Ingesting content with > 0.95 cosine similarity to a note from the last 7 days returns 409 Conflict with `similar_note_detected: true`, `similar_note_path`, and `similarity_score` in the response body; user forces creation with `allow_duplicate: true` in the request body
-- [x] `GET /api/notes?sort=updated&limit=10&offset=0` → paginated response with `total` and `items`
-- [x] `GET /api/ingest/failures` returns `.error.md`-backed failures in newest-first order
-- [x] `DELETE /api/ingest/failures/{id}` removes the failed-ingest record from the list; the underlying `.error.md` file is NOT deleted
-- [x] `PUT /api/notes/test.md` with stale `if_mtime` → 409
-- [x] Rapid consecutive `PUT /api/notes/{path}` calls within 10 seconds result in exactly one background re-index job for that file (coalescing via `ReindexQueue`)
-- [x] `GET /api/notes/../../.env` → 403
-- [x] `POST /api/ingest` with `audio_bytes` > 25 MB → 422
-- [x] `GET /api/health` → `{"status": "ready", "ai_reachable": true, "telemetry_endpoint": "http://localhost:4317", ...}` when provider is live
-- [x] `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_security.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m8-rest-api-wiring--core](milestones.md#m8-rest-api-wiring--core)
 
 ---
 
 ### M9: Graph Layer
 
-**Goal:** Ego-graph builder with all four edge sources, caching, and the fully wired `GET /api/graph` endpoint.
+**Status:** COMPLETE (2026-03-18)
 
-**Deliverables:**
-- [x] `monocle/graph.py` — `GraphBuilder` class:
-  - `build(focus=None, max_degree=3, types=None, n=500) -> GraphData`
-  - Reads all notes via `VaultLayer`; extracts edges from: (1) structured `links` frontmatter, (2) body `[[wikilinks]]`, (3) `people` co-mentions, (4) shared `tags`
-  - Computes `degree` via BFS from `focus` node; `degree=null` in full-vault mode
-  - In-memory cache keyed on `(focus, max_degree, types, n)`; invalidated by watcher events
-- [x] `routers/graph.py` — wired to `GraphBuilder`
-- [x] `routers/notes.py` — wire `GET /api/notes/{file_path:path}/backlinks` (stub registered in M2): scans all vault notes for incoming links to the target using the same edge-extraction logic as `GraphBuilder`; returns `source`, `relation`, and `context` fields per FR-API-12a
-- [x] `monocle/tests/test_graph.py` — use `tmp_vault` fixture; assert known node/edge structure
-- [x] Extend `.vscode/tasks.json`:
-  - `test: graph` — `python -m pytest monocle/tests/test_graph.py -x --tb=short -q`
+**Summary:** GraphBuilder with ego-graph extraction from structured links, wikilinks, people co-mentions, and shared tags. In-memory caching with watcher-based invalidation. Backlinks endpoint for all incoming edges.
 
-**Acceptance Criteria:**
-- [x] `GET /api/graph?focus=people/sarah.md&max_degree=2` returns Sarah at degree 0, co-mentioned notes at degree 1
-- [x] Structured `links` frontmatter edges carry `relation` and `metadata` in the response
-- [x] `types=person` excludes note and tag nodes from response
-- [x] Cache hit on second identical request; cache invalidated after a vault file is modified
-- [x] `GET /api/notes/people/sarah.md/backlinks` returns all notes that link to `sarah.md` via structured links, wikilinks, or `people` co-mention
-- [x] `uv run python -m pytest monocle/tests/test_graph.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m9-graph-layer](milestones.md#m9-graph-layer)
 
 ---
 
 ### M10: Agent Framework & Chat API
 
-**Goal:** Microsoft Agent Framework integration for multi-step chat. SSE streaming chat endpoint. Resolve SPIKE-3.
+**Status:** COMPLETE (2026-03-18)
 
-**Deliverables:**
-- [ ] `monocle/agents/tools.py` — 7 `@tool` decorated agent tools: `search_vault`, `read_note`, `write_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`
-- [ ] `monocle/agents/__init__.py` — `create_chat_agent(provider, vault, index) -> Agent`; agent uses all 7 tools; calls `agent_framework.observability.configure_otel_providers(vs_code_extension_port=4317, enable_sensitive_data=settings.telemetry.enable_sensitive_data)` once at construction time so agent spans and prompt/completion data flow into the same AI Toolkit trace as the surrounding FastAPI request span
-- [ ] `routers/chat.py` — `POST /api/chat` streaming SSE; emits all event types from Architecture Quick Reference; handles `session_id` (echo back only — sessions stored client-side); records `chat.ttft` histogram at first `token` event and `chat.total_duration` histogram at `done` event
-- [ ] Tool error handling: each tool wraps its body in `try/except`; failures emit `tool_error` event and return a structured error to the agent so it can continue
-- [ ] **SPIKE-3 resolution:** Validate streaming latency. Record outcome in `## Technical Spikes`.
-- [ ] `monocle/tests/test_agents.py` — mock agent; assert SSE event sequence
-- [ ] Extend `.vscode/tasks.json`:
-  - `test: agents` — `python -m pytest monocle/tests/test_agents.py -x --tb=short -q`
+**Summary:** Microsoft Agent Framework integration with 7 agent tools (search, read, write, create notes, get stats, list notes, get graph). ChatAgent factory with OTel correlation. SSE streaming chat endpoint with token/tool/error/note_created events. SPIKE-3 resolved.
 
-**Acceptance Criteria:**
-- [ ] `POST /api/chat {"messages": [{"role": "user", "content": "What did I discuss with Sarah?"}], "session_id": "abc"}` returns `text/event-stream`
-- [ ] Stream contains `token` events followed by `done` event
-- [ ] Tool failure emits `tool_error` event; stream continues and agent provides a response
-- [ ] `note_created` event emitted when agent creates a note during conversation
-- [ ] SPIKE-3 outcome recorded
-- [ ] `chat.ttft` histogram records time from POST to first `token` event; `chat.total_duration` records time to `done` event; both visible in AI Toolkit trace view
-- [ ] `uv run python -m pytest monocle/tests/test_agents.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m10-agent-framework--chat-api](milestones.md#m10-agent-framework--chat-api) | [SPIKE-3 resolution](milestones.md#spike-3-microsoft-agent-framework-sse-streaming-through-fastapi)
+---
+
 
 ---
 
