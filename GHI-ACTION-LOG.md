@@ -216,7 +216,8 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Updated `pyproject.toml`: added `httpx` to runtime `dependencies` (used directly by `WhisperCppTranscriptionProvider`)
   - Added 12 new tests to `monocle/tests/test_ai.py`: `TestWhisperCppTranscriptionProvider` (mock httpx, connect-error path, default URL), `TestSubprocessTranscriptionProvider` (mock subprocess, missing-whisper path), `TestNativeOpenAITranscriptionProvider` (mock OpenAI client), `TestGetTranscriptionProvider` (all 3 backends + unknown raises), `TestOllamaTranscription` (delegation + no-provider raises)
   - Updated SPIKE-1 outcome in `docs/build-plan.md` with final architecture description
-  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **314 passed, 3 deselected**, EXIT 0- **Executed M7 — Ingest Pipeline & Plugin Registry (COMPLETE)**
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **314 passed, 3 deselected**, EXIT 0
+  - **Executed M7 — Ingest Pipeline & Plugin Registry (COMPLETE)**
   - Created `monocle/ingest/plugin.py`: `IngestPlugin` ABC (`source_id/source_label` ClassVars, `can_handle()`, `extract()`); `IngestPluginRegistry` singleton with first-match-wins `resolve()`, `.reset()` for test isolation
   - Created `monocle/ingest/plugins/text_plugin.py`, `audio_plugin.py`, `teams_plugin.py`: three built-in plugins; `register_default_plugins()` in `monocle/ingest/plugins/__init__.py` registers them in priority order (Audio → Teams → Text)
   - Created `monocle/prompts.py`: `load_prompt(name)` checks `prompts/local/<name>.md` first (user override), then `prompts/<name>.md`; strips YAML frontmatter; WARNING log if not found
