@@ -127,11 +127,19 @@ class _AIProviderChatClient(BaseChatClient):
                     )
                 elif isinstance(content, FunctionResultContent):
                     # Tool result — becomes a "tool" role message
+                    # Avoid double-encoding: if result is already a string, use as-is;
+                    # otherwise JSON-serialize it
+                    if isinstance(content.result, str):
+                        result_content = content.result
+                    elif content.result is not None:
+                        result_content = json.dumps(content.result)
+                    else:
+                        result_content = ""
                     tool_results.append(
                         {
                             "role": "tool",
                             "tool_call_id": content.call_id or "",
-                            "content": json.dumps(content.result) if content.result is not None else "",
+                            "content": result_content,
                         }
                     )
 

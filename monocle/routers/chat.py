@@ -78,10 +78,11 @@ async def _stream_agent_response(
     Event types (see Architecture Quick Reference):
       token       — text delta from the model
       tool_call   — tool was invoked
-      tool_error  — tool invocation failed
       note_created — agent created a new note
-      done        — stream complete
-      error       — fatal error
+      error       — fatal or recoverable error (emitted before done)
+      done        — stream terminator (always emitted); includes status field:
+                    - "success" on normal completion
+                    - "error" if an exception occurred (see error event for details)
     """
     from agent_framework import (
         AgentRunResponseUpdate,
@@ -95,6 +96,8 @@ async def _stream_agent_response(
     start_ms = time.monotonic() * 1000
     first_token_sent = False
     total_tokens = 0
+    done_status = "success"
+    done_error_message = None
 
     app = request.app
     ai = getattr(app.state, "ai", None)
@@ -169,11 +172,22 @@ async def _stream_agent_response(
         except Exception:
             pass
 
-        yield _sse("done", {"total_tokens": total_tokens, "session_id": chat_request.session_id})
-
     except Exception as exc:
         logger.exception("[AGENT] Chat stream error: %s", exc)
-        yield _sse("error", {"message": "An error occurred processing your request"})
+        done_status = "error"
+        done_error_message = "An error occurred processing your request"
+        yield _sse("error", {"message": done_error_message})
+
+    finally:
+        # Always emit done as the terminal event
+        done_data: dict[str, Any] = {
+            "status": done_status,
+            "total_tokens": total_tokens,
+            "session_id": chat_request.session_id,
+        }
+        if done_error_message is not None:
+            done_data["error"] = done_error_message
+        yield _sse("done", done_data)
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +200,11 @@ async def _stream_agent_response(
 async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
     """Stream agent responses as Server-Sent Events.
 
-    Event types: token | tool_call | tool_error | note_created | done | error
+    The stream always terminates with a 'done' event carrying a status field
+    indicating success or error. If status=error, an 'error' event was also
+    emitted prior to done with failure details.
+
+    Event types: token | tool_call | note_created | error | done
     """
     if not body.messages:
         raise HTTPException(status_code=422, detail="messages must not be empty")

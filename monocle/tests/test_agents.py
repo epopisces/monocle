@@ -4,7 +4,7 @@ monocle/tests/test_agents.py — Tests for M10 Agent Framework & Chat API.
 Coverage:
   - POST /api/chat SSE event sequence: token, tool_call, note_created, done
   - tool_error: stream continues after tool failure
-  - done event always emitted (even on agent error)
+  - done event emitted on normal completion; error-only on pre-stream failures
   - Empty messages → 422
   - VaultTools construction and tool list
   - create_chat_agent factory returns a ChatAgent
@@ -118,7 +118,7 @@ class TestChatSSEStream:
         assert any(e["data"]["delta"] == "Hello" for e in token_events)
 
     def test_done_event_always_emitted(self, api_client):
-        """A 'done' event must always appear at the end of the stream."""
+        """A 'done' event must always appear at the end of the stream on happy path."""
         update = _fake_update([_text_content("response text")])
 
         mock_agent = MagicMock()
@@ -135,6 +135,10 @@ class TestChatSSEStream:
         assert len(done_events) == 1
         # done event must be last
         assert events[-1]["event"] == "done"
+        # done must have status=success on happy path
+        assert events[-1]["data"]["status"] == "success"
+        # error field should not be present on success
+        assert "error" not in events[-1]["data"]
 
     def test_tool_call_event_emitted(self, api_client):
         """FunctionCallContent emits a tool_call SSE event."""
@@ -534,6 +538,36 @@ class TestToDictMessages:
         result = _AIProviderChatClient._to_dict_messages([msg])
         assert result[0]["content"] == "Hello world"
 
+    def test_function_result_string_not_double_encoded(self):
+        """String results should not be JSON-encoded; they're used as-is."""
+        from agent_framework import ChatMessage, FunctionResultContent
+        from monocle.agents import _AIProviderChatClient
+
+        # Tool returns a JSON string directly
+        json_string = '{"found": true, "count": 42}'
+        frc = FunctionResultContent(call_id="c1", result=json_string)
+        msg = ChatMessage(role="tool", contents=[frc])
+        result = _AIProviderChatClient._to_dict_messages([msg])
+        
+        # Result content should be the string as-is, not double-encoded with quotes
+        assert result[0]["content"] == json_string
+        # Verify no extra quotes or escapes
+        assert '"' not in result[0]["content"].replace(json_string, "")
+
+    def test_function_result_dict_is_json_encoded(self):
+        """Non-string results (e.g., dicts) should be JSON-encoded."""
+        from agent_framework import ChatMessage, FunctionResultContent
+        from monocle.agents import _AIProviderChatClient
+        import json as json_module
+
+        result_dict = {"found": True, "count": 42}
+        frc = FunctionResultContent(call_id="c1", result=result_dict)
+        msg = ChatMessage(role="tool", contents=[frc])
+        result = _AIProviderChatClient._to_dict_messages([msg])
+        
+        # Result content should be JSON-encoded
+        assert result[0]["content"] == json_module.dumps(result_dict)
+
 
 # ---------------------------------------------------------------------------
 # Tests: _try_parse_tool_calls
@@ -576,9 +610,9 @@ class TestTryParseToolCalls:
 class TestChatSSEErrorContract:
     """Tests for the done/error SSE contract on the error path."""
 
-    def test_error_event_emitted_not_done_when_agent_raises_before_stream(self, api_client):
-        """When the agent raises before yielding any update, only error is emitted,
-        not done — clients must handle either terminator."""
+    def test_error_event_emitted_done_always_terminates_stream(self, api_client):
+        """When the agent raises before yielding any update, error is emitted,
+        and done is always the final event with status=error."""
         mock_agent = MagicMock()
         mock_agent.run_stream = MagicMock(side_effect=RuntimeError("fatal"))
 
@@ -590,12 +624,19 @@ class TestChatSSEErrorContract:
 
         events = _parse_sse(resp.text)
         event_types = [e.get("event") for e in events]
+        # Both error and done are emitted
         assert "error" in event_types
-        # done must NOT appear after a pre-stream hard failure
-        assert "done" not in event_types
+        assert "done" in event_types
+        # done must be last
+        assert events[-1]["event"] == "done"
+        # done must have status=error
+        assert events[-1]["data"]["status"] == "error"
+        # done must carry the error message
+        assert "error" in events[-1]["data"]
 
     def test_error_event_emitted_when_exception_mid_stream(self, api_client):
-        """An exception raised mid-iteration produces an error event."""
+        """An exception raised mid-iteration produces an error event,
+        and done is always the final event with status=error."""
 
         async def _mid_stream_fail():
             yield _fake_update([_text_content("partial")])
@@ -612,7 +653,12 @@ class TestChatSSEErrorContract:
 
         events = _parse_sse(resp.text)
         event_types = [e.get("event") for e in events]
-        # The partial token should appear, followed by the error
+        # The partial token, error, and done should appear
         assert "token" in event_types
         assert "error" in event_types
+        assert "done" in event_types
+        # done must be last
+        assert events[-1]["event"] == "done"
+        # done must have status=error
+        assert events[-1]["data"]["status"] == "error"
 

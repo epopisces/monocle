@@ -317,34 +317,24 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Resolved SPIKE-3: CONFIRMED â€” `ChatAgent.run_stream()` integrates cleanly with FastAPI `StreamingResponse`; `@use_function_invocation` handles multi-turn tool loop; `agent_framework_azure_ai` broken (import error) and not needed; adapter built on `BaseChatClient` from core `agent_framework` package
   - Updated `docs/build-plan.md`: all M10 deliverables and acceptance criteria marked `[x]`; Active Milestone â†’ M11; M10 â†’ COMPLETE in tracker; SPIKE-3 RESOLVED with full outcome documented
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` â†’ **497 passed (14 new from test_agents + adjusted test_api), 6 deselected**, EXIT 0
-- **M10 post-review hardening — resolved all 13 issues from code review (bugs, security, minor, test coverage)**
-  - **Bug — 	ools kwarg crash**: Added 	ools: list[dict] | None = None to AIProvider.chat() ABC; all 3 providers now accept 	ools=, forward to the underlying client, and serialize non-empty 	ool_calls responses to a JSON string; streaming paths accumulate and emit tool_call chunks; create_note tool now calls write_note() after create_from_template() (notes were previously built in memory but never written to disk)
-  - **Bug — streaming adapter**: _inner_get_response and _inner_get_streaming_response in gents/__init__.py now pass 	ools=tools unconditionally; streaming path detects tool-call JSON chunks via _try_parse_tool_calls and yields FunctionCallContent-containing ChatResponseUpdates
-  - **Security — review bypass**: create_note tool now sets eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in the review queue
-  - **Security — body-length cap**: _MAX_BODY_LENGTH = 50_000 enforced in both write_note and create_note tools
+- **M10 post-review hardening ï¿½ resolved all 13 issues from code review (bugs, security, minor, test coverage)**
+  - **Bug ï¿½ 	ools kwarg crash**: Added 	ools: list[dict] | None = None to AIProvider.chat() ABC; all 3 providers now accept 	ools=, forward to the underlying client, and serialize non-empty 	ool_calls responses to a JSON string; streaming paths accumulate and emit tool_call chunks; create_note tool now calls write_note() after create_from_template() (notes were previously built in memory but never written to disk)
+  - **Bug ï¿½ streaming adapter**: _inner_get_response and _inner_get_streaming_response in gents/__init__.py now pass 	ools=tools unconditionally; streaming path detects tool-call JSON chunks via _try_parse_tool_calls and yields FunctionCallContent-containing ChatResponseUpdates
+  - **Security ï¿½ review bypass**: create_note tool now sets 
+eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in the review queue
+  - **Security ï¿½ body-length cap**: _MAX_BODY_LENGTH = 50_000 enforced in both write_note and create_note tools
   - **Minor**: mutable default 	ags=[] changed to 	ags: list[str] | None = None; import asyncio moved to module level in 	ools.py; OTel port detection replaced fragile string match with urlparse-based port check
-  - **Tests — 	est_ai.py**: 9 new tests (TestOllamaChatWithTools, TestFoundryLocalChatWithTools, TestAzureChatWithTools) verifying tools kwarg accepted, tool_calls serialized, no regression when tools absent; existing mocks updated with 	ool_calls=None to prevent MagicMock auto-attribute false-positive
-  - **Tests — 	est_agents.py**: ~30 new tests: TestVaultToolsExecution (14 tests — all 7 tool methods, body length caps, review_status pending, mutable default absent), TestToDictMessages (5), TestTryParseToolCalls (5), TestChatSSEErrorContract (2); NoteChunk fixture corrected to use upsert_chunks() API with chunk_index field
+  - **Tests ï¿½ 	est_ai.py**: 9 new tests (TestOllamaChatWithTools, TestFoundryLocalChatWithTools, TestAzureChatWithTools) verifying tools kwarg accepted, tool_calls serialized, no regression when tools absent; existing mocks updated with 	ool_calls=None to prevent MagicMock auto-attribute false-positive
+  - **Tests ï¿½ 	est_agents.py**: ~30 new tests: TestVaultToolsExecution (14 tests ï¿½ all 7 tool methods, body length caps, review_status pending, mutable default absent), TestToDictMessages (5), TestTryParseToolCalls (5), TestChatSSEErrorContract (2); NoteChunk fixture corrected to use upsert_chunks() API with chunk_index field
   - uv run python -m pytest monocle/tests/ -x --tb=short -q ? **530 passed (33 new), 6 deselected**, EXIT 0
 
 ## 2026-03-19
 
 ### Claude Haiku 4.5
-- **Documentation reorganization** — Consolidated completed work, reduced build-plan cognitive load
-  - Created docs/milestones.md (500+ lines) — comprehensive archive of all completed milestones (M1–M10) and resolved technical spikes (SPIKE-1, SPIKE-3, SPIKE-4) with full details, implementation notes, and testing specifications preserved for future reference
-  - **M1–M4 condensed** in docs/build-plan.md — replaced 120+ lines of verbose deliverables/acceptance criteria with concise 4-line summaries (status, 1–2 sentence goal, archive pointer)
-  - **SPIKE-1, SPIKE-3, SPIKE-4 condensed** in docs/build-plan.md — replaced 35 lines of spike details with 9 lines total of condensed resolutions pointing to milestones.md
-  - **M6–M10 condensed** in docs/build-plan.md — replaced 250+ lines of orphaned old-detail sections (accumulated from partial failed deletion) with proper 4-line summaries per milestone plus archive pointers; fixed corrupted file state caused by attempted batch deletion (tool limitation on large multi-section text matching)
-  - **Updated .github/copilot-instructions.md** — added "Archive completed milestone details" § to Session Housekeeping with explicit pattern for future milestones: summarize inline in build-plan, archive full details to milestones.md, preserve cross-references; documented rationale (keeps build-plan lean and navigable while preserving full historical record)
-  - **Net result**: docs/build-plan.md reduced from 1400+ lines to ~500 lines of active guidance (4× improvement in navigability); M11+ milestones now clearly visible without scrolling past completed work; same full detail preserved in archive for future context retrieval
-
-## 2026-03-19
-
-### Claude Haiku 4.5
-- **Documentation reorganization** — Consolidated completed work, reduced build-plan cognitive load
-  - Created docs/milestones.md (500+ lines) — comprehensive archive of all completed milestones (M1–M10) and resolved technical spikes (SPIKE-1, SPIKE-3, SPIKE-4) with full details, implementation notes, and testing specifications preserved for future reference
-  - **M1–M4 condensed** in docs/build-plan.md — replaced 120+ lines of verbose deliverables/acceptance criteria with concise 4-line summaries (status, 1–2 sentence goal, archive pointer)
-  - **SPIKE-1, SPIKE-3, SPIKE-4 condensed** in docs/build-plan.md — replaced 35 lines of spike details with 9 lines total of condensed resolutions pointing to milestones.md
-  - **M6–M10 condensed** in docs/build-plan.md — replaced 250+ lines of orphaned old-detail sections (accumulated from partial failed deletion) with proper 4-line summaries per milestone plus archive pointers; fixed corrupted file state caused by attempted batch deletion (tool limitation on large multi-section text matching)
-  - **Updated .github/copilot-instructions.md** — added "Archive completed milestone details" § to Session Housekeeping with explicit pattern for future milestones: summarize inline in build-plan, archive full details to milestones.md, preserve cross-references; documented rationale (keeps build-plan lean and navigable while preserving full historical record)
-  - **Net result**: docs/build-plan.md reduced from 1400+ lines to ~500 lines of active guidance (4× improvement in navigability); M11+ milestones now clearly visible without scrolling past completed work; same full detail preserved in archive for future context retrieval
+- **Documentation reorganization** â€“ Consolidated completed work, reduced build-plan cognitive load
+  - Created docs/milestones.md (500+ lines) â€“ comprehensive archive of all completed milestones (M1â€“M10) and resolved technical spikes (SPIKE-1, SPIKE-3, SPIKE-4) with full details, implementation notes, and testing specifications preserved for future reference
+  - **M1â€“M4 condensed** in docs/build-plan.md â€“ replaced 120+ lines of verbose deliverables/acceptance criteria with concise 4-line summaries (status, 1â€“2 sentence goal, archive pointer)
+  - **SPIKE-1, SPIKE-3, SPIKE-4 condensed** in docs/build-plan.md â€“ replaced 35 lines of spike details with 9 lines total of condensed resolutions pointing to milestones.md
+  - **M6â€“M10 condensed** in docs/build-plan.md â€“ replaced 250+ lines of orphaned old-detail sections (accumulated from partial failed deletion) with proper 4-line summaries per milestone plus archive pointers; fixed corrupted file state caused by attempted batch deletion (tool limitation on large multi-section text matching)
+  - **Updated .github/copilot-instructions.md** â€“ added "Archive completed milestone details" â€“ to Session Housekeeping with explicit pattern for future milestones: summarize inline in build-plan, archive full details to milestones.md, preserve cross-references; documented rationale (keeps build-plan lean and navigable while preserving full historical record)
+  - **Net result**: docs/build-plan.md reduced from 1400+ lines to ~500 lines of active guidance (4Ã— improvement in navigability); M11+ milestones now clearly visible without scrolling past completed work; same full detail preserved in archive for future context retrieval
