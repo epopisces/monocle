@@ -31,3 +31,7 @@ def register_default_plugins(registry: IngestPluginRegistry | None = None) -> No
     for plugin in (AudioPlugin(), TeamsPlugin(), TextPlugin()):
         if plugin.source_id not in existing_ids:
             registry.register(plugin)
+
+
+# Auto-register on import as documented in the module docstring.
+register_default_plugins()

@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,7 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+@lru_cache(maxsize=64)
 def _load_template_schema(template_name: str) -> dict[str, Any]:
     """Load a YAML template schema by name (blank fallback)."""
     template_dir = Path(__file__).parent.parent / "vault" / "templates"

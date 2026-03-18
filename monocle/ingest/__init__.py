@@ -261,7 +261,7 @@ class IngestPipeline:
             except DuplicateSuspected:
                 raise
             except Exception as exc:
-                await self._handle_failure(request, exc, step=_current_step)
+                await self._handle_failure(request, exc, step=_current_step, text=text)
                 raise
 
             # --------------------------------------------------------
@@ -383,7 +383,7 @@ class IngestPipeline:
             exclude={"confidence", "confidence_rationale", "review_status",
                      "approved_by", "approved_at", "approval_mode",
                      "created", "updated", "template"},
-            exclude_none=False,
+            exclude_none=True,
         )
         # Override source from the request explicitly
         metadata_dict["source"] = request.source
@@ -529,16 +529,26 @@ class IngestPipeline:
         request: "IngestRequest",
         exc: Exception,
         step: int,
+        text: str = "",
     ) -> None:
         """Write a .error.md sidecar and register the failure.
 
         The sidecar is placed in the vault inbox directory.
+
+        Args:
+            request: The ingest request that failed.
+            exc:     The exception that was raised.
+            step:    The pipeline step number (1–8) where the failure occurred.
+            text:    The extracted text from step 2 (if failure occurred in steps 3–5).
+                     Used as fallback for content_preview when request.content is None
+                     (e.g., audio ingests where content_bytes are the input).
         """
         self._failures_counter.add(1, {"step": str(step)})
         try:
             from monocle.vault import VaultLayer
 
-            content_preview = (request.content or "")[:200]
+            # Use extracted text as fallback when request.content is None
+            content_preview = (request.content or text or "")[:200]
             ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
             # Strip characters illegal in Windows filenames and general unsafe chars
             raw_preview = content_preview[:40].replace("/", "-").replace("\\", "-")

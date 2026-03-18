@@ -118,7 +118,7 @@ class RoutingAgent:
         """
         from monocle.telemetry import span
 
-        async with span("agent.route", fast_path=False):
+        async with span("agent.route") as s:
             # ----------------------------------------------------------
             # 1. Explicit template hint (user override / MCP caller)
             # ----------------------------------------------------------
@@ -133,6 +133,7 @@ class RoutingAgent:
                             template_hint,
                             normalised,
                         )
+                        s.set_attribute("fast_path", True)
                         return RoutingDecision(
                             template=tmpl["template"],
                             note_type=note_type,  # type: ignore[arg-type]
@@ -155,6 +156,7 @@ class RoutingAgent:
                             starter,
                             tmpl["template"],
                         )
+                        s.set_attribute("fast_path", True)
                         return RoutingDecision(
                             template=tmpl["template"],
                             note_type=note_type,  # type: ignore[arg-type]
@@ -170,6 +172,7 @@ class RoutingAgent:
                 logger.debug(
                     "[AGENT] No AIProvider configured — defaulting to blank template"
                 )
+                s.set_attribute("fast_path", False)
                 return RoutingDecision(
                     template="blank",
                     note_type="other",
@@ -178,7 +181,9 @@ class RoutingAgent:
                     rationale="No AIProvider — sentence starters did not match",
                 )
 
-            return await self._llm_route(text)
+            decision = await self._llm_route(text)
+            s.set_attribute("fast_path", decision.fast_path)
+            return decision
 
     # ------------------------------------------------------------------
     # Private helpers
