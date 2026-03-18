@@ -10,8 +10,6 @@ continue to return 501 and are tested in the stub section at the bottom.
 """
 from __future__ import annotations
 
-import json
-
 import pytest
 from fastapi.testclient import TestClient
 
