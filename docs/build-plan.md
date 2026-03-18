@@ -690,7 +690,7 @@ tests/e2e/            Playwright tests (require running server)
     - If `review.auto_approve_threshold_pct == 0`, set `review_status: pending`
     - If `review.auto_approve_threshold_pct > 0` and `confidence * 100 >= review.auto_approve_threshold_pct`, set `review_status: approved`, `approval_mode: auto`, `approved_by: "system:auto"`, `approved_at: <now>`
     - Otherwise set `review_status: pending`
-- [ ] Duplicate detection: compute semantic similarity (cosine) between note body embedding and last 7 days of note embeddings in index; return advisory `similar_note_detected` flag if similarity > 0.95; **no automatic dedup** (user confirms via `allow_duplicate=true`)
+- [ ] Duplicate detection: compute semantic similarity (cosine) between note body embedding and last 7 days of note embeddings in index; return `409 Conflict` if similarity > 0.95 with conflict details (`similar_note_detected`, `similar_note_path`, `similarity_score`); user confirms override via `allow_duplicate=true`
 - [ ] Failed-ingest registry: persist enough metadata to drive a UI list and retry flow for `.error.md` sidecars. **Persistence mechanism: `data/failed_ingests.json`** — a JSON array written by the pipeline whenever a sidecar is created, updated on retry/dismiss. Uses Python stdlib `json` only (no new dependencies). Loaded into memory at startup; written atomically (write temp + rename) on each change.
 - [ ] `monocle/prompts.py` — `load_prompt(name: str) -> str` helper: loads `prompts/local/<name>.md` if it exists, otherwise `prompts/<name>.md`; strips YAML frontmatter and returns prompt body
 - [ ] Default prompt files (`prompts/routing.md`, `prompts/extract.md`) written with working content (not stubs); `prompts/confidence.md` **no longer needed** (replaced by deterministic scoring)
@@ -735,7 +735,7 @@ tests/e2e/            Playwright tests (require running server)
 
 **Acceptance Criteria:**
 - [x] `POST /api/ingest {"content": "Met with Sarah today", "source": "web"}` → 201 with a `Note` object
-- [x] Ingesting content with > 0.95 cosine similarity to a note from the last 7 days returns 201 with `similar_note_detected: true` and `similar_note_path`; **no automatic deduplication** — user forces creation with `allow_duplicate: true` in the request body
+- [x] Ingesting content with > 0.95 cosine similarity to a note from the last 7 days returns 409 Conflict with `similar_note_detected: true`, `similar_note_path`, and `similarity_score` in the response body; user forces creation with `allow_duplicate: true` in the request body
 - [x] `GET /api/notes?sort=updated&limit=10&offset=0` → paginated response with `total` and `items`
 - [x] `GET /api/ingest/failures` returns `.error.md`-backed failures in newest-first order
 - [x] `DELETE /api/ingest/failures/{id}` removes the failed-ingest record from the list; the underlying `.error.md` file is NOT deleted

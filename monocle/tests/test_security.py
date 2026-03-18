@@ -113,7 +113,7 @@ class TestAudioSizeLimits:
             "/api/transcribe",
             files={"file": ("big.webm", big_audio, "audio/webm")},
         )
-        assert r.status_code == 422
+        assert r.status_code == 413
 
 
 # ===========================================================================

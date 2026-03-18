@@ -31,12 +31,28 @@ async def transcribe(
     if ai is None:
         raise HTTPException(status_code=503, detail="AI provider not available")
 
-    audio_bytes = await file.read()
-    if len(audio_bytes) > _MAX_AUDIO_BYTES:
+    # Check Content-Length header first (fail-fast on obviously-oversized uploads)
+    if file.size is not None and file.size > _MAX_AUDIO_BYTES:
         raise HTTPException(
-            status_code=422,
-            detail=f"Audio exceeds 25 MB limit ({len(audio_bytes)} bytes)",
+            status_code=413,
+            detail=f"Audio exceeds 25 MB limit ({file.size} bytes)",
         )
+
+    # Stream the file in chunks and accumulate bytes, checking size as we go to prevent
+    # loading oversized payloads into memory even if Content-Length is missing or wrong
+    audio_bytes = b""
+    chunk_size = 1024 * 1024  # 1 MB chunks
+    while True:
+        chunk = await file.read(chunk_size)
+        if not chunk:
+            break
+        audio_bytes += chunk
+        if len(audio_bytes) > _MAX_AUDIO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Audio exceeds 25 MB limit ({len(audio_bytes)} bytes)",
+            )
+
     if len(audio_bytes) == 0:
         raise HTTPException(status_code=422, detail="Empty audio file")
 

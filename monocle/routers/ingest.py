@@ -109,7 +109,7 @@ async def ingest_stream(req: IngestRequest, request: Request) -> StreamingRespon
             if item is None:
                 break
             step_i, name = item
-            yield _sse("step_start", {"step": step_i, "name": name})
+            yield _sse("step_complete", {"step": step_i, "name": name})
 
         try:
             note, confidence = await pipeline_task

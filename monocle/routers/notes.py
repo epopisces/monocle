@@ -184,7 +184,7 @@ async def patch_note(path: str, body: NotePatchRequest, request: Request) -> Not
     vault = request.app.state.vault
     reindex_queue = getattr(request.app.state, "reindex_queue", None)
 
-    updated_note = await asyncio.to_thread(vault.patch_frontmatter, path, body.updates)
+    updated_note = await asyncio.to_thread(vault.patch_frontmatter, path, body.updates, body.if_mtime)
 
     if reindex_queue is not None:
         reindex_queue.push(path)

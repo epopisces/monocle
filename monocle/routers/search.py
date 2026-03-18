@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from monocle.models import ScoredChunk
 
@@ -18,7 +18,7 @@ class SearchResult(BaseModel):
     file_path: str
     score: float
     text: str
-    metadata: dict = {}
+    metadata: dict = Field(default_factory=dict)
 
 
 class KeywordResult(BaseModel):

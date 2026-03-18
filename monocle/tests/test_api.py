@@ -347,7 +347,7 @@ class TestIngest:
         assert r.status_code in (200, 201)
 
     def test_ingest_stream_emits_step_and_done_events(self, api_client: TestClient):
-        """SSE stream must include at least one step_start event and a done event."""
+        """SSE stream must include at least one step_complete event and a done event."""
         r = api_client.post(
             "/api/ingest/stream",
             json={"content": "Stream event content for SSE test", "source": "web"},
@@ -361,7 +361,7 @@ class TestIngest:
             for line in raw_text.splitlines()
             if line.startswith("event: ")
         ]
-        assert "step_start" in event_names, f"No step_start events found. Events: {event_names}"
+        assert "step_complete" in event_names, f"No step_complete events found. Events: {event_names}"
         assert "done" in event_names, f"No done event found. Events: {event_names}"
 
         # Parse done event data

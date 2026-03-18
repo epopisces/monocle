@@ -173,7 +173,11 @@ class IngestRequest(BaseModel):
     content_type: str = "text/plain"
     source: NoteSource = "web"
     template_hint: str | None = None
-    audio_bytes: AudioBytesField = Field(default=None, exclude=True)
+    audio_bytes: AudioBytesField = Field(
+        default=None,
+        exclude=True,
+        description="Base64-encoded audio data (WAV, MP3, FLAC, etc.). Can also be raw bytes in multipart requests.",
+    )
     audio_mime_type: str | None = None
     allow_duplicate: bool = False  # FR-ING-11: advisory duplicate-detection flow
 
