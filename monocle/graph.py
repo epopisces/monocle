@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from collections import deque
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,14 @@ class GraphBuilder:
         self._vault = vault
         # Cache: (focus, max_degree, types_tuple | None, n) -> GraphData
         self._cache: dict[tuple[Any, ...], GraphData] = {}
+        # Protects all _cache reads/writes and _generation updates.
+        # build() is called from asyncio.to_thread (worker thread);
+        # invalidate() is called from the main event loop thread.
+        self._lock = threading.Lock()
+        # Incremented every time invalidate() is called so that a build
+        # completing after an invalidation can detect it is stale and
+        # discard its result instead of re-populating the cache.
+        self._generation: int = 0
 
     # ------------------------------------------------------------------
     # Public API
@@ -49,7 +58,9 @@ class GraphBuilder:
         Called whenever the watcher detects a file change or when any note is
         written through the API.
         """
-        self._cache.clear()
+        with self._lock:
+            self._cache.clear()
+            self._generation += 1
         logger.debug("[GRAPH] Cache invalidated")
 
     def build(
@@ -76,13 +87,31 @@ class GraphBuilder:
         """
         types_key: tuple[str, ...] | None = tuple(sorted(types)) if types else None
         cache_key = (focus, max_degree, types_key, n)
-        if cache_key in self._cache:
-            logger.debug("[GRAPH] Cache hit: %s", cache_key)
-            return self._cache[cache_key]
 
+        # Fast path: return a cached result if one exists.
+        with self._lock:
+            if cache_key in self._cache:
+                logger.debug("[GRAPH] Cache hit: %s", cache_key)
+                return self._cache[cache_key]
+            # Snapshot the generation *inside* the lock so we have a consistent
+            # baseline to compare against when we try to write back below.
+            generation = self._generation
+
+        # Build outside the lock — this is the expensive part (vault I/O,
+        # edge extraction, BFS).  Other threads may call build() or invalidate()
+        # concurrently during this window.
         logger.debug("[GRAPH] Building graph: focus=%s max_degree=%d n=%d", focus, max_degree, n)
         result = self._build_uncached(focus, max_degree, types, n)
-        self._cache[cache_key] = result
+
+        # Write-back: only populate the cache if no invalidation happened while
+        # we were building.  If _generation changed, the vault has been modified
+        # and our result is stale — discard it silently.
+        with self._lock:
+            if self._generation == generation:
+                self._cache[cache_key] = result
+            else:
+                logger.debug("[GRAPH] Discarding stale build result (invalidated during build): %s", cache_key)
+
         return result
 
     # ------------------------------------------------------------------
@@ -141,8 +170,8 @@ class GraphBuilder:
         #    Use plain dicts internally to allow weight accumulation,
         #    then convert to GraphEdge at the end.
         # ----------------------------------------------------------
-        # edge_map: (source, target, edge_type) -> dict with mutable weight
-        edge_map: dict[tuple[str, str, str], dict[str, Any]] = {}
+        # edge_map: (source, target, edge_type, relation) -> dict with mutable weight
+        edge_map: dict[tuple[str, str, str, str], dict[str, Any]] = {}
 
         def _add_edge(
             source: str,
@@ -153,7 +182,7 @@ class GraphBuilder:
         ) -> None:
             if source not in nodes or target not in nodes or source == target:
                 return
-            key = (source, target, edge_type)
+            key = (source, target, edge_type, relation or "")
             if key in edge_map:
                 edge_map[key]["weight"] += 1
             else:
@@ -232,7 +261,7 @@ class GraphBuilder:
                 for p2 in tag_paths[i + 1 :]:
                     # Use canonical order so (A,B) and (B,A) get same key
                     s, t = (p1, p2) if p1 < p2 else (p2, p1)
-                    key = (s, t, "co-mention")
+                    key = (s, t, "co-mention", "shares-tag")
                     if key in edge_map:
                         edge_map[key]["weight"] += 1
                     else:
@@ -248,7 +277,7 @@ class GraphBuilder:
         # ----------------------------------------------------------
         # 4. Compute node weights (total edge connections)
         # ----------------------------------------------------------
-        for s, t, _ in edge_map:
+        for s, t, *_ in edge_map:
             nodes[s].weight += 1
             nodes[t].weight += 1
 
@@ -262,7 +291,7 @@ class GraphBuilder:
 
             # Build adjacency list from all edges
             adjacency: dict[str, set[str]] = {p: set() for p in nodes}
-            for s, t, _ in edge_map:
+            for s, t, *_ in edge_map:
                 adjacency[s].add(t)
                 adjacency[t].add(s)
 

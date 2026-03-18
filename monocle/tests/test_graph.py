@@ -338,7 +338,7 @@ class TestFocusedGraph:
         assert gd.nodes == []
         assert gd.edges == []
 
-    def test_max_degree_zero_still_includes_focus(self, tmp_vault: Path):
+    def test_max_degree_one_still_includes_focus(self, tmp_vault: Path):
         """max_degree=1 still includes the focus node at degree 0."""
         gd = _build(tmp_vault, focus="people/alice-example.md", max_degree=1)
         ids = _node_ids(gd)
@@ -446,6 +446,82 @@ class TestGraphCache:
         gb.invalidate()
         assert len(gb._cache) == 0
 
+    def test_invalidate_increments_generation(self, tmp_vault: Path):
+        from monocle.graph import GraphBuilder
+        from monocle.vault import VaultLayer
+
+        vault = VaultLayer(str(tmp_vault))
+        gb = GraphBuilder(vault)
+
+        assert gb._generation == 0
+        gb.invalidate()
+        assert gb._generation == 1
+        gb.invalidate()
+        assert gb._generation == 2
+
+    def test_stale_build_discarded_after_invalidation(self, tmp_vault: Path):
+        """Simulate the race: build() starts, invalidate() fires, build() writes back.
+
+        The write-back must be silently discarded (generation mismatch) so the
+        cache stays empty (correct) rather than being filled with a stale result.
+        """
+        import threading
+        from unittest.mock import patch
+        from monocle.graph import GraphBuilder
+        from monocle.vault import VaultLayer
+
+        vault = VaultLayer(str(tmp_vault))
+        gb = GraphBuilder(vault)
+
+        original_build = gb._build_uncached
+
+        def build_then_invalidate(*args, **kwargs):
+            # Simulate invalidate() firing *during* _build_uncached
+            gb.invalidate()
+            return original_build(*args, **kwargs)
+
+        with patch.object(gb, "_build_uncached", side_effect=build_then_invalidate):
+            result = gb.build()
+
+        # The result is still returned to the caller (correct behaviour)
+        assert result is not None
+        # But the cache must stay empty because the generation changed mid-build
+        assert len(gb._cache) == 0
+
+    def test_concurrent_builds_same_key_no_data_race(self, tmp_vault: Path):
+        """Two threads building the same cache key must both return valid
+        GraphData and leave the cache in a consistent state (not corrupt)."""
+        import threading
+        from monocle.graph import GraphBuilder
+        from monocle.vault import VaultLayer
+
+        vault = VaultLayer(str(tmp_vault))
+        gb = GraphBuilder(vault)
+
+        results: list = []
+        errors: list = []
+
+        def worker():
+            try:
+                results.append(gb.build())
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [threading.Thread(target=worker) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert errors == [], f"Threads raised exceptions: {errors}"
+        assert len(results) == 4
+        # All results must be structurally valid GraphData
+        for r in results:
+            assert hasattr(r, "nodes")
+            assert hasattr(r, "edges")
+        # Cache must contain exactly one entry for this key
+        assert len(gb._cache) == 1
+
 
 # ---------------------------------------------------------------------------
 # API endpoint tests
@@ -481,6 +557,24 @@ class TestGraphAPIEndpoint:
         data = resp.json()
         for node in data["nodes"]:
             assert node["type"] == "person_note"
+
+    def test_get_graph_types_comma_separated(self, api_client):
+        """?types=person_note,decision must filter correctly (comma in one param)."""
+        resp = api_client.get("/api/graph?types=person_note,decision")
+        assert resp.status_code == 200
+        data = resp.json()
+        allowed = {"person_note", "decision"}
+        for node in data["nodes"]:
+            assert node["type"] in allowed
+
+    def test_get_graph_types_repeated_params(self, api_client):
+        """?types=person_note&types=decision (repeated param) must filter correctly."""
+        resp = api_client.get("/api/graph?types=person_note&types=decision")
+        assert resp.status_code == 200
+        data = resp.json()
+        allowed = {"person_note", "decision"}
+        for node in data["nodes"]:
+            assert node["type"] in allowed
 
     def test_get_graph_structured_links_carry_relation(self, tmp_vault: Path):
         """Structured link edges have relation and metadata in graph response."""
@@ -716,3 +810,91 @@ class TestFocusWithTypesFilter:
         # No non-person nodes should appear
         for node in gd.nodes:
             assert node.type == "person_note"
+
+
+# ---------------------------------------------------------------------------
+# Regression tests — edge-key identity bugs
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeKeyIdentity:
+    """Regression: edges with different relations must never be merged."""
+
+    def test_different_relations_same_pair_produce_separate_edges(
+        self, tmp_vault: Path
+    ):
+        """A note that both wikilinks *and* structured-links to the same target
+        must produce two distinct edges (edge_type='wikilink', edge_type='structured'),
+        not a single merged entry with a blended relation."""
+        _write_note(
+            tmp_vault,
+            "work/dual-rel-source.md",
+            {
+                "type": "decision",
+                "domain": "work",
+                "tags": [],
+                "source": "web",
+                "confidence": 1.0,
+                "review_status": "approved",
+                "links": [{"target": "alice-example", "relation": "approved-by"}],
+            },
+            body="See also [[alice-example]] for context.",
+        )
+        gd = _build(tmp_vault)
+        edges = [
+            e
+            for e in gd.edges
+            if e.source == "work/dual-rel-source.md"
+            and e.target == "people/alice-example.md"
+        ]
+        # Both a structured and a wikilink edge must appear independently
+        edge_types = {e.edge_type for e in edges}
+        assert "structured" in edge_types, "structured edge missing"
+        assert "wikilink" in edge_types, "wikilink edge missing"
+        # Relations must not be blended
+        structured_edge = next(e for e in edges if e.edge_type == "structured")
+        assert structured_edge.relation == "approved-by"
+        wikilink_edge = next(e for e in edges if e.edge_type == "wikilink")
+        assert wikilink_edge.relation == "links-to"
+
+    def test_shared_tag_and_comention_same_pair_produce_separate_edges(
+        self, tmp_vault: Path
+    ):
+        """A pair of notes that BOTH share a tag AND one mentions the other via
+        people: must produce two separate edges (relation='shares-tag' and
+        relation='mentioned-in'), not a single merged entry."""
+        _write_note(
+            tmp_vault,
+            "people/alice-overlap.md",
+            {
+                "type": "person_note",
+                "domain": "work",
+                "tags": ["collab-overlap-tag"],
+                "source": "web",
+                "confidence": 1.0,
+                "review_status": "approved",
+            },
+        )
+        _write_note(
+            tmp_vault,
+            "work/overlap-source.md",
+            {
+                "type": "observation",
+                "domain": "work",
+                "tags": ["collab-overlap-tag"],
+                "source": "web",
+                "confidence": 1.0,
+                "review_status": "approved",
+                "people": ["alice-overlap"],
+            },
+        )
+        gd = _build(tmp_vault)
+        pair = {"work/overlap-source.md", "people/alice-overlap.md"}
+        pair_edges = [e for e in gd.edges if {e.source, e.target} == pair]
+        relations = {e.relation for e in pair_edges}
+        assert "mentioned-in" in relations, (
+            "people co-mention edge lost due to key collision with shares-tag"
+        )
+        assert "shares-tag" in relations, (
+            "shares-tag edge lost due to key collision with co-mention"
+        )
