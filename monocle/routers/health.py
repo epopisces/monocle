@@ -14,7 +14,7 @@ VERSION = "0.1.0"
 
 
 class HealthResponse(BaseModel):
-    status: str  # starting | ready | indexing | error
+    status: str  # starting | ready | indexing | degraded | error
     version: str
     ai_reachable: bool
     index_status: str  # empty | ready
