@@ -228,7 +228,7 @@ class TestDuplicateDetection:
         In the test environment we use MemoryIndex (substring search, score=1.0).
         We trigger the duplicate by mocking the index.search to return a high-score result.
         """
-        from unittest.mock import patch, MagicMock, AsyncMock
+        from unittest.mock import patch
         from monocle.models import ScoredChunk
 
         # Pre-populate index with a note so duplicate detection has something to find
