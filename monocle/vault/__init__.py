@@ -160,11 +160,15 @@ def _note_to_markdown(note: Note) -> str:
 
     if note.metadata:
         raw = note.metadata.model_dump()
-        # Serialize LinkRef objects → plain dicts (omit None values)
+        # Serialize LinkRef objects → plain dicts (omit None values).
+        # Iterate over note.metadata.links (live LinkRef objects) not raw["links"]
+        # which has already been converted to plain dicts by model_dump() and
+        # therefore doesn't have a .model_dump() method.
         fm["links"] = [
             {k: v for k, v in lnk.model_dump().items() if v is not None}
-            for lnk in (raw.pop("links", None) or [])
+            for lnk in note.metadata.links
         ]
+        raw.pop("links", None)  # prevent double-serialization via fm.update(raw)
         # Convert datetime objects → ISO strings
         for dt_field in ("created", "updated", "approved_at"):
             val = raw.get(dt_field)

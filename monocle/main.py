@@ -6,9 +6,11 @@ static file serving, and the lifespan context (startup / shutdown hooks).
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -75,6 +77,19 @@ async def lifespan(app: FastAPI):
     app.state.settings = cfg
 
     # ------------------------------------------------------------------
+    # AI Provider
+    # ------------------------------------------------------------------
+    from monocle.ai import get_provider
+
+    ai = None
+    try:
+        ai = get_provider(cfg)
+        logger.info("[API] AI provider initialised: %s", cfg.ai.provider)
+    except Exception as exc:  # pragma: no cover
+        logger.warning("[API] AI provider init failed (non-fatal): %s", exc)
+    app.state.ai = ai
+
+    # ------------------------------------------------------------------
     # Re-index queue (used by write routes in M8+)
     # ------------------------------------------------------------------
     from monocle.watcher import ReindexQueue
@@ -84,18 +99,101 @@ async def lifespan(app: FastAPI):
     app.state.reindex_queue = reindex_queue
 
     # ------------------------------------------------------------------
+    # Re-index queue callback — re-index a single file on write
+    # ------------------------------------------------------------------
+    async def _reindex_file(file_path: str) -> None:
+        from monocle.ingest.chunker import chunk_text
+
+        logger.debug("[API] ReindexQueue: re-indexing %s", file_path)
+        try:
+            note = await asyncio.to_thread(vault.read_note, file_path)
+        except Exception:
+            logger.debug("[API] ReindexQueue: file gone, skipping %s", file_path)
+            return
+        chunks_text = chunk_text(
+            note.body or "",
+            chunk_size=cfg.index.chunk_size_tokens,
+            overlap=cfg.index.chunk_overlap_tokens,
+        )
+        if not chunks_text:
+            await asyncio.to_thread(index.delete_file, file_path)
+            return
+        if ai is None:
+            return  # no embeddings available
+        from monocle.models import NoteChunk
+
+        # Use the note's own `updated` timestamp so duplicate-detection's
+        # recency window is based on when the note was last edited, not
+        # when the background re-index ran.
+        note_updated_iso = (
+            note.metadata.updated.isoformat()
+            if note.metadata.updated is not None
+            else note.metadata.created.isoformat()
+            if note.metadata.created is not None
+            else datetime.now(timezone.utc).isoformat()
+        )
+
+        embeddings = await ai.embed_batch(chunks_text)
+        note_chunks = [
+            NoteChunk(
+                chunk_id=f"{file_path}::{i}",
+                file_path=file_path,
+                chunk_index=i,
+                text=t,
+                embedding=e,
+                metadata={
+                    "type": note.metadata.type,
+                    "domain": note.metadata.domain,
+                    "source": note.metadata.source,
+                    "updated_at": note_updated_iso,
+                },
+            )
+            for i, (t, e) in enumerate(zip(chunks_text, embeddings))
+        ]
+        await asyncio.to_thread(index.upsert_chunks, note_chunks)
+        logger.info("[API] ReindexQueue: re-indexed %s (%d chunks)", file_path, len(note_chunks))
+
+    reindex_queue.set_callback(_reindex_file)
+
+    # ------------------------------------------------------------------
+    # Failed-ingest registry
+    # ------------------------------------------------------------------
+    from monocle.ingest.failed_registry import FailedIngestRegistry
+
+    failed_registry = FailedIngestRegistry()
+    app.state.failed_registry = failed_registry
+
+    # ------------------------------------------------------------------
+    # Ingest pipeline singleton
+    # ------------------------------------------------------------------
+    from monocle.ingest import IngestPipeline
+    from monocle.ingest.plugins import register_default_plugins
+    from monocle.ingest.plugin import IngestPluginRegistry
+
+    _registry = IngestPluginRegistry.get()
+    if not _registry.plugins:
+        register_default_plugins(_registry)
+
+    ingest_pipeline = IngestPipeline(
+        vault=vault,
+        index=index,
+        ai=ai,
+        settings=cfg,
+        registry=_registry,
+        failed_registry=failed_registry,
+    )
+    app.state.ingest_pipeline = ingest_pipeline
+
+    # ------------------------------------------------------------------
     # Scheduler (cron jobs — weekly summary + re-index)
     # ------------------------------------------------------------------
     from monocle.agents.reindex import ReindexAgent
     from monocle.agents.scheduler import MonocleScheduler
 
-    # TODO (M6): pass embed_fn=ai_provider.embed once AIProvider is wired.
-    # Without embed_fn, ReindexAgent.run() will skip re-indexing for any
-    # non-memory backend (ChromaDB) to prevent the delete-before-upsert data
-    # loss that would occur if empty embeddings are rejected at upsert time.
     reindex_agent = ReindexAgent(
         chunk_size=cfg.index.chunk_size_tokens,
         chunk_overlap=cfg.index.chunk_overlap_tokens,
+        embed_fn=ai.embed if ai is not None else None,
     )
     app.state.reindex_agent = reindex_agent
 
@@ -135,7 +233,24 @@ async def lifespan(app: FastAPI):
             inbox_path=cfg.vault.inbox_path,
             debounce_s=cfg.vault.debounce_ms / 1000,
         )
-        # Ingest callback is wired in M7 when IngestPipeline is implemented
+
+        # Wire ingest callback for inbox file captures
+        async def _inbox_ingest_callback(file_path: str) -> None:
+            """Run the ingest pipeline for a newly stable inbox file."""
+            import asyncio as _asyncio
+            from pathlib import Path as _Path
+
+            try:
+                content = await _asyncio.to_thread(_Path(file_path).read_text, encoding="utf-8")
+                from monocle.models import IngestRequest
+
+                req = IngestRequest(content=content, source="web")
+                await ingest_pipeline.run(req)
+                logger.info("[WATCHER] Ingest complete for %s", file_path)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
+
+        watcher.set_ingest_callback(_inbox_ingest_callback)
         await watcher.start()
     else:
         logger.info("[WATCHER] vault.watch=false — inbox watcher disabled")

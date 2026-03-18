@@ -7,9 +7,24 @@ pipeline, vault layer, index layer, and agent layer.  No business logic here.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Generic, Literal, TypeVar
+import base64 as _b64
+from typing import Annotated, Any, Generic, Literal, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
+
+def _coerce_audio_bytes(v: Any) -> bytes | None:
+    """Accept raw bytes (pass-through) or a base64-encoded str (decode it)."""
+    if v is None:
+        return None
+    if isinstance(v, (bytes, bytearray)):
+        return bytes(v)
+    if isinstance(v, str):
+        return _b64.b64decode(v)
+    raise ValueError(f"audio_bytes must be bytes or a base64 string, got {type(v).__name__}")
+
+
+AudioBytesField = Annotated[bytes | None, BeforeValidator(_coerce_audio_bytes)]
+
 
 T = TypeVar("T")
 
@@ -158,7 +173,7 @@ class IngestRequest(BaseModel):
     content_type: str = "text/plain"
     source: NoteSource = "web"
     template_hint: str | None = None
-    audio_bytes: bytes | None = Field(default=None, exclude=True)
+    audio_bytes: AudioBytesField = Field(default=None, exclude=True)
     audio_mime_type: str | None = None
     allow_duplicate: bool = False  # FR-ING-11: advisory duplicate-detection flow
 
@@ -210,6 +225,22 @@ class BrainStats(BaseModel):
     pending_review: int = 0
     failed_ingests: int = 0
     index: IndexStats = Field(default_factory=IndexStats)
+    # Latency percentiles per operation type (sourced from OTel histogram snapshots)
+    # Keys: "embed", "chat", "transcribe", "ingest", "search"
+    latency_p50_ms: dict[str, float] = Field(default_factory=dict)
+    latency_p95_ms: dict[str, float] = Field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Ingest response
+# ---------------------------------------------------------------------------
+
+
+class IngestResponse(BaseModel):
+    """Response body for POST /api/ingest."""
+
+    note: Note
+    confidence: IngestConfidence
 
 
 # ---------------------------------------------------------------------------
