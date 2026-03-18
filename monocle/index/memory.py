@@ -93,6 +93,13 @@ class MemoryIndex(IndexLayer):
         self._chunks.clear()
         logger.debug("MemoryIndex.delete_all: index cleared")
 
+    def get_embeddings_by_file(self, file_paths: list[str]) -> dict[str, list[float]]:
+        """MemoryIndex has no real embeddings — always returns empty dict.
+
+        Weekly summary falls back to LLM grouping when embeddings are absent.
+        """
+        return {}
+
     def get_file_timestamps(self) -> dict[str, str]:
         result: dict[str, str] = {}
         for chunk in self._chunks.values():

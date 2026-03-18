@@ -3,7 +3,7 @@ type: build-plan
 project: monocle
 maintained-by: github-copilot
 last-updated: 2026-03-18
-active-milestone: M11
+active-milestone: M12
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,9 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M11 — Scheduled Agents
-**Last Completed:** M10 — Agent Framework & Chat API (2026-03-18)
-**Blocked By:** Nothing
+**Active Milestone:** M12 — MCP Server
+**Last Completed:** M11 — Scheduled Agents (2026-03-18)
+**Blocked By:** SPIKE-2 (FastMCP client compatibility — must resolve during M12)
+**Session Notes (M11 — Scheduled Agents):** M11 fully executed. `monocle/agents/weekly_summary.py`: `WeeklySummaryAgent.run(vault, index, ai, settings)` — collects notes updated within 7 days via `vault.list_notes(limit=500)`, fetches embeddings via new `index.get_embeddings_by_file()`, clusters with `AgglomerativeClustering(metric="cosine", linkage="average")` (scikit-learn) for batches ≥4; `_llm_group_notes` JSON-prompt fallback for small batches; `_summarise_cluster` per-cluster chat call using `prompts/weekly_review.md`; writes `summaries/YYYY-WW.md` via `vault.write_note(file_path, Note(...))`. `monocle/index/base.py`: new `get_embeddings_by_file(file_paths) -> dict[str, list[float]]` abstract method. `monocle/index/chroma.py`: pages `_GET_PAGE_SIZE` batches via `collection.get(where={"file_path": {"$in": batch}})`, returns `chunk_index=0` embedding per file. `monocle/index/memory.py`: returns `{}` (triggers LLM fallback in tests). `monocle/main.py`: weekly summary cron job wired — `_weekly_summary_agent` instance + `scheduler.add_cron_job("weekly_summary", ...)` + `app.state.weekly_summary_agent`. `monocle/routers/agents.py`: both endpoints implemented — `POST /api/agents/weekly-summary` StreamingResponse SSE (`start`/`done`/`error` events), `POST /api/agents/reindex` 202 via `BackgroundTasks`. `monocle/tests/test_scheduler.py`: 12 new tests — `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests). `tests/test_api.py`: agents routes removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: scheduler` task added. **542 tests passing (12 new), 6 deselected, EXIT 0.**
 **Session Notes (2026-03-18 M10 post-review):** M10 code review resolved 13 issues. **Bugs**: `AIProvider.chat()` ABC now accepts `tools: list[dict] | None = None`; all 3 providers (`OllamaProvider`, `FoundryLocalProvider`, `AzureOpenAIProvider`) forward `tools=`, check `response.message.tool_calls` / `choices[0].message.tool_calls`, and serialize non-empty tool_calls to JSON string; `_inner_get_response` and `_inner_get_streaming_response` in `agents/__init__.py` pass `tools=tools` directly; streaming adapter detects and yields `FunctionCallContent` via `_try_parse_tool_calls`; `create_from_template` now followed by `write_note` in `create_note` tool (notes were never written to disk). **Security**: `create_note` sets `review_status="pending"` so agent-created notes land in the review queue; `_MAX_BODY_LENGTH = 50_000` constant enforced in both `write_note` and `create_note`. **Minor**: `tags=[]` mutable default changed to `tags: list[str] | None = None`; `import asyncio` moved to module-level in `tools.py`; OTel port detection uses `urlparse` instead of fragile string match. **Tests**: 9 new tests in `test_ai.py` (`TestOllamaChatWithTools`, `TestFoundryLocalChatWithTools`, `TestAzureChatWithTools`); ~30 new tests in `test_agents.py` (`TestVaultToolsExecution` 14 tests, `TestToDictMessages` 5 tests, `TestTryParseToolCalls` 5 tests, `TestChatSSEErrorContract` 2 tests); existing mocks updated with `tool_calls=None` to prevent MagicMock auto-attribute false-positive. **530 tests passing (33 new), EXIT 0.**
 **Session Notes (2026-03-18 M10):** M10 fully executed. `monocle/agents/tools.py`: `VaultTools` class with 7 `@ai_function` decorated tools (`search_vault`, `read_note`, `write_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`); each tool wraps vault/index/ai operations with try/except; `_to_thread` helper for sync→async conversion; `.tools` list exposed for `ChatAgent`. `monocle/agents/__init__.py`: `_AIProviderChatClient(BaseChatClient)` adapter with `@use_function_invocation` — `_to_dict_messages()` converts ChatMessage list (including FunctionCallContent/FunctionResultContent) to OpenAI-style dicts; `_build_openai_tools()` calls `.to_json_schema_spec()` on each AIFunction; `_inner_get_response()` and `_inner_get_streaming_response()` bridge to `AIProvider.chat()`; `_try_parse_tool_calls()` detects inline JSON tool calls; `_configure_agent_otel()` calls `configure_otel_providers` once; `create_chat_agent(ai, vault, index, settings, graph_builder)` factory returns ready `ChatAgent`. `routers/chat.py`: full SSE streaming `POST /api/chat`; `ChatRequest(messages, session_id)`; creates agent per request via `create_chat_agent`; translates `AgentRunResponseUpdate` contents to SSE events (TextContent→`token`, FunctionCallContent→`tool_call`, FunctionResultContent with status=created→`note_created`); records `chat.ttft` and `chat.total_duration` OTel histograms; echoes `session_id` in `done` event; 60/minute rate limit; exceptions emit `error` event. `monocle/tests/test_agents.py`: 14 tests across 3 classes (TestChatSSEStream 10 tests, TestVaultTools 3 tests, TestCreateChatAgent 2 tests). `tests/test_api.py`: `POST /api/chat` removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: agents` task added. SPIKE-3 RESOLVED — see Technical Spikes. **497 tests passing (14 new + 10 from test_api adjustment), EXIT 0.**
 **Session Notes (2026-03-18 M9):** M9 fully executed. `monocle/graph.py`: `GraphBuilder` class with `build(focus, max_degree, types, n) -> GraphData`; reads all vault notes via `VaultLayer`; extracts edges from (1) structured `links` frontmatter (`edge_type="structured"`), (2) body `[[wikilinks]]` (`edge_type="wikilink"`, relation=`"links-to"`), (3) `people` co-mentions (`edge_type="co-mention"`, relation=`"mentioned-in"`), (4) shared tags (`edge_type="co-mention"`, relation=`"shares-tag"`; capped at 20 notes-per-tag to prevent O(n²) explosion); name resolution via `resolve_wikilink()`; BFS degree computation from focus node (unreachable nodes/edges pruned); `types` filter applied post-BFS; weights tracked via internal dict before converting to `GraphEdge`; in-memory cache keyed on `(focus, max_degree, types_tuple, n)` — full invalidation on `invalidate()`. `routers/graph.py`: wired to `GraphBuilder` with `focus`, `max_degree`, `types`, `n` query params; runs in `asyncio.to_thread`. `monocle/main.py`: `GraphBuilder` created after `VaultLayer` in lifespan; stored on `app.state.graph_builder`; `_reindex_file` callback calls `graph_builder.invalidate()` at the top so any vault file change (write, delete, re-index) clears the cache. `monocle/tests/conftest.py`: `api_client` fixture test lifespan now sets `app.state.graph_builder`. `monocle/tests/test_api.py`: `GET /api/graph` removed from `STILL_STUB_ROUTES`. `monocle/tests/test_graph.py`: 33 tests across 8 test classes (`TestGraphBuilderFullVault`, `TestCoMentionEdges`, `TestWikilinkEdges`, `TestStructuredLinkEdges`, `TestSharedTagEdges`, `TestFocusedGraph`, `TestTypesFilter`, `TestGraphCache`, `TestGraphAPIEndpoint`). `.vscode/tasks.json`: `test: graph` task added. **469 tests passing (33 new), EXIT 0.**
@@ -106,7 +107,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M8 | REST API Wiring — Core | COMPLETE |
 | M9 | Graph Layer | COMPLETE |
 | M10 | Agent Framework & Chat API | COMPLETE |
-| M11 | Scheduled Agents | NOT STARTED |
+| M11 | Scheduled Agents | COMPLETE |
 | M12 | MCP Server | NOT STARTED |
 | M13 | Settings & Review API | NOT STARTED |
 | M14 | CLI Commands | NOT STARTED |
@@ -495,31 +496,11 @@ tests/e2e/            Playwright tests (require running server)
 
 ### M11: Scheduled Agents
 
-**Goal:** APScheduler weekly summary agent using lightweight built-in clustering on pre-computed embeddings. `ReindexAgent` wired into APScheduler for scheduled full-vault re-index.
+**Status:** COMPLETE (2026-03-18)
 
-**Deliverables:**
-- [ ] `monocle/agents/weekly_summary.py` — weekly summary pipeline:
-  1. Retrieve notes modified in last 7 days; fetch their 1536-dim embeddings from ChromaDB (no re-embedding)
-  2. Build numpy embedding matrix; cluster with scikit-learn (`KMeans` or `AgglomerativeClustering`, selected by implementation detail)
-  3. For each cluster: `AIProvider.chat` with `prompts/weekly_review.md` generates a paragraph summary
-  4. Optionally segment by `domain` (if `agents.weekly_summary.domains` configured)
-  5. Write `summaries/YYYY-WW.md` with `confidence: 1.0`, `review_status: approved`, `approval_mode: auto`, `approved_by: "system:weekly-summary"`, `approved_at: <now>`
-- [ ] Fallback for very small batches or poor cluster quality: LLM-based grouping via structured prompt instead of model-based clustering
-- [ ] `prompts/weekly_review.md` written with working summarisation prompt
-- [ ] `monocle/agents/scheduler.py` — APScheduler:
-  - Weekly summary cron from `agents.weekly_summary.cron` (default `"0 17 * * 5"`)
-  - Scheduled re-index cron from `agents.reindex.cron` (default `"0 3 * * 0"`)
-- [ ] `routers/agents.py` — `POST /api/agents/weekly-summary` (202 + SSE completion) and `POST /api/agents/reindex` (202) wired
-- [ ] `monocle/tests/test_scheduler.py`
-- [ ] Extend `.vscode/tasks.json`:
-  - `test: scheduler` — `python -m pytest monocle/tests/test_scheduler.py -x --tb=short -q`
+**Summary:** `WeeklySummaryAgent` with sklearn clustering on pre-computed ChromaDB embeddings, LLM-grouping fallback for small batches, SSE streaming trigger endpoint, and `POST /api/agents/reindex` (202). All APScheduler cron jobs wired in lifespan.
 
-**Acceptance Criteria:**
-- [ ] Manual trigger via `POST /api/agents/weekly-summary` creates `summaries/YYYY-WW.md` with correct frontmatter
-- [ ] Summary note does NOT appear in review queue (`confidence: 1.0`, `review_status: approved`)
-- [ ] Weekly summary clustering works with the built-in lightweight clustering implementation; very small batches fall back to LLM grouping
-- [ ] `POST /api/agents/reindex` triggers `ReindexAgent.run()` async, returns 202
-- [ ] `uv run python -m pytest monocle/tests/test_scheduler.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m11-scheduled-agents](milestones.md#m11-scheduled-agents)
 
 ---
 

@@ -7,7 +7,7 @@ last-updated: 2026-03-18
 
 # Monocle — Completed Milestones & Technical Spike Resolutions
 
-This document archives full details for completed milestones (M1–M10) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
+This document archives full details for completed milestones (M1–M11) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
 
 ---
 
@@ -24,6 +24,7 @@ This document archives full details for completed milestones (M1–M10) and reso
 - [M8: REST API Wiring — Core](#m8-rest-api-wiring--core)
 - [M9: Graph Layer](#m9-graph-layer)
 - [M10: Agent Framework & Chat API](#m10-agent-framework--chat-api)
+- [M11: Scheduled Agents](#m11-scheduled-agents)
 
 ### Resolved Technical Spikes
 - [SPIKE-1: Ollama Whisper audio transcription](#spike-1-ollama-whisper-audio-transcription)
@@ -293,6 +294,38 @@ This document archives full details for completed milestones (M1–M10) and reso
 - SPIKE-3 resolved (see resolved spike details)
 - `chat.ttft` and `chat.total_duration` histograms recorded in OTel
 - test_agents.py passes (14 tests for SSE, 3 for tools, 2 for factory)
+
+---
+
+### M11: Scheduled Agents
+
+**Goal:** APScheduler weekly summary agent using lightweight built-in clustering on pre-computed embeddings. `ReindexAgent` wired into APScheduler for scheduled full-vault re-index.
+
+**Deliverables (all completed):**
+- `monocle/agents/weekly_summary.py` — `WeeklySummaryAgent` class with 8-step pipeline:
+  1. Retrieve notes from vault modified in last 7 days (via `vault.list_notes`, filtering by `updated`)
+  2. Optionally segment by `domain` (`agents.weekly_summary.domains` config list)
+  3. Fetch pre-computed embeddings from ChromaDB via new `IndexLayer.get_embeddings_by_file()` method — no re-embedding
+  4. Build numpy matrix; cluster with scikit-learn `AgglomerativeClustering` (cosine/average linkage); n_clusters = `max(2, min(n//3, 5, 8))`
+  5. Fallback to LLM JSON grouping when batch < `_MIN_NOTES_FOR_CLUSTERING` (4) or no embeddings available (MemoryIndex)
+  6. For each cluster: `AIProvider.chat` with `prompts/weekly_review.md` generates a paragraph summary
+  7. Write `summaries/YYYY-WW.md` (ISO week) with `confidence: 1.0`, `review_status: approved`, `approval_mode: auto`, `approved_by: "system:weekly-summary"`
+- `IndexLayer.get_embeddings_by_file(file_paths) -> dict[str, list[float]]` added to base, ChromaIndex, MemoryIndex
+  - ChromaIndex: pages through collection in batches of `_GET_PAGE_SIZE`, returns first-chunk (chunk_index=0) embedding per file
+  - MemoryIndex: returns `{}` — triggers LLM fallback in weekly summary
+- `monocle/agents/scheduler.py` — weekly summary cron job wired from `agents.weekly_summary.cron` (default `"0 17 * * 5"`); replaces M5 stub
+- `monocle/main.py` — weekly summary job fully registered in lifespan; `app.state.weekly_summary_agent` set
+- `routers/agents.py` — `POST /api/agents/weekly-summary` (SSE streaming, emits `start`/`done`/`error`); `POST /api/agents/reindex` (202 + BackgroundTasks)
+- `monocle/tests/test_scheduler.py` — 12 new tests (24 total): `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests)
+- `.vscode/tasks.json` — `test: scheduler` task added
+
+**Acceptance criteria met:**
+- Manual trigger via `POST /api/agents/weekly-summary` creates `summaries/YYYY-WW.md` with `confidence: 1.0`, `review_status: approved`, `approved_by: "system:weekly-summary"`
+- Summary note does NOT appear in review queue
+- sklearn clustering used for ≥4 notes with embeddings; LLM grouping fallback for smaller batches or MemoryIndex
+- `POST /api/agents/reindex` returns 202 and triggers `ReindexAgent.run()` in background
+- `uv run python -m pytest monocle/tests/test_scheduler.py -x --tb=short -q` → **24 passed**
+- Full suite: **542 passed, 6 deselected, EXIT 0**
 
 ---
 

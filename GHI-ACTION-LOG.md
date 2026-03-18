@@ -338,3 +338,32 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - **M6–M10 condensed** in docs/build-plan.md – replaced 250+ lines of orphaned old-detail sections (accumulated from partial failed deletion) with proper 4-line summaries per milestone plus archive pointers; fixed corrupted file state caused by attempted batch deletion (tool limitation on large multi-section text matching)
   - **Updated .github/copilot-instructions.md** – added "Archive completed milestone details" – to Session Housekeeping with explicit pattern for future milestones: summarize inline in build-plan, archive full details to milestones.md, preserve cross-references; documented rationale (keeps build-plan lean and navigable while preserving full historical record)
   - **Net result**: docs/build-plan.md reduced from 1400+ lines to ~500 lines of active guidance (4× improvement in navigability); M11+ milestones now clearly visible without scrolling past completed work; same full detail preserved in archive for future context retrieval
+
+### Claude Sonnet 4.6
+- **Executed M11 — Scheduled Agents (COMPLETE)**
+  - Created `monocle/agents/weekly_summary.py`: `WeeklySummaryAgent` class with full pipeline — `_collect_recent_notes` (7-day window, up to 500 notes via `vault.list_notes`); `get_embeddings_by_file` from `IndexLayer` → `AgglomerativeClustering(metric="cosine", linkage="average")` from scikit-learn for batches ≥4 notes; `_llm_group_notes` JSON-prompt LLM fallback for small batches; `_summarise_cluster` per-cluster chat call using `prompts/weekly_review.md` template; `_write_summary` constructs `NoteMetadata(type="weekly_summary", confidence=1.0, review_status="approved", approval_mode="auto")` + `Note` and calls `vault.write_note` to `summaries/YYYY-WW.md`
+  - Extended `IndexLayer` with `get_embeddings_by_file(file_paths) -> dict[str, list[float]]` abstract method; `ChromaIndex` implementation pages in `_GET_PAGE_SIZE` batches via `collection.get(where={"file_path": {"$in": batch}})`, returns `chunk_index=0` embedding per file; `MemoryIndex` returns `{}` (triggers LLM fallback in tests)
+  - Wired weekly summary cron job in `monocle/main.py`: `_weekly_summary_agent = WeeklySummaryAgent()`; `scheduler.add_cron_job("weekly_summary", _scheduled_weekly_summary, cfg.agents.weekly_summary.cron)`; stored on `app.state.weekly_summary_agent`
+  - Replaced `monocle/routers/agents.py` stubs: `POST /api/agents/weekly-summary` → `StreamingResponse` SSE with `start`/`done`/`error` events; `POST /api/agents/reindex` → 202 `{"status": "accepted"}` via `BackgroundTasks.add_task`
+  - Added 12 new tests to `monocle/tests/test_scheduler.py`: `TestWeeklySummaryAgent` (7 tests — writes summary note, approved frontmatter, no recent notes raises RuntimeError, 7-day cutoff filter, LLM fallback for small batches, iso week label format, clustering with embeddings); `TestAgentAPIEndpoints` (5 tests — reindex 202, reindex missing state 503, weekly-summary SSE start event, no recent notes emits done, no AI emits error)
+  - Updated `monocle/tests/test_api.py`: removed `POST /api/agents/weekly-summary` and `POST /api/agents/reindex` from `STILL_STUB_ROUTES`
+  - Added `test: scheduler` task to `.vscode/tasks.json`
+  - Updated `docs/milestones.md`: added M11 section with full implementation details; updated header (M1–M11) and ToC
+  - Updated `docs/build-plan.md`: Active Milestone → M12; M11 → COMPLETE in tracker; M11 section replaced with 4-line completion summary
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **542 passed (12 new from test_scheduler + test_api adjustment), 6 deselected**, EXIT 0
+
+- **M11 post-review hardening — resolved all 11 issues from code review (security, bugs, testing, conventions)**
+  - **S1 (security)**: Added `@limiter.limit("10/minute")` to `POST /api/agents/weekly-summary` and `@limiter.limit("6/minute")` to `POST /api/agents/reindex` in `routers/agents.py`; imported `from monocle.rate_limit import limiter`
+  - **S2 (security)**: Replaced raw exception string in `_summarise_cluster` fallback return value with generic `"— see server logs"` message; added `exc_info=True` to logger.warning call
+  - **B1 (bug)**: Fixed dead `_MAX_CLUSTERS` constant — changed cluster count formula from `max(2, min(n//3, _DEFAULT_N_CLUSTERS, _MAX_CLUSTERS))` (where `_MAX_CLUSTERS=8 > _DEFAULT_N_CLUSTERS=5` made it unreachable) to `min(max(2, n//3, _DEFAULT_N_CLUSTERS), _MAX_CLUSTERS)` so _MAX_CLUSTERS actually caps the result
+  - **B2 (bug)**: Added null-AI guard in `_scheduled_weekly_summary` closure in `main.py` — logs warning and returns early when `ai is None`
+  - **B3 (bug)**: Changed `source="mcp"` to `source="agent"` in `_write_summary`; added `"agent"` to `NoteSource` Literal in `models.py`
+  - **C1 (convention)**: Removed inner `from monocle.models import ChatMessage` and `import re` from `_llm_group_notes` and `_summarise_cluster`; moved `import re` to module-level; replaced `ChatMessage(...)` with plain dicts (`{"role": "user", "content": ...}`) matching the `AIProvider.chat(list[dict])` signature
+  - **C2 (convention)**: Removed stale `MoocleScheduler` typo alias and its "Remove after M6" comment from `agents/scheduler.py`
+  - **T1 (test)**: Fixed zero-vector embedding in `test_clustering_with_embeddings_from_index` — changed `float(i) / 10` to `float(i + 1) / 10` to avoid undefined cosine similarity for the zero vector
+  - **T2 (test)**: Added `test_double_trigger_same_week_overwrites_gracefully` — verifies running agent twice in same ISO week doesn't raise and returns same path
+  - **T3 (test)**: Added `test_scheduled_weekly_summary_skips_when_ai_none` — reconstructs the `_scheduled_weekly_summary` closure and asserts `agent.run()` is never called when `ai is None`
+  - **T4 (test)**: Added `test_max_clusters_boundary` — creates 27 notes (n//3=9 > _MAX_CLUSTERS=8), patches `_compute_clusters_sklearn` to capture `n_clusters`, asserts `captured[0] <= _MAX_CLUSTERS`
+  - Updated `TestMoocleSchedulerAlias` to assert the alias is **gone** rather than equal
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **545 passed (3 new), 6 deselected**, EXIT 0
+

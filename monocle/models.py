@@ -32,7 +32,7 @@ T = TypeVar("T")
 # Primitives
 # ---------------------------------------------------------------------------
 
-NoteSource = Literal["web", "voice", "teams", "mcp", "import"]
+NoteSource = Literal["web", "voice", "teams", "mcp", "import", "agent"]
 ReviewStatus = Literal["pending", "approved"]
 ApprovalMode = Literal["auto", "manual"]
 

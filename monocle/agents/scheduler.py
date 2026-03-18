@@ -125,8 +125,3 @@ class MonocleScheduler:
         logger.info(
             "[SCHEDULER] Registered job '%s' with cron '%s'", job_id, cron_expression
         )
-
-
-# Backward-compat alias — the double-o variant was a typo introduced in M5.
-# Remove after M6.
-MoocleScheduler = MonocleScheduler
