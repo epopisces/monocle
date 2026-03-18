@@ -70,3 +70,17 @@ class IndexLayer(ABC):
         Used by :class:`~monocle.agents.reindex.ReindexAgent` to detect which
         vault files have changed since they were last indexed.
         """
+
+    @abstractmethod
+    def get_embeddings_by_file(self, file_paths: list[str]) -> dict[str, list[float]]:
+        """Return one representative embedding per file path.
+
+        Returns the embedding of the **first** chunk (chunk_index=0) for each
+        requested file.  Files not present in the index are silently omitted.
+
+        Used by :class:`~monocle.agents.weekly_summary.WeeklySummaryAgent` to
+        build the embedding matrix for clustering without re-embedding notes.
+
+        Returns an empty dict when the backend has no real embeddings
+        (e.g. :class:`~monocle.index.MemoryIndex` in tests).
+        """

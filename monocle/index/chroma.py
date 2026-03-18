@@ -233,6 +233,32 @@ class ChromaIndex(IndexLayer):
             offset += _GET_PAGE_SIZE
         return result
 
+    def get_embeddings_by_file(self, file_paths: list[str]) -> dict[str, list[float]]:
+        if not file_paths or self._collection.count() == 0:
+            return {}
+        result: dict[str, list[float]] = {}
+        # Process in pages to avoid unbounded single requests
+        for i in range(0, len(file_paths), _GET_PAGE_SIZE):
+            batch_paths = file_paths[i : i + _GET_PAGE_SIZE]
+            where = (
+                {"file_path": {"$eq": batch_paths[0]}}
+                if len(batch_paths) == 1
+                else {"file_path": {"$in": batch_paths}}
+            )
+            batch = self._collection.get(
+                where=where,
+                include=["embeddings", "metadatas"],
+            )
+            metadatas: list[dict] = batch.get("metadatas") or []
+            embeddings: list[list[float]] = batch.get("embeddings") or []
+            for meta, emb in zip(metadatas, embeddings):
+                fp = meta.get("file_path", "")
+                chunk_idx = int(meta.get("chunk_index", 9999))
+                # Keep only the first chunk (chunk_index == 0) per file
+                if fp and chunk_idx == 0 and fp not in result:
+                    result[fp] = list(emb)
+        return result
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

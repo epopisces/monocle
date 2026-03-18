@@ -226,12 +226,29 @@ async def lifespan(app: FastAPI):
             cfg.agents.reindex.cron,
         )
 
-    # Weekly summary job stub — implemented in M11
+    # Weekly summary job — implemented in M11
     if cfg.agents.weekly_summary.enabled:
-        logger.info(
-            "[SCHEDULER] Weekly summary job registered (cron=%s) — active in M11",
+        from monocle.agents.weekly_summary import WeeklySummaryAgent
+
+        _weekly_summary_agent = WeeklySummaryAgent()
+
+        async def _scheduled_weekly_summary() -> None:
+            logger.info("[SCHEDULER] Weekly summary starting")
+            if ai is None:
+                logger.warning("[SCHEDULER] Weekly summary skipped — AI provider not available")
+                return
+            try:
+                file_path = await _weekly_summary_agent.run(vault, index, ai, cfg)
+                logger.info("[SCHEDULER] Weekly summary written: %s", file_path)
+            except Exception as exc:
+                logger.error("[SCHEDULER] Weekly summary failed: %s", exc, exc_info=True)
+
+        scheduler.add_cron_job(
+            "weekly_summary",
+            _scheduled_weekly_summary,
             cfg.agents.weekly_summary.cron,
         )
+        app.state.weekly_summary_agent = _weekly_summary_agent
 
     # ------------------------------------------------------------------
     # Inbox watcher (async task — Phase 1 integration)
