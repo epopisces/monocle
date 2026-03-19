@@ -143,6 +143,14 @@
       "problemMatcher": []
     },
     {
+      "label": "test: mcp",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_mcp.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
       // Start a local whisper.cpp HTTP server for transcription.
       // Prerequisites and usage: see scripts/start_whisper_server.py
       // Override binary/model paths via WHISPER_CPP_SERVER / WHISPER_CPP_MODEL env vars.
