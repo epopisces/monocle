@@ -154,6 +154,13 @@ async def search_vault(
     Returns:
         JSON array of objects with file_path, similarity, and chunk fields.
     """
+    _state.assert_ready()
+    if _state.ai is None:
+        raise RuntimeError(
+            "search_vault requires an AI provider for embeddings, "
+            "but the server was started without one (ai=None). "
+            "Configure an AI provider in config.yaml to enable semantic search."
+        )
     n = max(1, min(n_results, _MAX_SEARCH_RESULTS))
     filters: dict = {}
     if note_type:
@@ -161,23 +168,14 @@ async def search_vault(
     if domain:
         filters["domain"] = domain
 
-    if _state.ai is not None:
-        embedding = await _state.ai.embed(query)
-        scored = await _to_thread(
-            _state.index.search,
-            embedding,
-            n,
-            filters or None,
-            query,
-        )
-    else:
-        scored = await _to_thread(
-            _state.index.search,
-            [],
-            n,
-            filters or None,
-            query,
-        )
+    embedding = await _state.ai.embed(query)
+    scored = await _to_thread(
+        _state.index.search,
+        embedding,
+        n,
+        filters or None,
+        query,
+    )
 
     return json.dumps(
         [
@@ -206,6 +204,7 @@ async def read_note(file_path: str) -> str:
     Returns:
         JSON object with file_path, title, type, domain, tags, people, and body.
     """
+    _state.assert_ready()
     note = await _to_thread(_state.vault.read_note, file_path)
     return json.dumps(
         {
@@ -241,6 +240,7 @@ async def browse_recent(
     Returns:
         JSON array of objects with file_path, title, type, domain, and updated fields.
     """
+    _state.assert_ready()
     n = max(1, min(limit, _MAX_LIST_RESULTS))
     result = await _to_thread(
         _state.vault.list_notes,
@@ -285,6 +285,7 @@ async def capture_thought(content: str, source: str = "mcp") -> str:
     Returns:
         JSON object with file_path, type, confidence, and review_status.
     """
+    _state.assert_ready()
     if len(content) > _MAX_BODY_LENGTH:
         raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
 
@@ -329,6 +330,7 @@ async def create_note(
     Returns:
         JSON object with file_path, title, and status.
     """
+    _state.assert_ready()
     if len(body) > _MAX_BODY_LENGTH:
         raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
 
@@ -343,7 +345,7 @@ async def create_note(
     note = await _to_thread(
         _state.vault.create_from_template,
         note_type,
-        {"title": title, **metadata.model_dump(exclude={"template"})},
+        {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
         body,
     )
     await _to_thread(_state.vault.write_note, note.file_path, note)
@@ -368,6 +370,7 @@ async def update_note(file_path: str, body: str) -> str:
     Returns:
         JSON object with file_path and status.
     """
+    _state.assert_ready()
     if len(body) > _MAX_BODY_LENGTH:
         raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
 
@@ -400,6 +403,7 @@ async def get_graph(
     Returns:
         JSON object with focus, nodes, and edges arrays.
     """
+    _state.assert_ready()
     import asyncio
 
     graph_data = await asyncio.to_thread(
@@ -455,6 +459,7 @@ async def get_stats() -> str:
         JSON object with total_notes, by_type, by_domain, pending_review,
         index_chunks, and failed_ingests fields.
     """
+    _state.assert_ready()
     all_refs, vault_total = await _fetch_all_refs()
     index_stats = await _to_thread(_state.index.get_stats)
 

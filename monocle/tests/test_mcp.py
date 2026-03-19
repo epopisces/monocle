@@ -53,6 +53,8 @@ def _reset_mcp_state():
         mcp_state.ai,
         mcp_state.ingest_pipeline,
         mcp_state.graph_builder,
+        mcp_state.reindex_queue,
+        mcp_state._initialised,
     )
     yield
     (
@@ -61,6 +63,8 @@ def _reset_mcp_state():
         mcp_state.ai,
         mcp_state.ingest_pipeline,
         mcp_state.graph_builder,
+        mcp_state.reindex_queue,
+        mcp_state._initialised,
     ) = orig
 
 
@@ -608,13 +612,12 @@ class TestMCPTools:
 
     @pytest.mark.asyncio
     async def test_search_vault_without_ai_provider(self, mcp_state):
-        """search_vault must not raise when no AI provider is configured."""
+        """search_vault must raise RuntimeError when no AI provider is configured."""
         from monocle.mcp_server import mcp, _state
 
         _state.ai = None
-        result = await mcp.call_tool("search_vault", {"query": "anything"})
-        data = json.loads(_extract_text(result))
-        assert isinstance(data, list)
+        with pytest.raises(Exception, match="AI provider"):
+            await mcp.call_tool("search_vault", {"query": "anything"})
 
     @pytest.mark.asyncio
     async def test_update_note_missing_file_raises(self, mcp_state):
