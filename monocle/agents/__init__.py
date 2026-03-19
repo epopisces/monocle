@@ -90,6 +90,35 @@ class _AIProviderChatClient(BaseChatClient):
         super().__init__()
         self._ai = ai
 
+    @staticmethod
+    def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """Normalize tool call arguments from JSON strings to dicts.
+
+        The agent framework may serialize tool call arguments as JSON strings,
+        but providers (Ollama, Azure, Foundry) expect them as dicts in their
+        Pydantic models. This normalizes them for all providers uniformly.
+        """
+        normalized = []
+        for msg in messages:
+            msg_copy = dict(msg)
+            if "tool_calls" in msg_copy:
+                normalized_calls = []
+                for tc in msg_copy.get("tool_calls", []):
+                    tc_copy = dict(tc)
+                    if "function" in tc_copy:
+                        func_copy = dict(tc_copy["function"])
+                        args = func_copy.get("arguments")
+                        if isinstance(args, str):
+                            try:
+                                func_copy["arguments"] = json.loads(args)
+                            except (json.JSONDecodeError, ValueError):
+                                pass  # Keep as string if not valid JSON; provider will validate
+                        tc_copy["function"] = func_copy
+                    normalized_calls.append(tc_copy)
+                msg_copy["tool_calls"] = normalized_calls
+            normalized.append(msg_copy)
+        return normalized
+
     # ------------------------------------------------------------------
     # Convert agent-framework ChatMessage list → dict-list for AIProvider.chat
     # ------------------------------------------------------------------
@@ -180,12 +209,13 @@ class _AIProviderChatClient(BaseChatClient):
         **kwargs: Any,
     ) -> ChatResponse:
         dict_messages = self._to_dict_messages(messages)
+        normalized_messages = self._normalize_tool_call_arguments(dict_messages)
         tools = self._build_openai_tools(chat_options)
 
         # AIProvider.chat with stream=False returns a str or AsyncIterator.
         # We always pass stream=False for the non-streaming path.
         raw = await self._ai.chat(
-            dict_messages,
+            normalized_messages,
             stream=False,
             tools=tools,
         )
@@ -229,10 +259,11 @@ class _AIProviderChatClient(BaseChatClient):
         **kwargs: Any,
     ) -> AsyncIterable[ChatResponseUpdate]:
         dict_messages = self._to_dict_messages(messages)
+        normalized_messages = self._normalize_tool_call_arguments(dict_messages)
         tools = self._build_openai_tools(chat_options)
 
         stream = await self._ai.chat(
-            dict_messages,
+            normalized_messages,
             stream=True,
             tools=tools,
         )
@@ -247,7 +278,7 @@ class _AIProviderChatClient(BaseChatClient):
                         contents=[FunctionCallContent(
                             call_id=tc.get("id", ""),
                             name=tc["function"]["name"],
-                            arguments=json.loads(tc["function"].get("arguments", "{}")),
+                            arguments=_parse_arguments(tc["function"].get("arguments")),
                         )],
                     )
             else:
@@ -266,7 +297,7 @@ class _AIProviderChatClient(BaseChatClient):
                             contents=[FunctionCallContent(
                                 call_id=tc.get("id", ""),
                                 name=tc["function"]["name"],
-                                arguments=json.loads(tc["function"].get("arguments", "{}")),
+                                arguments=_parse_arguments(tc["function"].get("arguments")),
                             )],
                         )
                 else:
@@ -276,6 +307,20 @@ class _AIProviderChatClient(BaseChatClient):
 # ---------------------------------------------------------------------------
 # Helper: extract tool calls from raw LLM text output
 # ---------------------------------------------------------------------------
+
+
+def _parse_arguments(args: dict | str | None) -> dict:
+    """Parse tool call arguments from either dict or JSON string."""
+    if args is None:
+        return {}
+    if isinstance(args, dict):
+        return args
+    if isinstance(args, str):
+        try:
+            return json.loads(args)
+        except (json.JSONDecodeError, ValueError):
+            return {}
+    return {}
 
 
 def _try_parse_tool_calls(raw: str) -> list[dict] | None:

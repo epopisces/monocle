@@ -65,15 +65,11 @@
     },
     {
       "name": "Frontend Dev Server",
-      "type": "node-terminal",
+      "type": "node",
       "request": "launch",
-      "command": "npm run dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev","--port","5174"],
       "cwd": "${workspaceFolder}/frontend",
-      "serverReadyAction": {
-        "action": "openExternally",
-        "pattern": "Local:\\s+(http://localhost:\\d+)",
-        "uriFormat": "%s"
-      },
       "presentation": {
         "group": "frontend",
         "order": 1

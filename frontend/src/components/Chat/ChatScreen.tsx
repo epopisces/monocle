@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useChat } from '../../hooks/useChat'
 import ChatMessage from './ChatMessage'
-import ChatInput from './ChatInput'
+import ChatInput, { type ChatInputHandle } from './ChatInput'
 import './ChatScreen.css'
 
 interface Starter {
@@ -9,20 +9,22 @@ interface Starter {
   label: string
   prompt: string | null
   action?: string
+  sendImmediately?: boolean  // true = send immediately, false/undefined = populate input
 }
 
 const CHAT_STARTERS: Starter[] = [
-  { icon: '👤', label: 'Notes on a person',  prompt: 'What are my notes on ' },
-  { icon: '📋', label: 'Open action items',  prompt: 'Show me all open action items' },
-  { icon: '📅', label: 'Weekly review',       prompt: 'Run my weekly review' },
+  { icon: '👤', label: 'Notes on a person',  prompt: 'What are my notes on ', sendImmediately: false },
+  { icon: '📋', label: 'Open action items',  prompt: 'Show me all open action items', sendImmediately: true },
+  { icon: '📅', label: 'Weekly review',       prompt: 'Run my weekly review', sendImmediately: true },
   { icon: '🎤', label: 'Capture voice note',  prompt: null, action: 'voice' },
-  { icon: '🔖', label: 'Recent decisions',    prompt: 'Show my recent decisions' },
-  { icon: '📁', label: 'Summarize project',   prompt: 'Summarize my notes about ' },
+  { icon: '🔖', label: 'Recent decisions',    prompt: 'Show my recent decisions', sendImmediately: true },
+  { icon: '📁', label: 'Summarize project',   prompt: 'Summarize my notes about ', sendImmediately: false },
 ]
 
 export default function ChatScreen() {
   const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession } = useChat()
   const threadEndRef = useRef<HTMLDivElement>(null)
+  const chatInputRef = useRef<ChatInputHandle>(null)
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -35,7 +37,13 @@ export default function ChatScreen() {
       return
     }
     if (starter.prompt) {
-      send(starter.prompt)
+      // If sendImmediately is true, send the prompt as-is
+      // Otherwise, populate the input field and let user add to it
+      if (starter.sendImmediately) {
+        send(starter.prompt)
+      } else {
+        chatInputRef.current?.populate(starter.prompt)
+      }
     }
   }
 
@@ -62,6 +70,15 @@ export default function ChatScreen() {
             </option>
           ))}
         </select>
+        <button
+          className="chat-screen__new-session-btn"
+          onClick={() => newSession()}
+          title="New session"
+          aria-label="Start a new session"
+          data-testid="new-session-btn"
+        >
+          ✨
+        </button>
       </div>
 
       {/* Thread or chat starters */}
@@ -95,7 +112,7 @@ export default function ChatScreen() {
 
       {/* Input area */}
       <div className="chat-screen__input-area">
-        <ChatInput onSend={send} disabled={isStreaming} />
+        <ChatInput ref={chatInputRef} onSend={send} disabled={isStreaming} />
       </div>
     </div>
   )

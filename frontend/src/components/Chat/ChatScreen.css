@@ -32,6 +32,29 @@
   outline-offset: 1px;
 }
 
+.chat-screen__new-session-btn {
+  margin-left: var(--space-2);
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-lg);
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.chat-screen__new-session-btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-elevated);
+}
+
+.chat-screen__new-session-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* ── Thread ──────────────────────────────────────────────────── */
 .chat-screen__thread {
   flex: 1;

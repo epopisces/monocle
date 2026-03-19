@@ -198,6 +198,18 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Created `monocle/tests/test_ai.py`: 27 mock-based unit tests; 3 live integration tests behind `@pytest.mark.integration` (skipped by default)
   - Updated `pyproject.toml`: added `addopts = "-m 'not integration'"` and registered `integration` marker
   - Updated `.vscode/tasks.json`: added `test: ai` task
+
+## 2026-03-20
+
+### Claude Haiku 4.5
+- **Chat Streaming Fixes & Refactoring (post-development testing)**
+  - Diagnosed and fixed async/await issue in OllamaProvider: Ollama AsyncClient.chat() with `stream=True` returns a coroutine that, when awaited, yields an async generator. Updated [ollama_provider.py](monocle/ai/ollama_provider.py#L166) line 166 to add `await`: `response = await self._client.chat(**chat_kwargs)` before `async for chunk in response:`
+  - Fixed test mock in `test_ai.py::TestOllamaProvider::test_chat_stream_returns_async_iterator`: updated to use `AsyncMock(side_effect=_mock_chat_coro)` where `_mock_chat_coro` is a coroutine that returns the async generator, correctly modeling Ollama AsyncClient.chat(stream=True) behavior
+  - Fixed tool call serialization impedance mismatch: Agent Framework serializes tool arguments as JSON strings; Pydantic models expect dicts. Added defensive `_parse_arguments()` helper in adapter layer that safely handles both formats. Updated tool call parsing at three sites to use the helper
+  - Centralized message normalization in adapter layer (`_AIProviderChatClient._normalize_tool_call_arguments()`): converts string-serialized tool call arguments to dicts before ANY provider sees them. Applied normalization in both `_inner_get_response()` and `_inner_get_streaming_response()` before provider dispatch
+  - Removed duplicate `_normalize_messages()` method from `OllamaProvider` after moving logic to adapter (eliminates duplication across OllamaProvider, FoundryLocalProvider, AzureOpenAIProvider)
+  - Updated OllamaProvider `chat()` and `_stream_chat()` methods: removed calls to `self._normalize_messages()`, now uses messaging directly since adapter guarantees normalization
+  - Streaming chat with tool invocation now works end-to-end without validation errors; resolved TypeError in production chat streaming
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **302 passed, 3 deselected** (all tests), EXIT 0
 
 ---
