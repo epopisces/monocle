@@ -394,5 +394,5 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
     - New `TestMCPSecurityBoundaries` class (5 tests): `test_read_note_path_traversal_blocked`, `test_update_note_path_traversal_blocked`, `test_auth_middleware_uses_constant_time_compare`, `test_assert_ready_raises_before_init`, `test_assert_ready_passes_after_init`
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **589 passed (16 new), 6 deselected**, EXIT 0
   - Updated `docs/milestones.md`: added M12 full details section
-  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **573 passed (24 new), 6 deselected**, EXIT 0
+
 
