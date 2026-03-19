@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-18
-active-milestone: M12
+last-updated: 2026-03-19
+active-milestone: M13
 ---
 
 # Monocle — Copilot Build Plan
