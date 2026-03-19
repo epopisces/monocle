@@ -462,4 +462,24 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - `npx tsc --noEmit` → EXIT 0 (no type errors)
   - Updated `docs/build-plan.md`: M15 deliverables `[x]`; M16 deliverables `[x]`; Active Milestone → M17; M16 → COMPLETE in tracker
 
+## 2026-03-20
+
+### Claude Sonnet 4.6
+- **Executed M17 — Document Browser, Search & Template Editor UI (COMPLETE)**
+  - Created `frontend/src/hooks/useDebounce.ts`: `useDebouncedCallback<Args>` — stable callback via `useRef` + `useCallback`; `useEffect` keeps fnRef current across renders
+  - Created `frontend/src/utils/yamlUtils.ts`: `metaToYaml()`, `buildRawDoc()`, `splitFrontmatter()`, `parseFrontmatter()` — minimal YAML serializer/parser for note frontmatter (no js-yaml dep)
+  - Created `frontend/src/components/DocumentBrowser/FileTree.tsx` + `.css`: `buildTree(NoteRef[])` groups by directory prefix; recursive `TreeNodeRow` with expand/collapse; type icons; pending review badge; `data-testid` attributes
+  - Created `frontend/src/components/DocumentBrowser/FormEditor.tsx` + `.css`: `TemplateField`/`TemplateSchema` exported interfaces; `StringField`/`ListField`/`BoolField` renderers; required field validation with error toast; `InlineToast` component
+  - Created `frontend/src/components/DocumentBrowser/BacklinksPanel.tsx` + `.css`: `getNoteBacklinks(path)` on mount with cancellation guard; loading/empty/error states; `onDoubleClick` → `onNavigate`
+  - Created `frontend/src/components/DocumentBrowser/NoteEditor.tsx` + `.css`: CodeMirror `EditorView` with `markdown()` + `yaml()` in YAML mode; `externalUpdateRef` prevents edit→state→editor loop; `useDebouncedCallback(saveNote, 2000)`; `Ctrl+S` immediate save; YAML/Preview/Form mode toggle; ReactMarkdown preview with `[[wikilink]]` click handler; FormEditor in form mode; Approve button (review_status=pending); 409 conflict toast
+  - Created `frontend/src/components/DocumentBrowser/DocumentBrowserScreen.tsx` + `.css`: `useSearchParams` for `?path=` and `?wikilink=`; `listNotes(limit:500)` + `listTemplates()` on mount; FileTree sidebar + NoteEditor + BacklinksPanel right panel
+  - Created `frontend/src/components/Search/SearchScreen.tsx` + `.css`: Semantic/Keyword mode toggle; semantic threshold slider (0–1, displayed as %); `semanticSearch`/`keywordSearch` API calls on submit; result cards with score badge; Open/Approve inline actions
+  - Updated `frontend/src/App.tsx`: replaced placeholder `DocsScreen`/`SearchScreen` with real imports from DocumentBrowserScreen and SearchScreen
+  - Created `frontend/src/DocumentBrowser.test.tsx`: 22 tests — FileTree (6), BacklinksPanel (4), DocumentBrowserScreen (3), NoteEditor isolated (7) + 2 placeholder; CodeMirror fully mocked
+  - Created `frontend/src/Search.test.tsx`: 14 tests — layout (4), semantic search (4), keyword search (2), actions (4); `vi.clearAllMocks()` in top-level `beforeEach` to reset call counts between tests
+  - Created `frontend/src/TemplateEditor.test.tsx`: 15 tests — rendering (7), validation (4), field interaction (4); uses `templates` array API, correct DOM assertions for field inputs
+  - Fixed TypeScript errors: `DocumentBrowserScreen` cast `listTemplates()` result via `unknown` intermediate; `NoteEditor.handleApprove` cast metadata spread to `Note['metadata']`; `TemplateEditor.test.tsx` BASE_NOTE metadata filled required fields, mtime changed to number
+  - `npm run test -- --run` → **113 passed (7 files, 51 new tests), EXIT 0**
+  - `npx tsc --noEmit` → **CLEAN (exit 0)**
+  - Updated `docs/build-plan.md`: M17 → COMPLETE; Active Milestone → M18; tracker row updated; session notes added
 

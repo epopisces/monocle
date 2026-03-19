@@ -1,0 +1,147 @@
+import { useCallback, useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { listNotes, getNote, listTemplates, type Note, type NoteRef } from '../../api/notes'
+import type { TemplateSchema } from './FormEditor'
+import FileTree from './FileTree'
+import NoteEditor from './NoteEditor'
+import BacklinksPanel from './BacklinksPanel'
+import './DocumentBrowserScreen.css'
+
+export default function DocumentBrowserScreen() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [notes, setNotes] = useState<NoteRef[]>([])
+  const [templates, setTemplates] = useState<TemplateSchema[]>([])
+  const [selectedPath, setSelectedPath] = useState<string | null>(
+    searchParams.get('path'),
+  )
+  const [openNote, setOpenNote] = useState<Note | null>(null)
+  const [loadingNote, setLoadingNote] = useState(false)
+  const [noteError, setNoteError] = useState<string | null>(null)
+
+  // Load note list + templates on mount
+  useEffect(() => {
+    listNotes({ limit: 500 }).then(page => setNotes(page.items)).catch(() => {})
+    listTemplates().then(schemata => setTemplates(schemata as unknown as TemplateSchema[])).catch(() => {})
+  }, [])
+
+  // If URL has ?path= or ?wikilink=, resolve them
+  useEffect(() => {
+    const pathParam = searchParams.get('path')
+    const wikilinkParam = searchParams.get('wikilink')
+
+    if (pathParam) {
+      setSelectedPath(pathParam)
+    } else if (wikilinkParam && notes.length > 0) {
+      const lower = wikilinkParam.toLowerCase()
+      const match = notes.find(
+        n => n.title.toLowerCase() === lower || n.file_path.toLowerCase().includes(lower),
+      )
+      if (match) {
+        setSelectedPath(match.file_path)
+        setSearchParams({ path: match.file_path }, { replace: true })
+      }
+    }
+  }, [searchParams, notes, setSearchParams])
+
+  // Load note content when selectedPath changes
+  useEffect(() => {
+    if (!selectedPath) {
+      setOpenNote(null)
+      return
+    }
+    let cancelled = false
+    setLoadingNote(true)
+    setNoteError(null)
+    getNote(selectedPath)
+      .then(n => {
+        if (!cancelled) setOpenNote(n)
+      })
+      .catch(err => {
+        if (!cancelled) setNoteError(String(err?.message ?? 'Failed to load note'))
+      })
+      .finally(() => {
+        if (!cancelled) setLoadingNote(false)
+      })
+    return () => { cancelled = true }
+  }, [selectedPath])
+
+  const handleSelectNote = useCallback((path: string) => {
+    setSelectedPath(path)
+    setSearchParams({ path }, { replace: true })
+  }, [setSearchParams])
+
+  const handleNavigate = useCallback((path: string) => {
+    handleSelectNote(path)
+  }, [handleSelectNote])
+
+  const handleSaved = useCallback((updated: Note) => {
+    setOpenNote(updated)
+    // Refresh note list entry
+    setNotes(prev =>
+      prev.map(n =>
+        n.file_path === updated.file_path
+          ? {
+              ...n,
+              title: updated.title,
+              type: updated.metadata?.type ?? n.type,
+              review_status: updated.metadata?.review_status ?? n.review_status,
+            }
+          : n,
+      ),
+    )
+  }, [])
+
+  return (
+    <div className="doc-browser" data-testid="doc-browser">
+      {/* ── Left: file tree ─────────────────────────────────── */}
+      <aside className="doc-browser__sidebar">
+        <div className="doc-browser__sidebar-header">
+          <span className="doc-browser__sidebar-title">Vault</span>
+        </div>
+        <FileTree
+          notes={notes}
+          selectedPath={selectedPath}
+          onSelect={handleSelectNote}
+        />
+      </aside>
+
+      {/* ── Right: editor + backlinks ─────────────────────── */}
+      <div className="doc-browser__main">
+        {!selectedPath && (
+          <div className="doc-browser__empty" data-testid="doc-browser-empty">
+            <span className="doc-browser__empty-icon">📄</span>
+            <p>Select a note from the vault</p>
+          </div>
+        )}
+
+        {selectedPath && loadingNote && (
+          <div className="doc-browser__loading" data-testid="doc-browser-loading">
+            Loading…
+          </div>
+        )}
+
+        {selectedPath && noteError && (
+          <div className="doc-browser__error" data-testid="doc-browser-error">
+            {noteError}
+          </div>
+        )}
+
+        {openNote && !loadingNote && !noteError && (
+          <div className="doc-browser__editor-pane">
+            <NoteEditor
+              note={openNote}
+              templates={templates}
+              onSaved={handleSaved}
+              onNavigate={handleNavigate}
+              allNotes={notes}
+            />
+            <BacklinksPanel
+              path={openNote.file_path}
+              onNavigate={handleNavigate}
+            />
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

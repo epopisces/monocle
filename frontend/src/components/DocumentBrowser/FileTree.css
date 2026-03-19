@@ -1,0 +1,98 @@
+.file-tree {
+  overflow-y: auto;
+  flex: 1;
+  padding: var(--space-1) 0;
+  min-width: 0;
+}
+
+.file-tree--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
+
+.file-tree__folder-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  padding: 4px 8px;
+  text-align: left;
+  border-radius: var(--radius-btn);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-tree__folder-row:hover {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.file-tree__arrow {
+  font-size: 10px;
+  width: 12px;
+  flex-shrink: 0;
+}
+
+.file-tree__folder-icon {
+  flex-shrink: 0;
+}
+
+.file-tree__folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-tree__file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: var(--text-sm);
+  font-family: var(--font-ui);
+  padding: 4px 8px;
+  text-align: left;
+  border-radius: var(--radius-btn);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-tree__file:hover {
+  background: var(--bg-elevated);
+}
+
+.file-tree__file--active {
+  background: var(--bg-elevated);
+  color: var(--accent);
+}
+
+.file-tree__file-icon {
+  flex-shrink: 0;
+  font-size: 13px;
+}
+
+.file-tree__file-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.file-tree__pending-badge {
+  color: var(--review-pending);
+  font-size: 8px;
+  flex-shrink: 0;
+}
