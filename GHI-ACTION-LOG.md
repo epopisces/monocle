@@ -474,6 +474,22 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - `npx tsc --noEmit` → EXIT 0 (no type errors)
   - Updated `docs/build-plan.md`: M15 deliverables `[x]`; M16 deliverables `[x]`; Active Milestone → M17; M16 → COMPLETE in tracker
 
+### Claude Haiku 4.5
+- **Fixed double-click and timer issues in graph interaction**
+  - Fixed double-click node detection: added `lastClickedNodeIdRef` to track which node was clicked; only triggers double-click when same node is clicked twice within 250ms (prevents cross-node false positives when rapidly clicking different nodes)
+  - Fixed stale timer on graph reload: `loadGraph()` now clears pending click timers before reloading graph (prevents orphaned timers from re-selecting stale nodes after graph data changes via depth/filter/focus modifications)
+  - Improved type safety in `handleNodeDragEnd()`: refactored from spread operator to `Object.assign` for better TypeScript index signature inference
+  - Updated [GraphScreen.tsx](frontend/src/components/Graph/GraphScreen.tsx#L103) with `lastClickedNodeIdRef`, [handleNodeClick](frontend/src/components/Graph/GraphScreen.tsx#L248-L270) with paired timer+node-ID check, and [loadGraph](frontend/src/components/Graph/GraphScreen.tsx#L126-L135) with timer cleanup
+  - `npx tsc --noEmit` → EXIT 0 (TypeScript clean after type assertion fix)
+  - `npm run test -- --run` → **185 passed** (Graph tests cover new click/drag scenarios), EXIT 0
+
+- **Fixed unsafe link rendering UX in Markdown preview**
+  - **Issue:** Unsafe (non-http(s)) links were rewritten to `href="#"` but still rendered with `target="_blank"`, causing clicks to open a new tab to the current page (confusing UX)
+  - **Solution:** Modified [NoteEditor.tsx](frontend/src/components/DocumentBrowser/NoteEditor.tsx#L362) `a` component renderer to only set `target="_blank" rel="noopener noreferrer"` when href is actually a valid http(s) URL; unsafe links now render as non-clickable `<span>` elements with `.unsafe-link` class
+  - **Styling:** Added `.note-editor__preview .unsafe-link` to [NoteEditor.css](frontend/src/components/DocumentBrowser/NoteEditor.css#L177) — disabled appearance (grayed out, strikethrough) with `cursor: not-allowed`
+  - **Test:** Added test case `renders unsafe (non-http) links as non-clickable text without target="_blank"` to [DocumentBrowser.test.tsx](frontend/src/DocumentBrowser.test.tsx#L596) — verifies `file://` links render as spans (no href attribute) while `https://` links remain clickable anchors with `target="_blank"`
+  - `npx tsc --noEmit` → EXIT 0 (no type errors)
+
 ## 2026-03-20
 
 ### Claude Sonnet 4.6

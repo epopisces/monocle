@@ -483,6 +483,18 @@ describe('DocumentBrowserScreen — wikilink resolution', () => {
     expect(screen.getByTestId('wiki-toast').textContent).toMatch(/not found/i)
   })
 
+  it('removes unresolved ?wikilink= from URL after showing toast', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/docs?wikilink=NonExistentNote']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(mockListNotes).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId('wiki-toast')).toBeInTheDocument())
+    // URL should be cleaned to remove the unresolved wikilink param
+    expect(window.location.search).toBe('')
+  })
+
   it('updates file tree title after a note is saved', async () => {
     render(
       <MemoryRouter initialEntries={['/docs?path=people/alice.md']}>
@@ -589,6 +601,38 @@ describe('NoteEditor — wikilink navigation in preview mode', () => {
     fireEvent.click(screen.getByTestId('wikilink'))
     await waitFor(() => expect(screen.getByTestId('editor-toast')).toBeInTheDocument())
     expect(screen.getByTestId('editor-toast').textContent).toMatch(/not found/i)
+  })
+
+  it('renders unsafe (non-http) links as non-clickable text without target="_blank"', async () => {
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={{
+            ...MOCK_NOTE_FULL,
+            body: 'See [local link](file:///home/user/file.md) and [valid link](https://example.com)',
+          } as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+    await act(async () => { fireEvent.click(screen.getByTestId('mode-btn-preview')) })
+    await waitFor(() => expect(screen.getByTestId('preview-content')).toBeInTheDocument())
+    
+    // Unsafe link should be a non-clickable span with the unsafe-link class
+    const unsafeLink = screen.queryByText('local link')
+    expect(unsafeLink?.tagName).toBe('SPAN')
+    expect(unsafeLink).toHaveClass('unsafe-link')
+    expect(unsafeLink?.getAttribute('href')).toBeNull()
+    
+    // Safe link should be an anchor with target="_blank"
+    const safeLink = screen.getByText('valid link')
+    expect(safeLink.tagName).toBe('A')
+    expect(safeLink.getAttribute('href')).toBe('https://example.com')
+    expect(safeLink.getAttribute('target')).toBe('_blank')
+    expect(safeLink.getAttribute('rel')).toBe('noopener noreferrer')
   })
 })
 

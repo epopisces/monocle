@@ -64,17 +64,21 @@ function getNodeSize(node: GraphNode): number {
 }
 
 function loadPositions(): Record<string, { x: number; y: number }> {
+  const MAX_COORD = 10000  // Reasonable bounds for graph coordinates
   try {
     const raw = JSON.parse(localStorage.getItem(POSITIONS_KEY) ?? '{}') as unknown
     if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return {}
     const result: Record<string, { x: number; y: number }> = {}
     for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      const x = (v as Record<string, unknown>).x
+      const y = (v as Record<string, unknown>).y
+      // Validate: must be numbers, must be finite, must be within reasonable bounds
       if (
         typeof v === 'object' && v !== null &&
-        typeof (v as Record<string, unknown>).x === 'number' &&
-        typeof (v as Record<string, unknown>).y === 'number'
+        typeof x === 'number' && Number.isFinite(x) && Math.abs(x) <= MAX_COORD &&
+        typeof y === 'number' && Number.isFinite(y) && Math.abs(y) <= MAX_COORD
       ) {
-        result[k] = { x: (v as { x: number; y: number }).x, y: (v as { x: number; y: number }).y }
+        result[k] = { x, y }
       }
     }
     return result
@@ -96,6 +100,7 @@ export default function GraphScreen() {
   const navigate = useNavigate()
   const containerRef = useRef<HTMLDivElement>(null)
   const clickTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const lastClickedNodeIdRef = useRef<string | undefined>(undefined)
 
   const [dimensions, setDimensions] = useState({ width: 600, height: 500 })
   const [graphData, setGraphData] = useState<GraphData | null>(null)
@@ -121,6 +126,12 @@ export default function GraphScreen() {
     maxDegree: number
     filters: FilterState
   }) => {
+    // Clear any pending single-click timer to prevent selecting stale nodes after reload
+    if (clickTimerRef.current !== undefined) {
+      clearTimeout(clickTimerRef.current)
+      clickTimerRef.current = undefined
+      lastClickedNodeIdRef.current = undefined
+    }
     setLoading(true)
     setError(null)
     setSelectedNode(null)
@@ -237,26 +248,38 @@ export default function GraphScreen() {
 
   function handleNodeClick(node: unknown) {
     const n = node as ForceNode
-    // Detect double-click via timer
-    if (clickTimerRef.current !== undefined) {
+    // Detect double-click: timer must exist AND same node must be clicked twice
+    if (clickTimerRef.current !== undefined && lastClickedNodeIdRef.current === n.id) {
       clearTimeout(clickTimerRef.current)
       clickTimerRef.current = undefined
+      lastClickedNodeIdRef.current = undefined
       // Double-click detected → navigate
       navigate(`/docs?path=${encodeURIComponent(n.id)}`)
       return
     }
+    // Clear any previous pending timer (different node was clicked)
+    if (clickTimerRef.current !== undefined) {
+      clearTimeout(clickTimerRef.current)
+    }
+    // Start new single-click timer for this node
+    lastClickedNodeIdRef.current = n.id
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = undefined
+      lastClickedNodeIdRef.current = undefined
       setSelectedNode(n)
     }, 250)
   }
 
   function handleNodeDragEnd(node: unknown) {
     const n = node as ForceNode
-    if (n.x !== undefined && n.y !== undefined) {
-      const next = { ...positions, [n.id]: { x: n.x, y: n.y } }
-      setPositions(next)
-      localStorage.setItem(POSITIONS_KEY, JSON.stringify(next))
+    const x = n.x
+    const y = n.y
+    if (typeof x === 'number' && typeof y === 'number') {
+      setPositions(prev => {
+        const next = Object.assign({}, prev, { [n.id]: { x, y } })
+        localStorage.setItem(POSITIONS_KEY, JSON.stringify(next))
+        return next
+      })
     }
   }
 

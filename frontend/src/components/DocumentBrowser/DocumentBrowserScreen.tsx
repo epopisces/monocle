@@ -60,6 +60,8 @@ export default function DocumentBrowserScreen() {
         setSearchParams({ path: match.file_path }, { replace: true })
       } else {
         setWikiToast(`Note not found: "${wikilinkParam}"`)
+        // Remove unresolved wikilink from URL to prevent toast on refresh/back navigation
+        setSearchParams({}, { replace: true })
       }
     }
   }, [searchParams, notes, setSearchParams])

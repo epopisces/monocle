@@ -382,8 +382,12 @@ export default function NoteEditor({
                       </a>
                     )
                   }
-                  const safe = /^https?:\/\//i.test(href ?? '') ? href : '#'
-                return <a href={safe} target="_blank" rel="noopener noreferrer">{children}</a>
+                  // Only allow http(s) URLs; render unsafe links as non-navigable text
+                  const isAllowedUrl = /^https?:\/\//i.test(href ?? '')
+                  if (!isAllowedUrl) {
+                    return <span className="unsafe-link" title="Unsafe link (non-http)">{children}</span>
+                  }
+                return <a href={href} target="_blank" rel="noopener noreferrer">{children}</a>
                 },
               }}
             >
