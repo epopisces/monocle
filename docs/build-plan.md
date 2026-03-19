@@ -26,9 +26,14 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M17 — Document Browser, Search & Template Editor UI
-**Last Completed:** M16 — Chat UI (2026-03-19)
+**Active Milestone:** M18 — Graph UI
+**Last Completed:** M17 — Document Browser, Search & Template Editor UI (2026-03-20)
 **Blocked By:** None
+**Session Notes (M17 — Document Browser, Search & Template Editor UI):**
+- **Status:** COMPLETE (2026-03-20)
+- Implemented the Document Browser, Search, and Template Editor UIs plus supporting YAML/frontmatter utilities.
+- All 113 frontend tests passing (51 new); TypeScript clean.
+- **Full details:** [docs/milestones.md#M17-—-document-browser-search--template-editor-ui](milestones.md#m17--document-browser-search--template-editor-ui)
 **Session Notes (M13 — Settings & Review API):** M13 fully executed + post-review hardened. `monocle/config.py`: `save_config_patch(patch: dict)` function — deep-merges allowed sections (`ai`, `vault`, `index`, `agents`, `review`, `server`, `telemetry`, `ui`) into `config.yaml` atomically via mkstemp+os.replace; respects `MONOCLE_CONFIG` env var. `monocle/index/base.py`: `patch_file_metadata(file_path, updates)` abstract method added. `monocle/index/chroma.py`: `patch_file_metadata` implementation uses `collection.get(where=file_path_filter)` + `collection.update()` with scalar-only metadata merge. `monocle/index/memory.py`: `patch_file_metadata` implementation updates `chunk.metadata` dict in-place. `monocle/routers/settings.py`: `GET /api/settings` returns all settings sections + `mcp_key_last4` (masked); `PATCH /api/settings` accepts `{review: ..., ai: ...}` partial patch — `AIPatch.provider` and `AIPatch.transcribe_backend` typed as `Literal` (invalid values → 422); `ReviewPatch` fields have `ge`/`le` range guards (out-of-range → 422); writes to config.yaml via `save_config_patch`, hot-reloads `AIProvider` when `ai.provider` changes; rate-limited 30/min; `POST /api/settings/rotate-mcp-key` generates `secrets.token_hex(32)`, writes to `.env` atomically, updates `os.environ`, rate-limited 10/min; `_write_env_key` strips newlines from value. `monocle/routers/review.py`: `GET /api/review` warms `app.state._review_pending_count` cache as side-effect; `GET /api/review/count` returns O(1) from cache when warm, falls back to vault scan; `PATCH /api/review/{path}/approve` rate-limited 60/min, decrements count cache; `POST /api/review/approve-all` parallelized via `asyncio.gather` + `asyncio.Semaphore(10)`, rate-limited 30/min, sets cache to remainder. `app.state._review_pending_count` initialized `None` in lifespan and in `_reindex_file` callback; `notes.py` PUT/PATCH/DELETE and `ingest.py` POST/stream also invalate cache on vault write. `monocle/tests/test_settings.py`: 28 tests (was 19); added `TestInputValidation` (9 tests: Literal constraints, range validators), `TestAIProviderHotReload` (2 tests: hot-reload triggered, not triggered), `TestRotateMcpKey.test_rotate_replaces_old_key_in_os_environ`. `monocle/tests/test_review.py`: 34 tests (was 25); added `test_approve_all_sets_all_approval_fields`, `test_approve_all_partial_failure_count`, `TestPendingCountCache` (3 tests), `TestPaginationEdgeCases` (1 test). `monocle/tests/test_security.py`: added `test_approve_path_traversal_blocked`, `test_approve_absolute_path_blocked`. **644 tests passing (18 new post-review), 6 deselected, EXIT 0.**
 **Session Notes (M12 — MCP Server):** M12 fully executed. `monocle/mcp_server.py`: `FastMCP("monocle", stateless_http=True)` + 8 tools (`search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`); `_MCPState` singleton (instance attrs, `assert_ready()`, `reindex_queue` field) populated via `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue)`; `_MCPAuthMiddleware` ASGI wrapper validates `x-monocle-key` header or `?key=` query param using `hmac.compare_digest` (constant-time); logs WARNING when `?key=` path is taken; returns HTTP 401 JSON if missing or invalid; `create_mcp_app(mcp_key)` → `_MCPAuthMiddleware`; MCP key loaded from env at `create_app()` time. `capture_thought` forwards `source` param to `IngestPipeline`. `create_note`/`update_note` push to `reindex_queue` after write; `update_note` sets `metadata.updated = datetime.now(utc)`. `get_stats` paginates via `_fetch_all_refs()` (500-note batches). `monocle/main.py`: `init_mcp_state(...)` called in lifespan with `reindex_queue=reindex_queue`; `create_mcp_app(mcp_key)` mounted at `/mcp`. `monocle/tests/test_mcp.py`: 40 tests across 4 classes — `TestMCPAuth` (6), `TestMCPTools` (26), `TestMCPSecurityBoundaries` (5), `TestMCPServerConfig` (3). SPIKE-2 outcome recorded. **589 tests passing (40 MCP), 6 deselected, EXIT 0.**
 **Session Notes (M11 — Scheduled Agents):** M11 fully executed. `monocle/agents/weekly_summary.py`: `WeeklySummaryAgent.run(vault, index, ai, settings)` — collects notes updated within 7 days via `vault.list_notes(limit=500)`, fetches embeddings via new `index.get_embeddings_by_file()`, clusters with `AgglomerativeClustering(metric="cosine", linkage="average")` (scikit-learn) for batches ≥4; `_llm_group_notes` JSON-prompt fallback for small batches; `_summarise_cluster` per-cluster chat call using `prompts/weekly_review.md`; writes `summaries/YYYY-WW.md` via `vault.write_note(file_path, Note(...))`. `monocle/index/base.py`: new `get_embeddings_by_file(file_paths) -> dict[str, list[float]]` abstract method. `monocle/index/chroma.py`: pages `_GET_PAGE_SIZE` batches via `collection.get(where={"file_path": {"$in": batch}})`, returns `chunk_index=0` embedding per file. `monocle/index/memory.py`: returns `{}` (triggers LLM fallback in tests). `monocle/main.py`: weekly summary cron job wired — `_weekly_summary_agent` instance + `scheduler.add_cron_job("weekly_summary", ...)` + `app.state.weekly_summary_agent`. `monocle/routers/agents.py`: both endpoints implemented — `POST /api/agents/weekly-summary` StreamingResponse SSE (`start`/`done`/`error` events), `POST /api/agents/reindex` 202 via `BackgroundTasks`. `monocle/tests/test_scheduler.py`: 12 new tests — `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests). `tests/test_api.py`: agents routes removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: scheduler` task added. **542 tests passing (12 new), 6 deselected, EXIT 0.**
@@ -115,7 +120,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M14 | CLI Commands | COMPLETE |
 | M15 | Frontend Scaffold & Typed API Wrappers | COMPLETE |
 | M16 | Chat UI | COMPLETE |
-| M17 | Document Browser & Search UI | NOT STARTED |
+| M17 | Document Browser & Search UI | COMPLETE |
 | M18 | Graph UI | NOT STARTED |
 | M19 | Voice Capture & Review Queue UI | NOT STARTED |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | NOT STARTED |
@@ -597,36 +602,10 @@ tests/e2e/            Playwright tests (require running server)
 
 ### M17: Document Browser, Search & Template Editor UI
 
-**Goal:** Vault file tree, CodeMirror markdown editor with auto-save, template editor UI for non-developers, search screen.
+**Status:** COMPLETE (2026-03-20)  
+Vault file tree, CodeMirror YAML+Markdown editor with auto-save and 3-mode editing (YAML/Preview/Form), template-driven FormEditor, semantic/keyword search screen, backlinks panel, and wikilink navigation. 51 new frontend tests.
 
-**Deliverables:**
-- [ ] `frontend/src/components/DocumentBrowser/` — file tree (expand/collapse, type icons), right panel with rendered preview, CodeMirror editor (Markdown + YAML frontmatter syntax highlighting), rich preview mode, AI Assist slide-over
-- [ ] Auto-save: `useDebounce` 2s → `PUT /api/notes/{path}` with `if_mtime` header; server-side re-index work is coalesced per file
-- [ ] Frontmatter editing modes:
-  - **YAML mode (default):** CodeMirror with YAML syntax highlighting for advanced users
-  - **Rich preview mode:** rendered Markdown surface with inline formatting affordances for lightweight WYSIWYG-like editing of common text operations; designed to share the same Markdown document model as YAML mode
-  - **Form mode (new):** Template Editor UI displaying note frontmatter as interactive form inputs—text fields for string values, toggles for booleans, multiselect for arrays, datetime picker for timestamps—derived from template schema
-  - Mode toggle button in editor toolbar (`YAML` / `Preview` / `Form`); form mode validates against the note's type-specific template schema before save
-- [ ] Template Editor UI reads field definitions from template YAML (e.g., `person.yaml`, `decision.yaml`): field name, type, required, descriptions, enum options
-- [ ] Form validation: required fields marked with `*`; non-string/non-array/non-boolean types trigger validation error toast before save
-- [ ] `[[Wikilink]]` click: navigate to that note in Document Browser
-- [ ] Review Approve button in editor toolbar (visible when `review_status: pending`)
-- [ ] `frontend/src/components/Search/SearchScreen.tsx` — mode toggle (Semantic / Keyword), semantic threshold slider, result note cards with open/approve inline actions
-- [ ] Backlinks side panel in Document Browser: shows incoming/outgoing links with relation types and preview snippets
-- [ ] `frontend/tests/DocumentBrowser.test.tsx` + `Search.test.tsx` + `TemplateEditor.test.tsx`
-
-**Acceptance Criteria:**
-- [ ] File tree renders vault structure; clicking a file shows rendered content
-- [ ] Edit mode: CodeMirror with YAML frontmatter highlighting; auto-save triggers after 2s idle
-- [ ] Form mode: note with type `person` displays form with fields defined in `person.yaml` template; non-developers can edit without knowing YAML
-- [ ] Form validation prevents save if required fields are empty; error toast displayed
-- [ ] Switching between YAML, rich preview, and form modes preserves unsaved changes (prompt if user tries to switch with pending saves)
-- [ ] Rapid consecutive saves while typing result in one eventual re-index for the file, not one embed pass per save
-- [ ] 409 conflict on save shows an error toast (no silent data loss)
-- [ ] `Ctrl+S` saves immediately
-- [ ] Backlinks panel lists all notes that link to the current note; double-click navigates to backlink source
-- [ ] Semantic search returns ranked results with similarity percentages
-- [ ] `cd frontend && npm run test -- --run` passes
+**Full details:** [docs/milestones.md#m17-document-browser-search--template-editor-ui](milestones.md#m17-document-browser-search--template-editor-ui)
 
 ---
 
