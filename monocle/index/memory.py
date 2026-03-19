@@ -109,6 +109,12 @@ class MemoryIndex(IndexLayer):
                     result[chunk.file_path] = str(ts)
         return result
 
+    def patch_file_metadata(self, file_path: str, updates: dict) -> None:
+        """Update metadata for all chunks belonging to *file_path*."""
+        for chunk in self._chunks.values():
+            if chunk.file_path == file_path:
+                chunk.metadata.update(updates)
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

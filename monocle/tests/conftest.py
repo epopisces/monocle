@@ -237,6 +237,7 @@ def api_client(tmp_path: Path, mock_ai):
         app.state.ingest_pipeline = pipeline
         app.state.failed_registry = failed_reg
         app.state.watcher = None
+        app.state._review_pending_count = None  # lazy count cache; see review.py
 
         from monocle.graph import GraphBuilder
         app.state.graph_builder = GraphBuilder(vault)

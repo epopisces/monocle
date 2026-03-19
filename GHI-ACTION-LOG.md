@@ -395,4 +395,37 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **589 passed (16 new), 6 deselected**, EXIT 0
   - Updated `docs/milestones.md`: added M12 full details section
 
+- **Executed M13 — Settings & Review API (COMPLETE)**
+  - `monocle/config.py`: added `save_config_patch(patch: dict)` — deep-merges allowed sections into `config.yaml` atomically via mkstemp+os.replace; respects `MONOCLE_CONFIG` env var; ignores `None` values
+  - `monocle/index/base.py`: added `patch_file_metadata(file_path, updates)` abstract method to `IndexLayer`
+  - `monocle/index/chroma.py`: `patch_file_metadata` implementation uses `collection.get(where=...)` + `collection.update()` with scalar-filtered metadata merge
+  - `monocle/index/memory.py`: `patch_file_metadata` implementation updates `chunk.metadata` in-place
+  - `monocle/routers/settings.py`: `GET /api/settings` (masked MCP key via `****` prefix + last 4 chars; secrets excluded by Pydantic); `PATCH /api/settings` (`review` and `ai` sections via `model_copy(update=...)`, atomic config.yaml write, hot-reload AI provider on provider change); `POST /api/settings/rotate-mcp-key` (`secrets.token_hex(32)`, atomic `.env` write, `os.environ` update)
+  - `monocle/routers/review.py`: `GET /api/review` and `GET /api/review/count` (vault scan filter `review_status=="pending"`); `PATCH /api/review/{path}/approve` (patch_frontmatter + ChromaDB metadata sync; NoteNotFound auto-404); `POST /api/review/approve-all` (bulk approval)
+  - `monocle/tests/test_settings.py`: 19 tests; `_temp_config` autouse fixture protects real config.yaml
+  - `monocle/tests/test_review.py`: 25 tests
+  - `monocle/tests/test_api.py`: removed settings/review routes from `STILL_STUB_ROUTES`
+  - `.vscode/tasks.json`: added `test: settings` task
+  - `docs/build-plan.md`: Active Milestone → M14; M13 → COMPLETE; section condensed to 4-line summary
+  - `docs/milestones.md`: M13 full details archived
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **626 passed (44 new — 19 settings + 25 review, plus stub-route count adjustment), 6 deselected**, EXIT 0
+
+- **M13 post-review hardening — resolved all 13 issues (2 bugs, 2 security, 5 testing gaps, 2 performance)**
+  - **B1 (bug)**: `AIPatch.provider` changed from `str | None` to `Literal["ollama","foundry_local","azure"] | None`; `AIPatch.transcribe_backend` changed to `Literal["native","whisper_cpp","subprocess"] | None` — prevents invalid provider values from being persisted to `config.yaml` (would crash on next startup); requests with bad values now return 422
+  - **B2 (bug)**: `ReviewPatch.queue_threshold` now `Field(None, ge=0.0, le=1.0)`; `ReviewPatch.auto_approve_threshold_pct` now `Field(None, ge=0, le=100)` — out-of-range values rejected with 422
+  - **S1 (security)**: Added `TestPathTraversal.test_approve_path_traversal_blocked` and `test_approve_absolute_path_blocked` to `test_security.py` — `PATCH /api/review/%2e%2e/%2e%2e/.env/approve` returns 403
+  - **S2 (security)**: Added `@limiter.limit("30/minute")` to `PATCH /api/settings`, `@limiter.limit("10/minute")` to `POST /api/settings/rotate-mcp-key`, `@limiter.limit("60/minute")` to `PATCH /api/review/{path}/approve`, `@limiter.limit("30/minute")` to `POST /api/review/approve-all`
+  - **S3 (security)**: `_write_env_key` in `settings.py` now strips `\n` and `\r` from value before writing to prevent newline injection into `.env` file
+  - **P1 (performance)**: Added `app.state._review_pending_count` lazy-O(1) pending count cache; `GET /api/review/count` returns cached value (warmed by `GET /api/review`, `PATCH approve`, `POST approve-all`); cache invalidated on any vault write (notes PUT/PATCH/DELETE, ingest, `_reindex_file` callback in `main.py`); each call to `list_review` warms the cache as a free side-effect; `review_count` falls back to full vault scan only when cache is cold (e.g. first call after startup or vault write)
+  - **P2 (performance)**: `POST /api/review/approve-all` parallelized via `asyncio.gather` + `asyncio.Semaphore(10)` — approvals now run up to 10 concurrent vault+index patches instead of serial sequencing; cache updated to exact remainder after all completions
+  - **T2 (test)**: `test_approve_all_sets_all_approval_fields` — verifies `approved_by`, `approval_mode`, and `approved_at` are written to frontmatter by approve-all bulk path
+  - **T3 (test)**: `test_approve_all_partial_failure_count` — monkeypatches `patch_frontmatter` to raise on one path; asserts `approved == 2` not 3
+  - **T4 (test)**: `TestPaginationEdgeCases.test_offset_beyond_total_returns_empty_items` — offset=9999 returns empty items but correct total
+  - **T5 (test)**: `test_rotate_replaces_old_key_in_os_environ` — verifies old key is replaced (not merely added to) `os.environ` after rotation
+  - **B3/tests**: `TestAIProviderHotReload` adds 2 tests — `test_patch_ai_provider_triggers_hot_reload` (mocks `monocle.ai.get_provider`, asserts called once on provider change) and `test_patch_ai_model_only_does_not_trigger_hot_reload` (asserts not called when only chat_model changes)
+  - **9 input-validation tests**: `TestInputValidation` class — 422 for bad provider, bad transcribe_backend, out-of-range thresholds; 200 at exact boundaries
+  - **3 pending-count cache tests**: `TestPendingCountCache` — sentinel value returned when cache hit; approve decrements cache; approve-all sets cache to remainder
+  - New cache invalidation added to `notes.py` (PUT/PATCH/DELETE) and `ingest.py` (both endpoints) so any vault write within the same request context invalidates the count before returning
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **644 passed (18 new), 6 deselected**, EXIT 0
+
 

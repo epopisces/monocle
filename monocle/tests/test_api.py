@@ -510,16 +510,7 @@ class TestStats:
 # ===========================================================================
 
 STILL_STUB_ROUTES: list[tuple[str, str]] = [
-    # review
-    ("GET", "/api/review"),
-    ("GET", "/api/review/count"),
-    ("PATCH", "/api/review/people/test.md/approve"),
-    ("POST", "/api/review/approve-all"),
-    # settings
-    ("GET", "/api/settings"),
-    ("PATCH", "/api/settings"),
-    ("POST", "/api/settings/rotate-mcp-key"),
-    # teams
+    # teams (M21)
     ("POST", "/api/teams/messages"),
 ]
 
