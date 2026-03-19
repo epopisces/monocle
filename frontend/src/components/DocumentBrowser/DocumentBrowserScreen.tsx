@@ -19,6 +19,7 @@ export default function DocumentBrowserScreen() {
   const [noteError, setNoteError] = useState<string | null>(null)
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [notesError, setNotesError] = useState<string | null>(null)
+  const [wikiToast, setWikiToast] = useState<string | null>(null)
 
   // Load note list + templates on mount
   useEffect(() => {
@@ -57,9 +58,18 @@ export default function DocumentBrowserScreen() {
       if (match) {
         setSelectedPath(match.file_path)
         setSearchParams({ path: match.file_path }, { replace: true })
+      } else {
+        setWikiToast(`Note not found: "${wikilinkParam}"`)
       }
     }
   }, [searchParams, notes, setSearchParams])
+
+  // Auto-dismiss wikilink resolution toast
+  useEffect(() => {
+    if (!wikiToast) return
+    const t = setTimeout(() => setWikiToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [wikiToast])
 
   // Load note content when selectedPath changes
   useEffect(() => {
@@ -111,6 +121,11 @@ export default function DocumentBrowserScreen() {
 
   return (
     <div className="doc-browser" data-testid="doc-browser">
+      {wikiToast && (
+        <div className="doc-browser__toast" role="alert" data-testid="wiki-toast">
+          {wikiToast}
+        </div>
+      )}
       {/* ── Left: file tree ─────────────────────────────────── */}
       <aside className="doc-browser__sidebar">
         <div className="doc-browser__sidebar-header">

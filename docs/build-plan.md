@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M18 — Graph UI
-**Last Completed:** M17 — Document Browser, Search & Template Editor UI (2026-03-20)
+**Active Milestone:** M19 — Voice Capture & Review Queue UI
+**Last Completed:** M18 — Graph UI (2026-03-19)
 **Blocked By:** None
 **Session Notes (M17 — Document Browser, Search & Template Editor UI):**
 - **Status:** COMPLETE (2026-03-20)
@@ -121,7 +121,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M15 | Frontend Scaffold & Typed API Wrappers | COMPLETE |
 | M16 | Chat UI | COMPLETE |
 | M17 | Document Browser & Search UI | COMPLETE |
-| M18 | Graph UI | NOT STARTED |
+| M18 | Graph UI | COMPLETE |
 | M19 | Voice Capture & Review Queue UI | NOT STARTED |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | NOT STARTED |
 | M21 | Teams Integration | NOT STARTED |
@@ -611,26 +611,10 @@ Vault file tree, CodeMirror YAML+Markdown editor with auto-save and 3-mode editi
 
 ### M18: Graph UI
 
-**Goal:** Ego-graph visualization with degree-based visual decay, type filters, and wired graph API.
+**Status:** COMPLETE (2026-03-19)  
+Force-directed graph screen with focus input (autocomplete), depth [1][2][3] toggle, type filter chips (Person/Note/Tag), degree-based visual decay, side panel with top-5 related notes, localStorage position persistence, and `react-force-graph` ForceGraph2D rendering. 31 new tests; `ResizeObserver` stub added to test-setup.ts; `react-force-graph` mocked in App.test.tsx to suppress `aframe-extras` AFRAME global requirement.
 
-**Deliverables:**
-- [ ] `frontend/src/components/Graph/GraphScreen.tsx` — React Force Graph instance
-- [ ] Focus input with autocomplete across person/note/tag names
-- [ ] Depth toggle [1][2][3] — updates `max_degree` param; re-fetches graph
-- [ ] Type filter chips [Person ✓][Note ✓][Tag ✓] — updates `types=` param; re-fetches
-- [ ] Reset View button — clears focus, returns to full-vault mode
-- [ ] Degree-based visual encoding: degree 0 = 100% opacity/max size; each degree: −25% opacity, −15% size
-- [ ] Edge labels: `relation` value rendered as midpoint label (hidden for unlabeled edges)
-- [ ] Node click: side panel with top 5 related notes; double-click: navigate to Document Browser
-- [ ] Drag: node positions persisted to localStorage
-- [ ] `frontend/tests/Graph.test.tsx`
-
-**Acceptance Criteria:**
-- [ ] Selecting a focus node fetches `GET /api/graph?focus=<id>&max_degree=<n>&types=<csv>` and redraws
-- [ ] Focus node (degree 0) is visually largest with full opacity
-- [ ] Type filter correctly removes node types from rendered graph
-- [ ] Graph renders within 2 seconds for a vault with up to 2,000 notes
-- [ ] `cd frontend && npm run test -- --run` passes
+**Full details:** [docs/milestones.md#m18-graph-ui](milestones.md#m18-graph-ui)
 
 ---
 

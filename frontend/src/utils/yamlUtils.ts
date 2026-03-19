@@ -30,7 +30,7 @@ export function metaToYaml(meta: Record<string, unknown>): string {
       const s = String(value)
       // Quote strings that contain YAML-special chars or look like other types
       if (
-        /[:#\[\]{},|>&*'"?]/.test(s) ||
+        /[:#\[\]{},|>&*'"?!]/.test(s) ||
         s.trim() !== s ||
         s === '' ||
         s === 'null' ||

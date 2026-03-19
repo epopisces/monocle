@@ -21,6 +21,7 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [approvedPaths, setApprovedPaths] = useState<Set<string>>(new Set())
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const showToast = (msg: string) => {
@@ -70,6 +71,7 @@ export default function SearchScreen() {
   async function handleApprove(filePath: string) {
     try {
       await approveNote(filePath)
+      setApprovedPaths(prev => { const next = new Set(prev); next.add(filePath); return next })
       showToast(`Approved: ${filePath}`)
     } catch (err) {
       showToast(`Approve failed: ${(err as Error).message}`)
@@ -190,13 +192,15 @@ export default function SearchScreen() {
                 >
                   Open
                 </button>
-                <button
-                  className="search-result-card__btn search-result-card__btn--approve"
-                  onClick={() => handleApprove(r.file_path)}
-                  data-testid="result-approve-btn"
-                >
-                  Approve
-                </button>
+                {!approvedPaths.has(r.file_path) && (
+                  <button
+                    className="search-result-card__btn search-result-card__btn--approve"
+                    onClick={() => handleApprove(r.file_path)}
+                    data-testid="result-approve-btn"
+                  >
+                    Approve
+                  </button>
+                )}
               </div>
             </div>
           ))}
@@ -218,13 +222,15 @@ export default function SearchScreen() {
                 >
                   Open
                 </button>
-                <button
-                  className="search-result-card__btn search-result-card__btn--approve"
-                  onClick={() => handleApprove(r.file_path)}
-                  data-testid="result-approve-btn"
-                >
-                  Approve
-                </button>
+                {!approvedPaths.has(r.file_path) && (
+                  <button
+                    className="search-result-card__btn search-result-card__btn--approve"
+                    onClick={() => handleApprove(r.file_path)}
+                    data-testid="result-approve-btn"
+                  >
+                    Approve
+                  </button>
+                )}
               </div>
             </div>
           ))}

@@ -184,4 +184,18 @@ describe('SearchScreen — actions', () => {
     fireEvent.submit(screen.getByTestId('search-input').closest('form')!)
     await waitFor(() => expect(screen.getByText(/2 results/)).toBeInTheDocument())
   })
+
+  it('approve button disappears after successful approval', async () => {
+    renderSearch()
+    fireEvent.change(screen.getByTestId('search-input'), { target: { value: 'Alice' } })
+    fireEvent.submit(screen.getByTestId('search-input').closest('form')!)
+    await waitFor(() => expect(screen.getAllByTestId('result-approve-btn')).toHaveLength(2))
+
+    // Approve the first result (alice.md)
+    fireEvent.click(screen.getAllByTestId('result-approve-btn')[0])
+    await waitFor(() => expect(mockApproveNote).toHaveBeenCalledWith('people/alice.md'))
+
+    // Button for alice.md should be gone; meeting.md still has one
+    await waitFor(() => expect(screen.getAllByTestId('result-approve-btn')).toHaveLength(1))
+  })
 })

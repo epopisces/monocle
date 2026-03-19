@@ -64,7 +64,7 @@ export default function NoteEditor({
   // ── Save logic ─────────────────────────────────────────────────
 
   const saveNote = useCallback(
-    async (noteToSave: Note) => {
+    async (noteToSave: Note): Promise<boolean> => {
       setIsSaving(true)
       try {
         const saved = await putNote(noteToSave.file_path, {
@@ -76,12 +76,14 @@ export default function NoteEditor({
         setLocalNote(saved)
         setIsDirty(false)
         onSaved(saved)
+        return true
       } catch (err) {
         if (err instanceof ApiError && err.status === 409) {
           setToast({ message: 'Save conflict — this note was modified elsewhere. Reload to see the latest version.', kind: 'error' })
         } else {
           setToast({ message: `Save failed: ${(err as Error).message}`, kind: 'error' })
         }
+        return false
       } finally {
         setIsSaving(false)
       }
@@ -210,8 +212,12 @@ export default function NoteEditor({
 
   const handleApprove = async () => {
     try {
-      // Cancel any pending debounced save before approving
       debouncedSave.cancel()
+      // Flush any unsaved edits first so the version on disk is current when approved.
+      if (isDirty) {
+        const saved = await saveNote(localNote)
+        if (!saved) return  // save failed; toast already shown by saveNote
+      }
       await approveNote(localNote.file_path)
       const updated: Note = {
         ...localNote,
@@ -376,7 +382,8 @@ export default function NoteEditor({
                       </a>
                     )
                   }
-                  return <a href={href}>{children}</a>
+                  const safe = /^https?:\/\//i.test(href ?? '') ? href : '#'
+                return <a href={safe} target="_blank" rel="noopener noreferrer">{children}</a>
                 },
               }}
             >

@@ -1,6 +1,16 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import App from './App'
+
+// react-force-graph pulls in aframe-extras which requires a global AFRAME.
+// Mock the whole module so App.test.tsx doesn't trigger that side effect.
+vi.mock('react-force-graph', () => ({
+  ForceGraph2D: () => null,
+}))
+
+// Graph and Notes API calls fired by GraphScreen on the /graph route
+vi.mock('./api/graph', () => ({ getGraph: vi.fn().mockResolvedValue({ focus: null, nodes: [], edges: [] }) }))
+vi.mock('./api/notes', () => ({ listNotes: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }) }))
 
 describe('App', () => {
   it('renders without crashing', () => {

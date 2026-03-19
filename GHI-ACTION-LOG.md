@@ -483,3 +483,28 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - `npx tsc --noEmit` → **CLEAN (exit 0)**
   - Updated `docs/build-plan.md`: M17 → COMPLETE; Active Milestone → M18; tracker row updated; session notes added
 
+- **Executed M18 — Graph UI (COMPLETE)**
+  - Created `frontend/src/components/Graph/GraphScreen.tsx`: ForceGraph2D force-directed graph with focus input + autocomplete (`listNotes({limit:500})`), depth toggle [1][2][3] (updates `max_degree`, re-fetches), type filter chips [Person/Note/Tag] (`buildTypesParam` maps chip state → `types=` query param; all active → no filter; none active → `'__empty__'` sentinel), Reset View button, degree-based visual encoding (`getNodeColor` → `rgba` with opacity `max(0.2, 1.0 - degree * 0.25)`; `getNodeSize` → `max(3, 15 * 0.85^degree)`), node click → side panel with top-5 related notes sorted by edge weight, double-click → `/docs?path=...` navigation using 250ms timer disambiguation, drag-end → node positions persisted to `localStorage` (`monocle.graph.positions`)
+  - Created `frontend/src/components/Graph/GraphScreen.css`: full screen styles using design tokens (graph-specific color vars: `--graph-person`, `--graph-topic`, `--graph-edge`)
+  - Created `frontend/src/Graph.test.tsx`: 31 tests across Layout (7) / Graph fetch (7) / Depth toggle (2) / Type filter chips (4) / Focus input (3) / Reset view (1) / Side panel (5) / Node positions (1) describe blocks; `react-force-graph` mocked as DOM proxy rendering node buttons; fake timers for 250ms click disambiguation
+  - Updated `frontend/src/App.tsx`: replaced `GraphScreen` placeholder with real import; updated placeholder comment from M18–M20 → M19–M20
+  - Updated `frontend/src/test-setup.ts`: added `window.ResizeObserver` stub (implements full DOM interface with typed constructor) — prevents `ResizeObserver is not defined` error in jsdom
+  - Updated `frontend/src/App.test.tsx`: added `vi.mock('react-force-graph', ...)` + `vi.mock('./api/graph', ...)` + `vi.mock('./api/notes', ...)` — prevents `AFRAME is not defined` crash from aframe-extras bundled inside react-force-graph
+  - `npm run test -- --run` → **145 passed (8 files, 32 new tests), EXIT 0**
+  - `npx tsc --noEmit` → **CLEAN (exit 0)**
+  - Updated `docs/build-plan.md`: M18 → COMPLETE; Active Milestone → M19; tracker row updated
+
+- **M17/M18 post-review hardening — 7 source fixes + 72 new tests (185 total, up from 113)**
+  - **Security (XSS)**: `NoteEditor.tsx` ReactMarkdown `a` renderer now sanitizes `href` — filters to `https?://` or replaces with `'#'`; adds `target="_blank" rel="noopener noreferrer"`
+  - **Security**: `GraphScreen.tsx` `loadPositions()` validates deserialized JSON shape — rejects entries where `x` or `y` is not a number
+  - **Bug**: `NoteEditor.tsx` `handleApprove` now flushes dirty edits before approving — `saveNote` returns `Promise<boolean>`; approve returns early on save failure
+  - **Bug**: `GraphScreen.tsx` `handleTypeToggle` guard — when all chips are deactivated, sets empty graph locally instead of making API call with `__empty__` sentinel; also added comment to document the sentinel's purpose
+  - **Bug**: `DocumentBrowserScreen.tsx` — wikilink no-match now shows a 4-second toast (`data-testid="wiki-toast"`) with "Note not found: …"
+  - **Bug**: `SearchScreen.tsx` — `approvedPaths` state tracks approved file paths; Approve button hidden (`{!approvedPaths.has(r.file_path) && ...}`) after successful approval
+  - **Bug**: `yamlUtils.ts` — string quoting regex now includes `!` (`/[:#\[\]{},|>&*'"?!]/`) to prevent unquoted YAML tags
+  - **New file `frontend/src/utils/yamlUtils.test.ts`** (25 tests): scalar serialization, string quoting rules (including `!`), arrays, round-trip `buildRawDoc → splitFrontmatter → parseFrontmatter`, edge cases
+  - **`DocumentBrowser.test.tsx`** — 11 new tests: BacklinksPanel error state, FileTree root-level notes, DocumentBrowserScreen wikilink resolve/no-match/handleSaved, NoteEditor Ctrl+S shortcut, NoteEditor wikilink preview navigation, NoteEditor approve-flushes-dirty
+  - **`Graph.test.tsx`** — 4 new tests: invalid localStorage positions (non-object, non-numeric coords), drag persistence to localStorage, double-click navigation via `useNavigate`; mock infrastructure added (`mockNavigate`, `vi.mock('react-router-dom')`, ForceGraph2D `onNodeDragEnd` prop exposed)
+  - **`Search.test.tsx`** — 1 new test: approve button disappears after successful approval (verifies `approvedPaths` conditional render)
+  - `npm run test -- --run` → **185 passed (9 files, 40 new tests), EXIT 0**
+
