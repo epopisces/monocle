@@ -22,12 +22,14 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 from agent_framework import ai_function
+from pydantic import BeforeValidator, Field
 
 if TYPE_CHECKING:
     from monocle.ai.base import AIProvider
     from monocle.graph import GraphBuilder
     from monocle.index.base import IndexLayer
     from monocle.vault import VaultLayer
+    from monocle.watcher import ReindexQueue
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,51 @@ logger = logging.getLogger(__name__)
 _MAX_SEARCH_RESULTS = 10
 _MAX_LIST_RESULTS = 20
 _MAX_BODY_LENGTH = 50_000  # matches IngestRequest.content character limit
+
+
+def _normalize_tags(value: Any) -> list[str] | None:
+    """Normalise tags from various LLM-produced formats to a flat list[str].
+
+    The LLM may send tags as:
+    - A proper JSON array: ["work", "python"]
+    - A Python dict string: "{'hobbies': ['Lego', 'programming']}"
+    - A JSON object string: '{"hobbies": ["Lego"]}'
+    - A plain comma-separated string: "work, python"
+    - Already a list, dict, or None.
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return [str(t) for t in value if t is not None]
+    if isinstance(value, dict):
+        # Flatten {"category": ["tag1", "tag2"], ...} → ["tag1", "tag2", ...]
+        result: list[str] = []
+        for v in value.values():
+            if isinstance(v, list):
+                result.extend(str(x) for x in v if x is not None)
+            elif v is not None:
+                result.append(str(v))
+        return result or None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        # Try JSON array / object first (handles double-quoted strings)
+        try:
+            parsed = json.loads(s)
+            return _normalize_tags(parsed)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Try Python literal eval (handles single-quoted strings, Python dicts/lists)
+        try:
+            import ast  # stdlib, safe with literal_eval
+            parsed = ast.literal_eval(s)
+            return _normalize_tags(parsed)
+        except (ValueError, SyntaxError):
+            pass
+        # Final fallback: comma-separated plain text
+        return [t.strip() for t in s.split(",") if t.strip()] or None
+    return [str(value)]
 
 
 class VaultTools:
@@ -54,11 +101,13 @@ class VaultTools:
         index: "IndexLayer",
         ai: "AIProvider | None",
         graph_builder: "GraphBuilder | None" = None,
+        reindex_queue: "ReindexQueue | None" = None,
     ) -> None:
         self._vault = vault
         self._index = index
         self._ai = ai
         self._graph_builder = graph_builder
+        self._reindex_queue = reindex_queue
 
         # Bind the @ai_function decorated methods to this instance so the tool
         # implementations can reference self.  The agent framework accepts any
@@ -170,6 +219,9 @@ class VaultTools:
             note = await _to_thread(self._vault.read_note, file_path)
             note.body = body
             await _to_thread(self._vault.write_note, file_path, note)
+            # Trigger re-index to update embeddings and search index
+            if self._reindex_queue is not None:
+                self._reindex_queue.push(file_path)
             return json.dumps({"file_path": file_path, "status": "updated"})
         except Exception as exc:
             logger.warning("write_note tool error for %r: %s", file_path, exc)
@@ -184,11 +236,12 @@ class VaultTools:
         self,
         title: Annotated[str, "Title of the new note"],
         body: Annotated[str, "Markdown body content"],
-        note_type: Annotated[str, "Note type, e.g. 'idea', 'person_note', 'decision'"] = "other",
+        note_type: Annotated[str, "Note type: 'person_note' (or 'person'), 'idea', 'decision', 'observation', 'reference', 'meeting_note', 'project', 'action_item', 'other'"] = "other",
         domain: Annotated[str, "Domain, e.g. 'work' or 'personal'"] = "personal",
         tags: Annotated[
             list[str] | None,
-            "List of topic tags",
+            BeforeValidator(_normalize_tags),
+            Field(description="Flat list of string tags, e.g. ['python', 'automation']. Do NOT send a dict."),
         ] = None,
     ) -> str:
         """Create a new note in the vault using the appropriate template.
@@ -199,26 +252,26 @@ class VaultTools:
         if len(body) > _MAX_BODY_LENGTH:
             raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
         try:
-            from monocle.models import NoteMetadata
-
-            metadata = NoteMetadata(
-                type=note_type,  # type: ignore[arg-type]
-                domain=domain,
-                tags=tags or [],
-                review_status="pending",
-            )
             note = await _to_thread(
                 self._vault.create_from_template,
                 note_type,
-                {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
+                {
+                    "title": title,
+                    "domain": domain,
+                    "tags": tags or [],
+                    "review_status": "pending",
+                },
                 body,
             )
             await _to_thread(self._vault.write_note, note.file_path, note)
+            # Trigger re-index so the new note is embedded and searchable immediately
+            if self._reindex_queue is not None:
+                self._reindex_queue.push(note.file_path)
             return json.dumps(
                 {"file_path": note.file_path, "title": note.title, "status": "created"}
             )
         except Exception as exc:
-            logger.warning("create_note tool error: %s", exc)
+            logger.warning("create_note tool error: %s", exc, exc_info=True)
             raise
 
     # ------------------------------------------------------------------

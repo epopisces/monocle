@@ -4,6 +4,27 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-03-20
+
+### Claude Sonnet 4.6
+- **Fixed chat agent `create_note` tool silently failing:** Root cause was that `NoteMetadata(type=note_type, ...)` threw a Pydantic `ValidationError` when the LLM sent a `note_type` value not in the `NOTE_TYPES` Literal (e.g. `"person"` instead of `"person_note"`). The exception was caught, logged, and re-raised, causing the agent framework to report "Function failed" without creating the file. Additionally improved `exc_info=True` on the exception log for better diagnostics.
+- **Fix:** Removed the intermediate `NoteMetadata` construction from `VaultTools.create_note()` in `monocle/agents/tools.py`. Now passes a plain dict directly to `vault.create_from_template()`, which already handles NoteMetadata validation gracefully with a fallback. This also applies to any other invalid field values the LLM might send.
+- **Testing:** All 687 backend tests pass.
+- **Fixed `create_note` tool "Argument parsing failed" error:** When the LLM sent `tags` as a Python dict-string (e.g. `"{'hobbies': ['Lego', ...]}"`) instead of a flat list, Pydantic's `list[str] | None` validation raised `ValidationError`, causing agent_framework to return `"Error: Argument parsing failed."` before the function body ran — so no note was created.
+- **Fix:** Added `_normalize_tags()` helper in `monocle/agents/tools.py` that normalises any LLM-produced tags format (JSON array string, Python literal dict/list string, comma-separated plain text, actual list or dict) to a flat `list[str]`. Applied via `pydantic.BeforeValidator` on the `tags` parameter so normalisation runs before Pydantic's type validation. Also updated the `note_type` annotation description to include `'person'` as a valid alias.
+- **Testing:** 687 backend tests passed, 6 deselected, EXIT 0.
+
+## 2026-03-19
+
+### GitHub Copilot (Claude Haiku 4.5)
+- **Fixed critical bug in chat agent note creation:** Agent-created notes via `create_note` tool were not being indexed into ChromaDB, causing subsequent searches to fail. Root cause: missing `reindex_queue.push()` call in `VaultTools.create_note()` and `write_note()` methods after vault writes.
+- **Changes made:**
+  - Added `reindex_queue` parameter to `VaultTools.__init__()` in `monocle/agents/tools.py`
+  - Added `reindex_queue.push(note.file_path)` calls in both `create_note()` and `write_note()` tools to trigger immediate re-indexing
+  - Updated `create_chat_agent()` factory in `monocle/agents/__init__.py` to accept and pass through `reindex_queue` parameter
+  - Updated chat router in `monocle/routers/chat.py` to retrieve and pass `reindex_queue` from app.state
+- **Testing:** All 687 backend tests passing, all frontend tests passing
+
 ## 2026-03-14 
 
 ### Claude Sonnet 4.6

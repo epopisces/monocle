@@ -36,6 +36,7 @@ if TYPE_CHECKING:
     from monocle.graph import GraphBuilder
     from monocle.index.base import IndexLayer
     from monocle.vault import VaultLayer
+    from monocle.watcher import ReindexQueue
 
 logger = logging.getLogger(__name__)
 
@@ -353,6 +354,7 @@ def create_chat_agent(
     index: "IndexLayer",
     settings: "Settings",
     graph_builder: "GraphBuilder | None" = None,
+    reindex_queue: "ReindexQueue | None" = None,
 ):
     """Create a ``ChatAgent`` wired with all 7 vault tools.
 
@@ -362,6 +364,7 @@ def create_chat_agent(
         index: Active ``IndexLayer`` (ChromaDB or MemoryIndex).
         settings: Application settings (used for OTel and model config).
         graph_builder: Optional ``GraphBuilder`` for graph tool support.
+        reindex_queue: Optional ``ReindexQueue`` for triggering re-indexing when notes are created/updated.
 
     Returns:
         A ready-to-use ``ChatAgent`` with all 7 tools registered.
@@ -372,7 +375,7 @@ def create_chat_agent(
 
     _configure_agent_otel(settings)
 
-    tool_registry = VaultTools(vault=vault, index=index, ai=ai, graph_builder=graph_builder)
+    tool_registry = VaultTools(vault=vault, index=index, ai=ai, graph_builder=graph_builder, reindex_queue=reindex_queue)
     client = _AIProviderChatClient(ai=ai)
 
     agent = ChatAgent(
