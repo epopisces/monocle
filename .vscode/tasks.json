@@ -210,6 +210,43 @@
           }
         }
       ]
+    },
+    {
+      "label": "frontend: dev",
+      "type": "shell",
+      "command": "npm run dev",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "isBackground": true,
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "problemMatcher": [
+        {
+          "pattern": { "regexp": "^$" },
+          "background": {
+            "activeOnStart": true,
+            "beginsPattern": "VITE",
+            "endsPattern": "Local:"
+          }
+        }
+      ]
+    },
+    {
+      "label": "frontend: type-check",
+      "type": "shell",
+      "command": "npx tsc --noEmit",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "frontend: gen-api",
+      "type": "shell",
+      "command": "npm run gen-api",
+      "options": { "cwd": "${workspaceFolder}/frontend" },
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
     }
   ]
 }

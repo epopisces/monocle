@@ -1,0 +1,220 @@
+/* ── Chat Message ─────────────────────────────────────────────── */
+.chat-message {
+  display: flex;
+  margin-bottom: var(--space-3);
+}
+
+.chat-message--user {
+  justify-content: flex-end;
+}
+
+.chat-message--assistant {
+  justify-content: flex-start;
+}
+
+.chat-message__bubble {
+  max-width: 75%;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-card);
+  font-size: var(--text-base);
+  line-height: 1.6;
+}
+
+.chat-message--user .chat-message__bubble {
+  background: var(--bg-elevated);
+  color: var(--text-primary);
+  border-bottom-right-radius: 2px;
+}
+
+.chat-message--assistant .chat-message__bubble {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 2px;
+}
+
+/* ── Message text ─────────────────────────────────────────────── */
+.chat-message__text {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-message__text--empty {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+/* ── Markdown content ─────────────────────────────────────────── */
+.chat-message__markdown {
+  /* Mitigate react-markdown adding margins */
+}
+
+.chat-message__markdown > *:first-child {
+  margin-top: 0;
+}
+
+.chat-message__markdown > *:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message__markdown p {
+  margin: 0 0 var(--space-2) 0;
+}
+
+.chat-message__markdown p:last-child {
+  margin-bottom: 0;
+}
+
+.chat-message__markdown code {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  background: var(--bg-elevated);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.chat-message__markdown pre {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  padding: var(--space-3);
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  margin: var(--space-2) 0;
+}
+
+.chat-message__markdown pre code {
+  background: none;
+  padding: 0;
+}
+
+.chat-message__markdown ul,
+.chat-message__markdown ol {
+  padding-left: var(--space-5);
+  margin: var(--space-2) 0;
+}
+
+.chat-message__markdown li {
+  margin-bottom: var(--space-1);
+}
+
+.chat-message__markdown h1,
+.chat-message__markdown h2,
+.chat-message__markdown h3 {
+  margin: var(--space-4) 0 var(--space-2) 0;
+  font-weight: 600;
+}
+
+.chat-message__markdown h1 { font-size: var(--text-lg); }
+.chat-message__markdown h2 { font-size: var(--text-md); }
+.chat-message__markdown h3 { font-size: var(--text-base); }
+
+/* ── Streaming cursor ─────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+.chat-message__cursor {
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  background: var(--accent);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  animation: blink 1s step-end infinite;
+}
+
+/* ── Tool call disclosure ─────────────────────────────────────── */
+.chat-message__tools {
+  margin-bottom: var(--space-2);
+}
+
+.tool-call {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  overflow: hidden;
+  margin-bottom: var(--space-1);
+}
+
+.tool-call--error .tool-call__summary {
+  color: var(--error);
+}
+
+.tool-call__summary {
+  padding: var(--space-2) var(--space-3);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.tool-call__summary::-webkit-details-marker {
+  display: none;
+}
+
+.tool-call__summary::before {
+  content: '▶';
+  font-size: 9px;
+  transition: transform 0.15s;
+}
+
+details[open] .tool-call__summary::before {
+  transform: rotate(90deg);
+}
+
+.tool-call__error-detail {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--error);
+  padding: var(--space-2) var(--space-3);
+  margin: 0;
+  background: var(--bg-elevated);
+  border-top: 1px solid var(--border);
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ── Note card ────────────────────────────────────────────────── */
+.note-card {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  font-size: var(--text-sm);
+}
+
+.note-card__icon {
+  flex-shrink: 0;
+}
+
+.note-card__info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.note-card__type {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.note-card__path {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

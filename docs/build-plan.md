@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M15 — Frontend Scaffold & Typed API Wrappers
-**Last Completed:** M14 — CLI Commands (2026-03-18)
+**Active Milestone:** M17 — Document Browser, Search & Template Editor UI
+**Last Completed:** M16 — Chat UI (2026-03-19)
 **Blocked By:** None
 **Session Notes (M13 — Settings & Review API):** M13 fully executed + post-review hardened. `monocle/config.py`: `save_config_patch(patch: dict)` function — deep-merges allowed sections (`ai`, `vault`, `index`, `agents`, `review`, `server`, `telemetry`, `ui`) into `config.yaml` atomically via mkstemp+os.replace; respects `MONOCLE_CONFIG` env var. `monocle/index/base.py`: `patch_file_metadata(file_path, updates)` abstract method added. `monocle/index/chroma.py`: `patch_file_metadata` implementation uses `collection.get(where=file_path_filter)` + `collection.update()` with scalar-only metadata merge. `monocle/index/memory.py`: `patch_file_metadata` implementation updates `chunk.metadata` dict in-place. `monocle/routers/settings.py`: `GET /api/settings` returns all settings sections + `mcp_key_last4` (masked); `PATCH /api/settings` accepts `{review: ..., ai: ...}` partial patch — `AIPatch.provider` and `AIPatch.transcribe_backend` typed as `Literal` (invalid values → 422); `ReviewPatch` fields have `ge`/`le` range guards (out-of-range → 422); writes to config.yaml via `save_config_patch`, hot-reloads `AIProvider` when `ai.provider` changes; rate-limited 30/min; `POST /api/settings/rotate-mcp-key` generates `secrets.token_hex(32)`, writes to `.env` atomically, updates `os.environ`, rate-limited 10/min; `_write_env_key` strips newlines from value. `monocle/routers/review.py`: `GET /api/review` warms `app.state._review_pending_count` cache as side-effect; `GET /api/review/count` returns O(1) from cache when warm, falls back to vault scan; `PATCH /api/review/{path}/approve` rate-limited 60/min, decrements count cache; `POST /api/review/approve-all` parallelized via `asyncio.gather` + `asyncio.Semaphore(10)`, rate-limited 30/min, sets cache to remainder. `app.state._review_pending_count` initialized `None` in lifespan and in `_reindex_file` callback; `notes.py` PUT/PATCH/DELETE and `ingest.py` POST/stream also invalate cache on vault write. `monocle/tests/test_settings.py`: 28 tests (was 19); added `TestInputValidation` (9 tests: Literal constraints, range validators), `TestAIProviderHotReload` (2 tests: hot-reload triggered, not triggered), `TestRotateMcpKey.test_rotate_replaces_old_key_in_os_environ`. `monocle/tests/test_review.py`: 34 tests (was 25); added `test_approve_all_sets_all_approval_fields`, `test_approve_all_partial_failure_count`, `TestPendingCountCache` (3 tests), `TestPaginationEdgeCases` (1 test). `monocle/tests/test_security.py`: added `test_approve_path_traversal_blocked`, `test_approve_absolute_path_blocked`. **644 tests passing (18 new post-review), 6 deselected, EXIT 0.**
 **Session Notes (M12 — MCP Server):** M12 fully executed. `monocle/mcp_server.py`: `FastMCP("monocle", stateless_http=True)` + 8 tools (`search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`); `_MCPState` singleton (instance attrs, `assert_ready()`, `reindex_queue` field) populated via `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue)`; `_MCPAuthMiddleware` ASGI wrapper validates `x-monocle-key` header or `?key=` query param using `hmac.compare_digest` (constant-time); logs WARNING when `?key=` path is taken; returns HTTP 401 JSON if missing or invalid; `create_mcp_app(mcp_key)` → `_MCPAuthMiddleware`; MCP key loaded from env at `create_app()` time. `capture_thought` forwards `source` param to `IngestPipeline`. `create_note`/`update_note` push to `reindex_queue` after write; `update_note` sets `metadata.updated = datetime.now(utc)`. `get_stats` paginates via `_fetch_all_refs()` (500-note batches). `monocle/main.py`: `init_mcp_state(...)` called in lifespan with `reindex_queue=reindex_queue`; `create_mcp_app(mcp_key)` mounted at `/mcp`. `monocle/tests/test_mcp.py`: 40 tests across 4 classes — `TestMCPAuth` (6), `TestMCPTools` (26), `TestMCPSecurityBoundaries` (5), `TestMCPServerConfig` (3). SPIKE-2 outcome recorded. **589 tests passing (40 MCP), 6 deselected, EXIT 0.**
@@ -113,8 +113,8 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M12 | MCP Server | COMPLETE |
 | M13 | Settings & Review API | COMPLETE |
 | M14 | CLI Commands | COMPLETE |
-| M15 | Frontend Scaffold & Typed API Wrappers | NOT STARTED |
-| M16 | Chat UI | NOT STARTED |
+| M15 | Frontend Scaffold & Typed API Wrappers | COMPLETE |
+| M16 | Chat UI | COMPLETE |
 | M17 | Document Browser & Search UI | NOT STARTED |
 | M18 | Graph UI | NOT STARTED |
 | M19 | Voice Capture & Review Queue UI | NOT STARTED |
@@ -543,32 +543,32 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** React app skeleton with all routes and a typed API layer generated from the committed OpenAPI spec.
 
 **Deliverables:**
-- [ ] `npx openapi-typescript http://localhost:8000/openapi.json -o frontend/src/api/schema.d.ts` (requires running M8 server)
-- [ ] `frontend/src/api/client.ts` — typed `fetch` wrapper: handles JSON, SSE streams, 4xx/5xx errors; uses `schema.d.ts` types
-- [ ] `frontend/src/api/` — individual typed functions for all documented frontend-consumed endpoints generated from the committed OpenAPI spec (no uncovered endpoint families)
-- [ ] `frontend/src/App.tsx` — React Router routes: `/` (Chat), `/docs` (Document Browser), `/search`, `/graph`, `/stats`
-- [ ] `frontend/src/components/layout/` — `AppShell`, `Topbar` (polls `GET /api/health` every 10s; shows green/amber/red indicator per status field), `LeftNav` (collapses at ≤1200px viewport)
-- [ ] `frontend/src/components/SettingsModal/` — wired to `GET/PATCH /api/settings`, key rotation — functional but minimal styling
-- [ ] `frontend/src/styles/tokens.css` — all CSS custom property tokens from UI Design doc §3 (colors, typography, spacing, border-radius, shadows)
-- [ ] `frontend/src/hooks/useTheme.ts` — theme state management: detect system preference via `prefers-color-scheme` media query; persist selection to `localStorage`; provide context hook for all components to subscribe to theme changes
-- [ ] `frontend/tests/api.test.ts` — mock fetch; assert type-safe API calls
-- [ ] `frontend/tests/App.test.tsx` — renders without crash, nav links present
-- [ ] Add `openapi-typescript` as a `devDependency` and as a `package.json` script: `"gen-api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts"`
-- [ ] Extend `.vscode/tasks.json`:
+- [x] `npx openapi-typescript http://localhost:8000/openapi.json -o frontend/src/api/schema.d.ts` (requires running M8 server)
+- [x] `frontend/src/api/client.ts` — typed `fetch` wrapper: handles JSON, SSE streams, 4xx/5xx errors; uses `schema.d.ts` types
+- [x] `frontend/src/api/` — individual typed functions for all documented frontend-consumed endpoints generated from the committed OpenAPI spec (no uncovered endpoint families)
+- [x] `frontend/src/App.tsx` — React Router routes: `/` (Chat), `/docs` (Document Browser), `/search`, `/graph`, `/stats`
+- [x] `frontend/src/components/layout/` — `AppShell`, `Topbar` (polls `GET /api/health` every 10s; shows green/amber/red indicator per status field), `LeftNav` (collapses at ≤1200px viewport)
+- [x] `frontend/src/components/SettingsModal/` — wired to `GET/PATCH /api/settings`, key rotation — functional but minimal styling
+- [x] `frontend/src/styles/tokens.css` — all CSS custom property tokens from UI Design doc §3 (colors, typography, spacing, border-radius, shadows)
+- [x] `frontend/src/hooks/useTheme.ts` — theme state management: detect system preference via `prefers-color-scheme` media query; persist selection to `localStorage`; provide context hook for all components to subscribe to theme changes
+- [x] `frontend/tests/api.test.ts` — mock fetch; assert type-safe API calls
+- [x] `frontend/tests/App.test.tsx` — renders without crash, nav links present
+- [x] Add `openapi-typescript` as a `devDependency` and as a `package.json` script: `"gen-api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts"`
+- [x] Extend `.vscode/tasks.json`:
   - `frontend: dev` — `npm run dev` (cwd: `frontend/`; runs Vite dev server)
   - `frontend: type-check` — `npx tsc --noEmit` (cwd: `frontend/`)
   - `frontend: gen-api` — `npm run gen-api` (cwd: `frontend/`; regenerates `schema.d.ts`; requires server running at `:8000`)
-- [ ] Extend `.vscode/launch.json`:
+- [x] Extend `.vscode/launch.json`:
   - `Frontend Dev Server` — runs `frontend: dev` task and opens `http://localhost:5173` in the browser
   - `Full Stack (debug)` — compound configuration: `Dev Server (debug)` + `Frontend Dev Server`; the **default developer launch** once both tiers are functional
 
 **Acceptance Criteria:**
-- [ ] `cd frontend && npm run dev` serves `http://localhost:5173` with no console errors
-- [ ] All CSS tokens defined and applied to at least the layout shell
-- [ ] Topbar health indicator reflects live `GET /api/health` response
-- [ ] `cd frontend && npx tsc --noEmit` exits 0 (no TypeScript errors)
-- [ ] `cd frontend && npm run test -- --run` passes
-- [ ] `Full Stack (debug)` compound launch config starts both backend (with debugger) and frontend dev server; `http://localhost:5173` loads in the browser
+- [x] `cd frontend && npm run dev` serves `http://localhost:5173` with no console errors
+- [x] All CSS tokens defined and applied to at least the layout shell
+- [x] Topbar health indicator reflects live `GET /api/health` response
+- [x] `cd frontend && npx tsc --noEmit` exits 0 (no TypeScript errors)
+- [x] `cd frontend && npm run test -- --run` passes
+- [x] `Full Stack (debug)` compound launch config starts both backend (with debugger) and frontend dev server; `http://localhost:5173` loads in the browser
 
 ---
 
@@ -577,21 +577,21 @@ tests/e2e/            Playwright tests (require running server)
 **Goal:** Fully functional chat screen — streaming, chat starters, session history, settings modal.
 
 **Deliverables:**
-- [ ] `frontend/src/components/Chat/ChatScreen.tsx` — message thread, 6 chat starter tiles (2×3 grid), session picker dropdown (last 10 sessions from localStorage)
-- [ ] `frontend/src/components/Chat/ChatInput.tsx` — multiline textarea; `Enter` sends; `Shift+Enter` newlines; microphone button (opens VoiceModal); send button
-- [ ] `frontend/src/components/Chat/ChatMessage.tsx` — Markdown rendering; tool call disclosure (collapsible); inline note card for `note_created` events
-- [ ] `frontend/src/hooks/useChat.ts` — `EventSource`-based SSE streaming; session management (localStorage, last 10 sessions)
-- [ ] Settings modal: fully wired to API — backend selector, threshold slider, key rotation, and theme toggle (wired to `useTheme()` hook from M15)
-- [ ] Theme switching: Settings modal adds a **Theme** section with radio buttons [● Dark ○ Light ○ System]. Integrates with `useTheme()` hook created in M15. Selection persisted to localStorage. Changes take effect immediately across the app.
-- [ ] `frontend/tests/Chat.test.tsx`
+- [x] `frontend/src/components/Chat/ChatScreen.tsx` — message thread, 6 chat starter tiles (2×3 grid), session picker dropdown (last 10 sessions from localStorage)
+- [x] `frontend/src/components/Chat/ChatInput.tsx` — multiline textarea; `Enter` sends; `Shift+Enter` newlines; microphone button (opens VoiceModal); send button
+- [x] `frontend/src/components/Chat/ChatMessage.tsx` — Markdown rendering; tool call disclosure (collapsible); inline note card for `note_created` events
+- [x] `frontend/src/hooks/useChat.ts` — `EventSource`-based SSE streaming; session management (localStorage, last 10 sessions)
+- [x] Settings modal: fully wired to API — backend selector, threshold slider, key rotation, and theme toggle (wired to `useTheme()` hook from M15)
+- [x] Theme switching: Settings modal adds a **Theme** section with radio buttons [● Dark ○ Light ○ System]. Integrates with `useTheme()` hook created in M15. Selection persisted to localStorage. Changes take effect immediately across the app.
+- [x] `frontend/tests/Chat.test.tsx`
 
 **Acceptance Criteria:**
-- [ ] Clicking a chat starter sends a pre-filled message that streams a response
-- [ ] Tool call renders as collapsible: "Used `search_vault` — 4 results"
-- [ ] Session picker shows ≤10 sessions; switching sessions restores thread
-- [ ] Settings modal shows masked key; Rotate calls `POST /api/settings/rotate-mcp-key` and updates display
-- [ ] Theme toggle in Settings modal immediately applies dark or light mode; selection persists across page reloads
-- [ ] `cd frontend && npm run test -- --run` passes
+- [x] Clicking a chat starter sends a pre-filled message that streams a response
+- [x] Tool call renders as collapsible: "Used `search_vault` — 4 results"
+- [x] Session picker shows ≤10 sessions; switching sessions restores thread
+- [x] Settings modal shows masked key; Rotate calls `POST /api/settings/rotate-mcp-key` and updates display
+- [x] Theme toggle in Settings modal immediately applies dark or light mode; selection persists across page reloads
+- [x] `cd frontend && npm run test -- --run` passes
 
 ---
 

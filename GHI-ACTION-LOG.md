@@ -450,4 +450,16 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - **live_server fixture telemetry noise** — added `MONOCLE_TELEMETRY_ENABLED=false` env var to session-scoped `live_server` fixture (`monocle/tests/conftest.py`)
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **681 passed (6 new), 6 deselected**, EXIT 0
 
+- **Executed M16 — Chat UI (COMPLETE)**
+  - Created `frontend/src/hooks/useChat.ts`: `useChat()` hook with SSE streaming via `streamChat()`, session persistence to `localStorage` (`monocle-sessions`, max 10), stable `send` callback via refs pattern (no stale closures), abort-on-session-switch, all 6 `ChatEvent` types handled (`token`, `tool_call`, `tool_error`, `note_created`, `done`, `error`)
+  - Created `frontend/src/components/Chat/ChatMessage.tsx` + CSS: ReactMarkdown prose rendering, `<details>` tool call disclosures, `NoteCard` sub-component, streaming cursor with `@keyframes blink`
+  - Created `frontend/src/components/Chat/ChatInput.tsx` + CSS: auto-grow textarea (max 6 lines / 144px), `Enter`→send / `Shift+Enter`→newline, optional voice button prop
+  - Created `frontend/src/components/Chat/ChatScreen.tsx` + CSS: 6 starter tiles (2-column grid), session picker `<select>`, auto-scroll on new messages, thread render
+  - Updated `frontend/src/components/SettingsModal/index.tsx`: added Theme section with `dark`/`light`/`system` radio buttons wired to `useTheme().setTheme`
+  - Updated `frontend/src/App.tsx`: replaced M15 placeholder with real `ChatScreen` import
+  - Created `frontend/src/Chat.test.tsx`: 24 tests covering ChatInput (8), ChatMessage (9), ChatScreen (7)
+  - `npm run test -- --run` → **45 passed (3 files: api.test.ts 13, App.test.tsx 8, Chat.test.tsx 24)**, EXIT 0
+  - `npx tsc --noEmit` → EXIT 0 (no type errors)
+  - Updated `docs/build-plan.md`: M15 deliverables `[x]`; M16 deliverables `[x]`; Active Milestone → M17; M16 → COMPLETE in tracker
+
 

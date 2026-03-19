@@ -1,0 +1,75 @@
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--topbar-height);
+  padding: 0 var(--space-4);
+  background-color: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  box-shadow: var(--shadow-card);
+  z-index: 100;
+}
+
+.topbar-left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.topbar-menu-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: var(--text-md);
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-btn);
+  line-height: 1;
+}
+
+.topbar-menu-btn:hover {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+}
+
+.topbar-logo {
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.topbar-center {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.topbar-health {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  cursor: default;
+}
+
+.health-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  transition: background-color 0.3s;
+}
+
+.health-label {
+  font-size: var(--text-sm);
+}
+
+.topbar-right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}

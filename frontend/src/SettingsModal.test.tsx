@@ -1,0 +1,183 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import SettingsModal from './components/SettingsModal'
+import { getSettings, patchSettings, rotateMcpKey } from './api/settings'
+
+// ── Module mocks ──────────────────────────────────────────────────────────────
+
+vi.mock('./api/settings', () => ({
+  getSettings: vi.fn(),
+  patchSettings: vi.fn(),
+  rotateMcpKey: vi.fn(),
+}))
+
+// Replace useTheme with a controlled mock so tests don't need ThemeContext wiring
+const mockSetTheme = vi.fn()
+vi.mock('./hooks/useTheme', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./hooks/useTheme')>()
+  return {
+    ...actual,
+    useTheme: () => ({ theme: 'dark' as const, resolvedTheme: 'dark' as const, setTheme: mockSetTheme }),
+  }
+})
+
+// ── Fixture ───────────────────────────────────────────────────────────────────
+
+const mockSettings = {
+  ai: {
+    provider: 'ollama',
+    model: 'llama3',
+    embed_model: 'nomic-embed-text',
+    transcribe_backend: 'subprocess',
+    transcribe_url: null,
+    transcribe_model: 'whisper',
+    embed_dimensions: 1536,
+    base_url: null,
+  },
+  vault: { path: '/vault', inbox_path: '/vault/inbox', templates_path: '/vault/.templates', watch: true, debounce_ms: 2000 },
+  index: { chroma_persist_path: './data/chroma', collection_name: 'monocle' },
+  agents: { weekly_summary_cron: '0 9 * * 1', reindex_cron: '0 2 * * *' },
+  review: { queue_threshold: 70, auto_approve_threshold_pct: 90, confidence_weights: {} },
+  server: { host: '127.0.0.1', port: 8000, dev_mode: false },
+  telemetry: { enabled: false, otlp_endpoint: '', log_level: 'INFO', log_format: 'text' },
+  ui: {},
+  mcp_key_last4: 'ab12',
+} as const
+
+function renderModal(open = true, onClose = vi.fn()) {
+  return render(<SettingsModal open={open} onClose={onClose} />)
+}
+
+// ── Tests ─────────────────────────────────────────────────────────────────────
+
+describe('SettingsModal — not open', () => {
+  it('renders nothing when open=false', () => {
+    renderModal(false)
+    expect(screen.queryByTestId('settings-modal')).toBeNull()
+  })
+})
+
+describe('SettingsModal — loading state', () => {
+  it('shows loading indicator while settings are fetching', () => {
+    // Never resolves — simulates pending request
+    vi.mocked(getSettings).mockReturnValue(new Promise(() => undefined))
+    renderModal()
+    expect(screen.getByTestId('settings-modal')).toBeInTheDocument()
+    expect(screen.getByText(/loading settings/i)).toBeInTheDocument()
+  })
+})
+
+describe('SettingsModal — loaded state', () => {
+  beforeEach(() => {
+    mockSetTheme.mockReset()
+    vi.mocked(getSettings).mockResolvedValue({ ...mockSettings })
+    vi.mocked(patchSettings).mockResolvedValue({ ...mockSettings })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('renders settings data after load', async () => {
+    renderModal()
+    const select = await screen.findByTestId('ai-provider-select')
+    expect(select).toHaveValue('ollama')
+  })
+
+  it('shows masked MCP key hint', async () => {
+    renderModal()
+    await screen.findByTestId('ai-provider-select')
+    expect(screen.getByTestId('mcp-key-hint')).toHaveTextContent('••••ab12')
+  })
+
+  it('calls patchSettings when AI provider changes', async () => {
+    renderModal()
+    const select = await screen.findByTestId('ai-provider-select')
+    fireEvent.change(select, { target: { value: 'azure' } })
+    await waitFor(() =>
+      expect(patchSettings).toHaveBeenCalledWith({ ai: { provider: 'azure' } }),
+    )
+  })
+
+  it('calls patchSettings after 400ms debounce when threshold slider changes', async () => {
+    renderModal()
+    const slider = await screen.findByTestId('queue-threshold-slider')
+    vi.useFakeTimers()
+
+    fireEvent.change(slider, { target: { value: '80' } })
+    expect(patchSettings).not.toHaveBeenCalled()
+
+    act(() => { vi.advanceTimersByTime(400) })
+    expect(patchSettings).toHaveBeenCalledWith({ review: { queue_threshold: 80 } })
+
+    vi.useRealTimers()
+  })
+
+  it('slider does not call patchSettings before debounce fires', async () => {
+    renderModal()
+    const slider = await screen.findByTestId('queue-threshold-slider')
+    vi.useFakeTimers()
+
+    fireEvent.change(slider, { target: { value: '55' } })
+    act(() => { vi.advanceTimersByTime(300) })    // < 400ms
+    expect(patchSettings).not.toHaveBeenCalled()
+
+    vi.useRealTimers()
+  })
+
+  it('theme radio calls setTheme', async () => {
+    renderModal()
+    await screen.findByTestId('ai-provider-select')
+    fireEvent.click(screen.getByTestId('theme-radio-light'))
+    expect(mockSetTheme).toHaveBeenCalledWith('light')
+  })
+})
+
+describe('SettingsModal — MCP key rotation', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ ...mockSettings })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('calls rotateMcpKey and updates hint on success', async () => {
+    vi.mocked(rotateMcpKey).mockResolvedValueOnce({ mcp_key_last4: 'zz99' })
+    renderModal()
+    const btn = await screen.findByTestId('rotate-key-btn')
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(screen.getByTestId('mcp-key-hint')).toHaveTextContent('••••zz99'),
+    )
+  })
+})
+
+describe('SettingsModal — error state', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('shows error message when getSettings rejects', async () => {
+    vi.mocked(getSettings).mockRejectedValueOnce(new Error('Network error'))
+    renderModal()
+    await waitFor(() =>
+      expect(screen.getByText(/network error/i)).toBeInTheDocument(),
+    )
+  })
+})
+
+describe('SettingsModal — close behaviour', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockReturnValue(new Promise(() => undefined))
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('calls onClose when Escape is pressed', () => {
+    const onClose = vi.fn()
+    renderModal(true, onClose)
+    fireEvent.keyDown(window, { key: 'Escape' })
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('calls onClose when backdrop is clicked', () => {
+    const onClose = vi.fn()
+    renderModal(true, onClose)
+    const overlay = screen.getByTestId('settings-modal')
+    // Simulate click directly on the overlay element (not on a child)
+    fireEvent.click(overlay, { target: overlay })
+    expect(onClose).toHaveBeenCalled()
+  })
+})

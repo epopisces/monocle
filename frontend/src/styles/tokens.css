@@ -1,0 +1,125 @@
+/* Monocle Design Tokens — generated from ui-design.md §3 */
+
+/* ── Dark theme (default) ───────────────────────────────────── */
+:root,
+[data-theme="dark"] {
+  --bg-base: #111318;
+  --bg-surface: #1c1f26;
+  --bg-elevated: #252830;
+  --border: #2e3240;
+  --text-primary: #ebedf2;
+  --text-secondary: #8891a8;
+  --accent: #7c8af7;
+  --accent-hover: #9099fb;
+  --success: #3dbf84;
+  --error: #e96b67;
+  --warning: #f5a623;
+  --tag-bg: #2a2e4a;
+  --tag-text: #a0aaff;
+  --graph-person: #7c8af7;
+  --graph-topic: #3dbf84;
+  --graph-edge: #5a6072;
+  --review-pending: #f5a623;
+
+  color-scheme: dark;
+}
+
+/* ── Light theme ─────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-base: #f8f9fa;
+  --bg-surface: #ffffff;
+  --bg-elevated: #f0f2f5;
+  --border: #e2e5ea;
+  --text-primary: #111318;
+  --text-secondary: #5a6072;
+  --accent: #5865f2;
+  --accent-hover: #4752c4;
+  --success: #2d9e6b;
+  --error: #d9534f;
+  --warning: #e08a00;
+  --tag-bg: #e8eaff;
+  --tag-text: #3a45c4;
+  --graph-person: #5865f2;
+  --graph-topic: #2d9e6b;
+  --graph-edge: #8891a8;
+  --review-pending: #e08a00;
+
+  color-scheme: light;
+}
+
+/* ── Typography ──────────────────────────────────────────────── */
+:root {
+  --font-ui: 'Inter', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  --text-xs:   12px;
+  --text-sm:   13px;
+  --text-base: 14px;
+  --text-md:   16px;
+  --text-lg:   20px;
+  --text-xl:   24px;
+  --text-2xl:  32px;
+}
+
+/* ── Border radius ───────────────────────────────────────────── */
+:root {
+  --radius-card:   8px;
+  --radius-btn:    6px;
+  --radius-pill:   20px;
+  --radius-modal:  12px;
+}
+
+/* ── Shadows ─────────────────────────────────────────────────── */
+:root {
+  --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.12);
+  --shadow-modal: 0 4px 12px rgba(0, 0, 0, 0.2);
+}
+
+/* ── Spacing scale ───────────────────────────────────────────── */
+:root {
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+}
+
+/* ── Layout constants ────────────────────────────────────────── */
+:root {
+  --topbar-height: 52px;
+  --leftnav-width: 220px;
+  --leftnav-rail-width: 56px;
+  --collapse-breakpoint: 1200px;
+}
+
+/* ── Base resets ─────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  color: var(--text-primary);
+  background-color: var(--bg-base);
+}
+
+a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--accent-hover);
+}

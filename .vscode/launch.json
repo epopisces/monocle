@@ -62,6 +62,33 @@
         "group": "monocle",
         "order": 4
       }
+    },
+    {
+      "name": "Frontend Dev Server",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/frontend",
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Local:\\s+(http://localhost:\\d+)",
+        "uriFormat": "%s"
+      },
+      "presentation": {
+        "group": "frontend",
+        "order": 1
+      }
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Full Stack (debug)",
+      "configurations": ["Dev Server (debug)", "Frontend Dev Server"],
+      "stopAll": true,
+      "presentation": {
+        "group": "monocle",
+        "order": 0
+      }
     }
   ]
 }
