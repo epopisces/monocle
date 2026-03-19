@@ -223,6 +223,24 @@ export default function FormEditor({ note, templates, onChange, onSave }: FormEd
                 onChange={v => handleFieldChange(field.name, v)}
                 error={hasError}
               />
+            ) : field.type === 'number' ? (
+              <input
+                type="number"
+                className="form-editor__input"
+                value={val === null || val === undefined ? '' : String(val)}
+                onChange={e => {
+                  const raw = e.target.value
+                  if (raw === '') {
+                    handleFieldChange(field.name, undefined)
+                    return
+                  }
+                  const num = Number(raw)
+                  if (!Number.isNaN(num)) {
+                    handleFieldChange(field.name, num)
+                  }
+                }}
+                aria-invalid={hasError ? 'true' : 'false'}
+              />
             ) : (
               <StringField
                 field={field}
