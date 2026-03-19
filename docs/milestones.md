@@ -328,10 +328,11 @@ This document archives full details for completed milestones (M1–M11) and reso
 
 - `monocle/main.py` — `init_mcp_state(...)` called in lifespan after IngestPipeline + GraphBuilder init; `create_mcp_app(mcp_key)` mounted at `/mcp` in `create_app()` using `os.environ.get(cfg.server.mcp_access_key_env, "")`
 
-- `monocle/tests/test_mcp.py` — 24 tests across 3 classes:
-  - `TestMCPAuth` (6 tests): no key → 401; wrong key header → 401; wrong key query → 401; valid header passes; valid query param passes; no env key configured → all requests rejected
-  - `TestMCPTools` (15 tests): all 8 tools exercised via `mcp.call_tool()` with real VaultLayer + MemoryIndex; field presence assertions; `create_note` sets pending review status; `update_note` body-too-long raises; `capture_thought` returns file_path
-  - `TestMCPServerConfig` (3 tests): `init_mcp_state` sets all 5 fields; `create_mcp_app` returns `_MCPAuthMiddleware`; server has exactly 8 tools
+- `monocle/tests/test_mcp.py` — 40 tests across 4 classes:
+  - `TestMCPAuth`: no key → 401; wrong key header → 401; wrong key query → 401; valid header passes; valid query param passes; no env key configured → all requests rejected
+  - `TestMCPTools`: all 8 tools exercised via `mcp.call_tool()` with real VaultLayer + MemoryIndex; field presence assertions; `create_note` sets pending review status; `update_note` body-too-long raises; `capture_thought` returns file_path
+  - `TestMCPServerConfig`: `init_mcp_state` sets all 5 fields; `create_mcp_app` returns `_MCPAuthMiddleware`; server has exactly 8 tools
+  - `TestMCPSecurityBoundaries`: enforces MCP security boundaries (e.g. vault path restrictions, cross-tenant isolation, and HTTP surface hardening) around tools and routes
 
 - `.vscode/tasks.json` — `test: mcp` task added
 
@@ -340,8 +341,8 @@ This document archives full details for completed milestones (M1–M11) and reso
 - `search_vault` returns list with `file_path`, `similarity`, `chunk` fields ✓
 - `capture_thought` creates a vault note and returns its `file_path` ✓
 - SPIKE-2 outcome recorded (implementation complete; live client testing deferred) ✓
-- `uv run python -m pytest monocle/tests/test_mcp.py -x --tb=short -q` → **24 passed** ✓
-- Full suite: **573 passed, 6 deselected, EXIT 0** ✓
+- `uv run python -m pytest monocle/tests/test_mcp.py -x --tb=short -q` → **40 passed** ✓
+- Full suite: **all tests passing (EXIT 0)** ✓
 
 ---
 
