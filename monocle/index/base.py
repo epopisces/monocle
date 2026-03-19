@@ -84,3 +84,14 @@ class IndexLayer(ABC):
         Returns an empty dict when the backend has no real embeddings
         (e.g. :class:`~monocle.index.MemoryIndex` in tests).
         """
+
+    @abstractmethod
+    def patch_file_metadata(self, file_path: str, updates: dict) -> None:
+        """Merge-update metadata for every chunk that belongs to *file_path*.
+
+        Only scalar values (str, int, float, bool) are written; unsupported
+        types are silently ignored by the ChromaDB backend.
+
+        Used by the review-approval flow to keep ChromaDB metadata in sync
+        with frontmatter changes (e.g. ``review_status`` → ``"approved"``).
+        """

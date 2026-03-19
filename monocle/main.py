@@ -75,6 +75,9 @@ async def lifespan(app: FastAPI):
     app.state.vault = vault
     app.state.index = index
     app.state.settings = cfg
+    # Lazy pending-review count cache; invalidated on any vault write.
+    # review_count endpoint reads this before falling back to a full scan.
+    app.state._review_pending_count = None
 
     # ------------------------------------------------------------------
     # Graph builder (in-memory cache; invalidated on any vault file change)
@@ -113,6 +116,8 @@ async def lifespan(app: FastAPI):
         from monocle.ingest.chunker import chunk_text
 
         logger.debug("[API] ReindexQueue: re-indexing %s", file_path)
+        # Any vault file change may alter review_status — invalidate count cache.
+        app.state._review_pending_count = None
         # Always invalidate the graph cache when a vault file changes,
         # regardless of whether re-indexing succeeds or the file is gone.
         graph_builder.invalidate()

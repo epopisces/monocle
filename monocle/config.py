@@ -184,6 +184,46 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 
+def save_config_patch(patch: dict) -> None:
+    """Deep-merge *patch* into ``config.yaml`` atomically.
+
+    Only recognised top-level settings sections are updated.  Secret fields
+    (azure_*, foundry_local_*) are never written.  ``None`` values in the
+    patch are skipped.
+    """
+    import tempfile
+    import yaml  # noqa: PLC0415
+
+    _ALLOWED = {"ai", "vault", "index", "agents", "review", "server", "telemetry", "ui"}
+
+    config_path = _find_config_file()
+    current = _load_yaml(config_path)
+
+    for section, values in patch.items():
+        if section not in _ALLOWED:
+            continue
+        if not isinstance(values, dict):
+            continue
+        if section not in current:
+            current[section] = {}
+        current[section].update({k: v for k, v in values.items() if v is not None})
+
+    content = yaml.dump(current, default_flow_style=False, allow_unicode=True)
+
+    dir_path = config_path.parent if isinstance(config_path, Path) else Path(config_path).parent
+    fd, tmp = tempfile.mkstemp(dir=str(dir_path), suffix=".tmp", text=True)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(content)
+        os.replace(tmp, str(config_path))
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 class Settings(BaseModel):
     """Root settings object. Constructed once at startup."""
 

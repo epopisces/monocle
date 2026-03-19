@@ -259,6 +259,27 @@ class ChromaIndex(IndexLayer):
                     result[fp] = list(emb)
         return result
 
+    def patch_file_metadata(self, file_path: str, updates: dict) -> None:
+        """Update metadata for all chunks belonging to *file_path*."""
+        result = self._collection.get(
+            where={"file_path": {"$eq": file_path}},
+            include=["metadatas"],
+        )
+        if not result["ids"]:
+            return
+        scalar_updates = {
+            k: v
+            for k, v in updates.items()
+            if isinstance(v, (str, int, float, bool))
+        }
+        new_metadatas = [{**m, **scalar_updates} for m in result["metadatas"]]
+        self._collection.update(ids=result["ids"], metadatas=new_metadatas)
+        logger.debug(
+            "ChromaIndex.patch_file_metadata(%s): updated %d chunk(s)",
+            file_path,
+            len(result["ids"]),
+        )
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

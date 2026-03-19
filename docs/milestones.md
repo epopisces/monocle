@@ -346,7 +346,37 @@ This document archives full details for completed milestones (M1–M11) and reso
 
 ---
 
-### M11: Scheduled Agents
+### M13: Settings & Review API
+
+**Goal:** Runtime settings management (with hot-reload and config.yaml persistence) and review queue CRUD.
+
+**Deliverables (all completed):**
+- `monocle/config.py` — `save_config_patch(patch: dict)` public function: deep-merges allowed section keys (`ai`, `vault`, `index`, `agents`, `review`, `server`, `telemetry`, `ui`) into `config.yaml` atomically via mkstemp + os.replace; respects `MONOCLE_CONFIG` env var; skips `None` values.
+- `monocle/index/base.py` — `patch_file_metadata(file_path, updates)` abstract method added to `IndexLayer`.
+- `monocle/index/chroma.py` — `patch_file_metadata` uses `collection.get(where=file_path_filter, include=["metadatas"])` + `collection.update()` with scalar-only metadata merge.
+- `monocle/index/memory.py` — `patch_file_metadata` updates `chunk.metadata` dict in-place for all matching chunks.
+- `monocle/routers/settings.py` — full implementation:
+  - `GET /api/settings` — returns `settings.model_dump()` (secrets excluded by Pydantic `Field(exclude=True)`) + `mcp_key_last4` (masked via `"****" + key[-4:]`; `None` if key absent).
+  - `PATCH /api/settings` — accepts `{review: {...}, ai: {...}}` partial patch; applies via `model_copy(update=...)` on sub-configs; writes to `config.yaml` via `save_config_patch`; hot-reloads `AIProvider` when `ai.provider` changes; updates `app.state.settings`.
+  - `POST /api/settings/rotate-mcp-key` — generates `secrets.token_hex(32)`; writes to `.env` (path configurable via `MONOCLE_ENV_FILE` env var) atomically; updates `os.environ`; returns `{mcp_key_last4: "****xxxx"}`.
+- `monocle/routers/review.py` — full implementation:
+  - `GET /api/review` — scans vault via `vault.list_notes(limit=10000)`, filters `review_status=="pending"`, returns paginated list.
+  - `GET /api/review/count` — same scan, returns `{"count": N}`.
+  - `PATCH /api/review/{path}/approve` — calls `vault.patch_frontmatter(path, {review_status, approval_mode, approved_by, approved_at})` (auto-404 via `NoteNotFound` HTTPException); mirrors `review_status: approved` to ChromaDB via `index.patch_file_metadata`; returns `ApprovalResult`.
+  - `POST /api/review/approve-all` — approves all pending notes in batch; returns `{"approved": N}`.
+- `monocle/tests/test_settings.py` — 19 tests: `TestGetSettings` (6), `TestPatchSettings` (8), `TestRotateMcpKey` (5). `_temp_config` autouse fixture redirects config writes to a per-test temp file (via `MONOCLE_CONFIG` env var) so the real `config.yaml` is never mutated.
+- `monocle/tests/test_review.py` — 25 tests: `TestListReview` (7), `TestReviewCount` (4), `TestApproveNote` (9), `TestApproveAll` (5).
+- `monocle/tests/test_api.py` — `STILL_STUB_ROUTES` pruned to only `POST /api/teams/messages`.
+- `.vscode/tasks.json` — `test: settings` task added.
+
+**Acceptance criteria met:**
+- `GET /api/settings` returns MCP key masked to last 4 characters only ✓
+- `PATCH /api/settings {"review": {"queue_threshold": 0.75, "auto_approve_threshold_pct": 90}}` takes effect immediately on `app.state.settings` and is persisted to `config.yaml` ✓
+- `PATCH /api/review/{path}/approve` sets `review_status: approved`, `approval_mode: manual`, `approved_by`, `approved_at` in frontmatter and mirrors `review_status` to ChromaDB metadata ✓
+- `uv run python -m pytest monocle/tests/test_settings.py monocle/tests/test_review.py -x --tb=short -q` → **44 passed** ✓
+- Full suite: **626 passed, 6 deselected, EXIT 0** ✓
+
+---
 
 **Goal:** APScheduler weekly summary agent using lightweight built-in clustering on pre-computed embeddings. `ReindexAgent` wired into APScheduler for scheduled full-vault re-index.
 

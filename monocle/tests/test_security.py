@@ -68,6 +68,22 @@ class TestPathTraversal:
             f"Expected 403 for to_path traversal, got {r.status_code}: {r.text}"
         )
 
+    def test_approve_path_traversal_blocked(self, api_client: TestClient):
+        """PATCH /api/review/%2e%2e/%2e%2e/.env/approve must return 403 (S1)."""
+        r = api_client.patch(
+            "/api/review/%2e%2e/%2e%2e/.env/approve",
+            json={"approved_by": "user"},
+        )
+        assert r.status_code == 403
+
+    def test_approve_absolute_path_blocked(self, api_client: TestClient):
+        """Absolute path in approve endpoint must return 403 (S1)."""
+        r = api_client.patch(
+            "/api/review/%2Fetc%2Fpasswd/approve",
+            json={"approved_by": "user"},
+        )
+        assert r.status_code == 403
+
 
 # ===========================================================================
 # Audio Size Limits

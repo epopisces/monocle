@@ -53,6 +53,7 @@ async def ingest(req: IngestRequest, request: Request) -> IngestResponse:
         logger.error("[INGEST] Pipeline error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Ingest pipeline failed. See server logs for details.")
 
+    request.app.state._review_pending_count = None  # ingest may create a pending note
     return IngestResponse(note=note, confidence=confidence)
 
 
@@ -114,6 +115,7 @@ async def ingest_stream(req: IngestRequest, request: Request) -> StreamingRespon
         try:
             note, confidence = await pipeline_task
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
+            request.app.state._review_pending_count = None  # ingest may create a pending note
             yield _sse(
                 "done",
                 {

@@ -171,6 +171,7 @@ async def put_note(path: str, body: NoteWriteRequest, request: Request, response
 
     if reindex_queue is not None:
         reindex_queue.push(path)
+    request.app.state._review_pending_count = None  # note write may change review_status
 
     if not already_exists:
         response.status_code = 201
@@ -188,6 +189,7 @@ async def patch_note(path: str, body: NotePatchRequest, request: Request) -> Not
 
     if reindex_queue is not None:
         reindex_queue.push(path)
+    request.app.state._review_pending_count = None  # frontmatter patch may change review_status
 
     return updated_note
 
@@ -196,6 +198,7 @@ async def patch_note(path: str, body: NotePatchRequest, request: Request) -> Not
 async def delete_note(path: str, request: Request) -> None:
     vault = request.app.state.vault
     await asyncio.to_thread(vault.delete_note, path)
+    request.app.state._review_pending_count = None  # deleted note may have been pending
 
 
 @router.post("/notes/{path:path}/move", response_model=dict)
