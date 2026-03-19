@@ -45,7 +45,7 @@ def _wait_for_server(base_url: str, timeout: float = 12.0) -> bool:
 
 @pytest.fixture()
 def dev_server(tmp_path):
-    """Start `python -m monocle serve` on a free port; yield base_url; then stop."""
+    """Start `uvicorn monocle.main:app` on a free port; yield (base_url, proc); then stop."""
     import httpx  # ensure importable early
 
     port = _free_port()
