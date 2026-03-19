@@ -4,7 +4,6 @@ import { ThemeContext, useThemeProvider } from './hooks/useTheme'
 import AppShell from './components/layout/AppShell'
 import SettingsModal from './components/SettingsModal'
 import ChatScreen from './components/Chat/ChatScreen'
-import './styles/tokens.css'
 
 /* Placeholder screen components — replaced in M17–M20 */
 const DocsScreen = () => <div className="screen-placeholder">📄 Document Browser — coming in M17</div>

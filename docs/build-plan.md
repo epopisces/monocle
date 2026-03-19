@@ -116,7 +116,6 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M15 | Frontend Scaffold & Typed API Wrappers | COMPLETE |
 | M16 | Chat UI | COMPLETE |
 | M17 | Document Browser & Search UI | NOT STARTED |
-| M17 | Document Browser & Search UI | NOT STARTED |
 | M18 | Graph UI | NOT STARTED |
 | M19 | Voice Capture & Review Queue UI | NOT STARTED |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | NOT STARTED |
