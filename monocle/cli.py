@@ -167,6 +167,7 @@ def pull_models() -> None:
 
     models_to_pull = list({settings.ai.chat_model, settings.ai.embed_model})
     typer.echo(f"Pulling {len(models_to_pull)} model(s) from Ollama …")
+    failed_count = 0
     for model_name in models_to_pull:
         typer.echo(f"  → {model_name} …", nl=False)
         try:
@@ -174,6 +175,11 @@ def pull_models() -> None:
             typer.echo(" done")
         except Exception as exc:
             typer.echo(f" FAILED: {exc}", err=True)
+            failed_count += 1
+    
+    if failed_count > 0:
+        typer.echo(f"\n[ERROR] {failed_count}/{len(models_to_pull)} pull(s) failed.", err=True)
+        raise typer.Exit(code=1)
 
 
 # ---------------------------------------------------------------------------
@@ -192,17 +198,31 @@ def stats() -> None:
 
     async def _gather() -> dict:
         index_stats = await asyncio.to_thread(index.get_stats)
-        page = await asyncio.to_thread(vault.list_notes, None, None, None, "updated", 100_000, 0)
+        # Fetch all notes using pagination (limit 100k per page)
         by_type: dict[str, int] = {}
         by_domain: dict[str, int] = {}
         pending = 0
-        for ref in page.items:
-            by_type[ref.type] = by_type.get(ref.type, 0) + 1
-            by_domain[ref.domain] = by_domain.get(ref.domain, 0) + 1
-            if ref.review_status == "pending":
-                pending += 1
+        total_notes = 0
+        offset = 0
+        page_size = 100_000
+        
+        while offset == 0 or offset < total_notes:
+            page = await asyncio.to_thread(vault.list_notes, None, None, None, "updated", page_size, offset)
+            if offset == 0:
+                total_notes = page.total
+            
+            for ref in page.items:
+                by_type[ref.type] = by_type.get(ref.type, 0) + 1
+                by_domain[ref.domain] = by_domain.get(ref.domain, 0) + 1
+                if ref.review_status == "pending":
+                    pending += 1
+            
+            offset += len(page.items)
+            if len(page.items) < page_size:
+                break  # Last page; fewer items than page_size
+        
         return {
-            "total_notes": page.total,
+            "total_notes": total_notes,
             "total_chunks": index_stats.total_chunks,
             "by_type": by_type,
             "by_domain": by_domain,
@@ -275,14 +295,29 @@ def search(
 def export(
     output: str = typer.Option("export.zip", "--output", "-o", help="Destination zip file path"),
 ) -> None:
-    """Export the vault to a zip archive (excludes .versions/, .trash/, data/)."""
+    """Export the vault to a zip archive (excludes .versions/, .trash/, macOS metadata)."""
     settings = _load_settings()
     vault_root = Path(settings.vault.path).resolve()
 
-    # Directories to exclude (relative prefixes inside vault root)
+    output_path = Path(output).resolve()
+
+    # Prevent output path from being inside vault (avoid self-referential archive)
+    try:
+        output_path.relative_to(vault_root)
+        typer.echo(
+            f"[ERROR] Output path must be outside the vault directory.\n"
+            f"  vault root: {vault_root}\n"
+            f"  output path: {output_path}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    except ValueError:
+        # This is expected — output_path is NOT inside vault_root
+        pass
+
+    # Directories to exclude (top-level prefixes inside vault root)
     excluded_top = {".versions", ".trash"}
 
-    output_path = Path(output).resolve()
     total = 0
 
     with zipfile.ZipFile(str(output_path), "w", compression=zipfile.ZIP_DEFLATED) as zf:
@@ -290,10 +325,10 @@ def export(
             if not file.is_file():
                 continue
             rel = file.relative_to(vault_root)
-            # Exclude hidden system directories
+            # Exclude Monocle system directories
             if rel.parts[0] in excluded_top:
                 continue
-            # Exclude macOS cruft
+            # Exclude macOS metadata
             if rel.name == ".DS_Store":
                 continue
             # Use forward slashes in arcnames so archives are portable across

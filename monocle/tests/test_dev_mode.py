@@ -14,6 +14,7 @@ import signal
 import socket
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
@@ -41,6 +42,18 @@ def _wait_for_server(base_url: str, timeout: float = 12.0) -> bool:
             pass
         time.sleep(0.25)
     return False
+
+
+def _drain_pipe(pipe, output_list) -> None:
+    """Read all data from a pipe and store in output_list (thread worker)."""
+    try:
+        while True:
+            chunk = pipe.read(4096)
+            if not chunk:
+                break
+            output_list.append(chunk)
+    except Exception:
+        pass
 
 
 @pytest.fixture()
@@ -73,27 +86,46 @@ def dev_server(tmp_path):
         stderr=subprocess.PIPE,
     )
 
+    # Start background threads to drain pipes and prevent buffer overflow
+    stdout_data: list[bytes] = []
+    stderr_data: list[bytes] = []
+    stdout_thread = threading.Thread(target=_drain_pipe, args=(proc.stdout, stdout_data), daemon=True)
+    stderr_thread = threading.Thread(target=_drain_pipe, args=(proc.stderr, stderr_data), daemon=True)
+    stdout_thread.start()
+    stderr_thread.start()
+
     ready = _wait_for_server(base_url, timeout=12.0)
     if not ready:
         proc.terminate()
-        out, err = proc.communicate(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        
+        # Collate captured output
+        out = b"".join(stdout_data).decode(errors="replace")
+        err = b"".join(stderr_data).decode(errors="replace")
         pytest.skip(
             f"dev_server did not start in time on port {port}. "
-            f"stdout: {out.decode()[-1000:]} stderr: {err.decode()[-1000:]}"
+            f"stdout: {out[-1000:]} stderr: {err[-1000:]}"
         )
 
     yield base_url, proc
 
-    if sys.platform == "win32":
-        proc.terminate()
-    else:
-        proc.send_signal(signal.SIGINT)
+    # Only signal if the process is still running (poll() returns None if running).
+    # test_clean_shutdown may have already terminated the process.
+    if proc.poll() is None:
+        if sys.platform == "win32":
+            proc.terminate()
+        else:
+            proc.send_signal(signal.SIGINT)
 
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
 
 
 class TestUnifiedDevStartup:
@@ -173,6 +205,8 @@ class TestDevTelemetryBlock:
         env = os.environ.copy()
         env["MONOCLE_VAULT_PATH"] = str(vault_dir)
         env["MONOCLE_TELEMETRY_ENABLED"] = "false"
+        # Ensure stdout is line-buffered so telemetry line is flushed promptly
+        env["PYTHONUNBUFFERED"] = "1"
 
         # Run `python -m monocle dev` and immediately terminate.
         # We just need the first few lines of output.

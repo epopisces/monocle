@@ -439,9 +439,10 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - Updated `docs/milestones.md`: M14 full implementation details archived
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **675 passed (21 new), 6 deselected**, EXIT 0
 
-- **M14 post-implementation code review — 7 issues resolved**
+- **M14 post-implementation code review — 8 issues resolved**
   - **Bug (High): `asyncio.get_event_loop()` in thread** — `embed_fn` closure in `reindex` CLI called `asyncio.get_event_loop().run_until_complete()`, which raises `RuntimeError` in thread-pool threads on Python 3.10+ (and confirmed 3.14). The error was silently swallowed, producing empty embeddings; with ChromaDB this causes a dimension-mismatch + silent chunk deletion. Fixed to `asyncio.run()` (`monocle/cli.py`)
   - **Bug (Medium): zip arcnames use OS path separator** — `Path.relative_to()` on Windows returns backslash paths; zip arcnames now forced to forward slashes via `.replace(os.sep, "/")` (`monocle/cli.py`)
+  - **Bug (Medium): live_server pipe deadlock** — `live_server` subprocess spawned with `stdout=PIPE, stderr=PIPE` but pipes never drained; can block subprocess when output fills OS buffer. Changed to `subprocess.DEVNULL` and updated error handling to not try to decode from closed pipes (`monocle/tests/conftest.py`)
   - **Weak test assertion** — `test_list_invalid_path_exits_nonzero` accepted `"No versions" in result.output` as a passing path for traversal attempts; assertion tightened to require `exit_code != 0` only (`monocle/tests/test_cli.py`)
   - **Missing traversal test** — added `test_restore_path_traversal_blocked` to `TestVersionsRestore` (`monocle/tests/test_cli.py`)
   - **TestSearch added (4 tests)** — `test_search_returns_results`, `test_search_empty_results`, `test_search_ai_failure_exits_nonzero`, `test_search_limit_passed_to_index` (`monocle/tests/test_cli.py`)

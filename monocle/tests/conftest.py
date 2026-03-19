@@ -314,8 +314,8 @@ def live_server(tmp_path_factory):
             str(port),
         ],
         env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
 
     deadline = time.monotonic() + 15.0
@@ -333,10 +333,14 @@ def live_server(tmp_path_factory):
 
     if not ready:
         proc.terminate()
-        out, err = proc.communicate(timeout=5)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
         pytest.fail(
-            f"live_server did not become ready within 15s on port {port}.\n"
-            f"stdout: {out.decode()[-2000:]}\nstderr: {err.decode()[-2000:]}"
+            f"live_server did not become ready within 15s on port {port}. "
+            f"(stdout/stderr redirected to DEVNULL; check server logs separately if needed)"
         )
 
     yield base_url
