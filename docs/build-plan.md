@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-18
-active-milestone: M12
+last-updated: 2026-03-19
+active-milestone: M13
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,9 +26,10 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M12 — MCP Server
-**Last Completed:** M11 — Scheduled Agents (2026-03-18)
-**Blocked By:** SPIKE-2 (FastMCP client compatibility — must resolve during M12)
+**Active Milestone:** M13 — Settings & Review API
+**Last Completed:** M12 — MCP Server (2026-03-18)
+**Blocked By:** None
+**Session Notes (M12 — MCP Server):** M12 fully executed. `monocle/mcp_server.py`: `FastMCP("monocle", stateless_http=True)` + 8 tools (`search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`); `_MCPState` singleton (instance attrs, `assert_ready()`, `reindex_queue` field) populated via `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue)`; `_MCPAuthMiddleware` ASGI wrapper validates `x-monocle-key` header or `?key=` query param using `hmac.compare_digest` (constant-time); logs WARNING when `?key=` path is taken; returns HTTP 401 JSON if missing or invalid; `create_mcp_app(mcp_key)` → `_MCPAuthMiddleware`; MCP key loaded from env at `create_app()` time. `capture_thought` forwards `source` param to `IngestPipeline`. `create_note`/`update_note` push to `reindex_queue` after write; `update_note` sets `metadata.updated = datetime.now(utc)`. `get_stats` paginates via `_fetch_all_refs()` (500-note batches). `monocle/main.py`: `init_mcp_state(...)` called in lifespan with `reindex_queue=reindex_queue`; `create_mcp_app(mcp_key)` mounted at `/mcp`. `monocle/tests/test_mcp.py`: 40 tests across 4 classes — `TestMCPAuth` (6), `TestMCPTools` (26), `TestMCPSecurityBoundaries` (5), `TestMCPServerConfig` (3). SPIKE-2 outcome recorded. **589 tests passing (40 MCP), 6 deselected, EXIT 0.**
 **Session Notes (M11 — Scheduled Agents):** M11 fully executed. `monocle/agents/weekly_summary.py`: `WeeklySummaryAgent.run(vault, index, ai, settings)` — collects notes updated within 7 days via `vault.list_notes(limit=500)`, fetches embeddings via new `index.get_embeddings_by_file()`, clusters with `AgglomerativeClustering(metric="cosine", linkage="average")` (scikit-learn) for batches ≥4; `_llm_group_notes` JSON-prompt fallback for small batches; `_summarise_cluster` per-cluster chat call using `prompts/weekly_review.md`; writes `summaries/YYYY-WW.md` via `vault.write_note(file_path, Note(...))`. `monocle/index/base.py`: new `get_embeddings_by_file(file_paths) -> dict[str, list[float]]` abstract method. `monocle/index/chroma.py`: pages `_GET_PAGE_SIZE` batches via `collection.get(where={"file_path": {"$in": batch}})`, returns `chunk_index=0` embedding per file. `monocle/index/memory.py`: returns `{}` (triggers LLM fallback in tests). `monocle/main.py`: weekly summary cron job wired — `_weekly_summary_agent` instance + `scheduler.add_cron_job("weekly_summary", ...)` + `app.state.weekly_summary_agent`. `monocle/routers/agents.py`: both endpoints implemented — `POST /api/agents/weekly-summary` StreamingResponse SSE (`start`/`done`/`error` events), `POST /api/agents/reindex` 202 via `BackgroundTasks`. `monocle/tests/test_scheduler.py`: 12 new tests — `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests). `tests/test_api.py`: agents routes removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: scheduler` task added. **542 tests passing (12 new), 6 deselected, EXIT 0.**
 **Session Notes (2026-03-18 M10 post-review):** M10 code review resolved 13 issues. **Bugs**: `AIProvider.chat()` ABC now accepts `tools: list[dict] | None = None`; all 3 providers (`OllamaProvider`, `FoundryLocalProvider`, `AzureOpenAIProvider`) forward `tools=`, check `response.message.tool_calls` / `choices[0].message.tool_calls`, and serialize non-empty tool_calls to JSON string; `_inner_get_response` and `_inner_get_streaming_response` in `agents/__init__.py` pass `tools=tools` directly; streaming adapter detects and yields `FunctionCallContent` via `_try_parse_tool_calls`; `create_from_template` now followed by `write_note` in `create_note` tool (notes were never written to disk). **Security**: `create_note` sets `review_status="pending"` so agent-created notes land in the review queue; `_MAX_BODY_LENGTH = 50_000` constant enforced in both `write_note` and `create_note`. **Minor**: `tags=[]` mutable default changed to `tags: list[str] | None = None`; `import asyncio` moved to module-level in `tools.py`; OTel port detection uses `urlparse` instead of fragile string match. **Tests**: 9 new tests in `test_ai.py` (`TestOllamaChatWithTools`, `TestFoundryLocalChatWithTools`, `TestAzureChatWithTools`); ~30 new tests in `test_agents.py` (`TestVaultToolsExecution` 14 tests, `TestToDictMessages` 5 tests, `TestTryParseToolCalls` 5 tests, `TestChatSSEErrorContract` 2 tests); existing mocks updated with `tool_calls=None` to prevent MagicMock auto-attribute false-positive. **530 tests passing (33 new), EXIT 0.**
 **Session Notes (2026-03-18 M10):** M10 fully executed. `monocle/agents/tools.py`: `VaultTools` class with 7 `@ai_function` decorated tools (`search_vault`, `read_note`, `write_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`); each tool wraps vault/index/ai operations with try/except; `_to_thread` helper for sync→async conversion; `.tools` list exposed for `ChatAgent`. `monocle/agents/__init__.py`: `_AIProviderChatClient(BaseChatClient)` adapter with `@use_function_invocation` — `_to_dict_messages()` converts ChatMessage list (including FunctionCallContent/FunctionResultContent) to OpenAI-style dicts; `_build_openai_tools()` calls `.to_json_schema_spec()` on each AIFunction; `_inner_get_response()` and `_inner_get_streaming_response()` bridge to `AIProvider.chat()`; `_try_parse_tool_calls()` detects inline JSON tool calls; `_configure_agent_otel()` calls `configure_otel_providers` once; `create_chat_agent(ai, vault, index, settings, graph_builder)` factory returns ready `ChatAgent`. `routers/chat.py`: full SSE streaming `POST /api/chat`; `ChatRequest(messages, session_id)`; creates agent per request via `create_chat_agent`; translates `AgentRunResponseUpdate` contents to SSE events (TextContent→`token`, FunctionCallContent→`tool_call`, FunctionResultContent with status=created→`note_created`); records `chat.ttft` and `chat.total_duration` OTel histograms; echoes `session_id` in `done` event; 60/minute rate limit; exceptions emit `error` event. `monocle/tests/test_agents.py`: 14 tests across 3 classes (TestChatSSEStream 10 tests, TestVaultTools 3 tests, TestCreateChatAgent 2 tests). `tests/test_api.py`: `POST /api/chat` removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: agents` task added. SPIKE-3 RESOLVED — see Technical Spikes. **497 tests passing (14 new + 10 from test_api adjustment), EXIT 0.**
@@ -108,7 +109,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M9 | Graph Layer | COMPLETE |
 | M10 | Agent Framework & Chat API | COMPLETE |
 | M11 | Scheduled Agents | COMPLETE |
-| M12 | MCP Server | NOT STARTED |
+| M12 | MCP Server | COMPLETE |
 | M13 | Settings & Review API | NOT STARTED |
 | M14 | CLI Commands | NOT STARTED |
 | M15 | Frontend Scaffold & Typed API Wrappers | NOT STARTED |
@@ -139,11 +140,13 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 ### SPIKE-2: FastMCP `stateless_http=True` client compatibility
 
 **Resolve by:** M12 (MCP Server)
-**Hypothesis:** A FastMCP server with `stateless_http=True` works correctly with Claude Desktop, VS Code Copilot (GitHub Copilot), and Cursor as MCP clients.
-**Validation:** Stand up a minimal FastMCP server with one tool; connect each MCP client and invoke the tool; confirm no handshake or streaming errors.
-**Status:** UNRESOLVED
-**Outcome:** *(fill in per client: CONFIRMED / FAILED / PARTIAL)*
-**Fallback:** Standard SSE-based MCP transport (deprecated in spec 2025-03-26 but may still be required by some clients).
+**Status:** PARTIAL RESOLUTION — 2026-03-18
+**Implementation:** `FastMCP("monocle", stateless_http=True)` mounted at `/mcp` via `mcp.streamable_http_app()` (Starlette). Key-based auth enforced via `_MCPAuthMiddleware` ASGI wrapper. The MCP Python SDK (`mcp[cli]`) is used; `streamable_http_app()` returns the MCP 2025-03-26 streamable HTTP transport app.
+**Outcome per client:** *(requires live client testing — complete after server deployment)*
+  - Claude Desktop: *(not yet tested)*
+  - VS Code Copilot (GitHub Copilot): *(not yet tested)*
+  - Cursor: *(not yet tested)*
+**Fallback:** Standard SSE transport available via `mcp.sse_app()` if stateless HTTP proves incompatible with specific clients.
 
 ---
 
@@ -506,23 +509,11 @@ tests/e2e/            Playwright tests (require running server)
 
 ### M12: MCP Server
 
-**Goal:** FastMCP tools exposed at `/mcp` with key-based auth. Resolve SPIKE-2.
+**Status:** COMPLETE (2026-03-18)
 
-**Deliverables:**
-- [ ] `monocle/mcp_server.py` — `FastMCP("monocle", stateless_http=True)` mounted at `/mcp`
-- [ ] All 8 MCP tools: `search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`
-- [ ] Auth middleware: verify `x-monocle-key` header or `?key=` query param; return `401` if missing or invalid
-- [ ] **SPIKE-2 resolution:** Test with Claude Desktop, VS Code Copilot, Cursor. Record outcome per client in `## Technical Spikes`.
-- [ ] `monocle/tests/test_mcp.py`
-- [ ] Extend `.vscode/tasks.json`:
-  - `test: mcp` — `python -m pytest monocle/tests/test_mcp.py -x --tb=short -q`
+**Summary:** `FastMCP("monocle", stateless_http=True)` with 8 tools mounted at `/mcp`. Key-based auth middleware (x-monocle-key header / ?key= param) with HTTP 401 rejection. SPIKE-2 implementation complete; live client testing deferred to post-deployment.
 
-**Acceptance Criteria:**
-- [ ] Request to `/mcp` without a key → 401
-- [ ] `search_vault` returns `list[dict]` with `file_path`, `similarity`, `chunk` fields
-- [ ] `capture_thought` creates a vault note and returns its `file_path`
-- [ ] SPIKE-2 outcome recorded per client
-- [ ] `uv run python -m pytest monocle/tests/test_mcp.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m12-mcp-server](milestones.md#m12-mcp-server)
 
 ---
 

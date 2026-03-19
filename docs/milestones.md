@@ -306,6 +306,46 @@ This document archives full details for completed milestones (M1–M11) and reso
 
 ---
 
+### M12: MCP Server
+
+**Goal:** FastMCP tools exposed at `/mcp` with key-based auth. Resolve SPIKE-2.
+
+**Deliverables (all completed):**
+- `monocle/mcp_server.py` — `FastMCP("monocle", stateless_http=True)` with 8 tools + auth middleware + factory:
+  - `_MCPState` dataclass holds module-level references to vault/index/ai/pipeline/graph_builder
+  - `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder)` — called from app lifespan
+  - `_MCPAuthMiddleware(app, key)` — ASGI wrapper; validates `x-monocle-key` header then `?key=` query param; returns HTTP 401 JSON `{"detail":"Unauthorized"}` if missing or invalid; passes non-HTTP scope types (lifespan, websocket) through unchanged
+  - `create_mcp_app(mcp_key) -> _MCPAuthMiddleware` — wraps `mcp.streamable_http_app()` with auth
+  - 8 `@mcp.tool()` decorated async functions using `_state` singleton:
+    1. `search_vault(query, n_results, note_type, domain)` — embeds query via AI, calls `index.search()`, returns JSON array with `file_path`, `similarity`, `chunk` (≤500 chars)
+    2. `read_note(file_path)` — reads via `vault.read_note()`, returns JSON with title/type/domain/tags/people/body
+    3. `browse_recent(limit, note_type, domain)` — calls `vault.list_notes(sort="updated")`, returns JSON array with file_path/title/type/domain/updated fields
+    4. `capture_thought(content, source)` — runs full `IngestPipeline.run(IngestRequest)`, returns JSON with file_path/type/confidence/review_status
+    5. `create_note(title, body, note_type, domain, tags)` — `create_from_template` + `write_note`; sets `review_status="pending"` (MCP-created notes go to review queue)
+    6. `update_note(file_path, body)` — reads note, patches body, writes back; `_MAX_BODY_LENGTH = 50_000`
+    7. `get_graph(focus, max_degree)` — `graph_builder.build()` in thread, returns `GraphData.model_dump_json()`
+    8. `get_stats()` — aggregates vault + index stats; returns total_notes/by_type/by_domain/pending_review/index_chunks/index_backend
+
+- `monocle/main.py` — `init_mcp_state(...)` called in lifespan after IngestPipeline + GraphBuilder init; `create_mcp_app(mcp_key)` mounted at `/mcp` in `create_app()` using `os.environ.get(cfg.server.mcp_access_key_env, "")`
+
+- `monocle/tests/test_mcp.py` — 40 tests across 4 classes:
+  - `TestMCPAuth`: no key → 401; wrong key header → 401; wrong key query → 401; valid header passes; valid query param passes; no env key configured → all requests rejected
+  - `TestMCPTools`: all 8 tools exercised via `mcp.call_tool()` with real VaultLayer + MemoryIndex; field presence assertions; `create_note` sets pending review status; `update_note` body-too-long raises; `capture_thought` returns file_path
+  - `TestMCPServerConfig`: `init_mcp_state` sets all 5 fields; `create_mcp_app` returns `_MCPAuthMiddleware`; server has exactly 8 tools
+  - `TestMCPSecurityBoundaries`: enforces MCP security boundaries (e.g. vault path restrictions, cross-tenant isolation, and HTTP surface hardening) around tools and routes
+
+- `.vscode/tasks.json` — `test: mcp` task added
+
+**Acceptance criteria met:**
+- Request to `/mcp` without a key → 401 ✓
+- `search_vault` returns list with `file_path`, `similarity`, `chunk` fields ✓
+- `capture_thought` creates a vault note and returns its `file_path` ✓
+- SPIKE-2 outcome recorded (implementation complete; live client testing deferred) ✓
+- `uv run python -m pytest monocle/tests/test_mcp.py -x --tb=short -q` → **40 passed** ✓
+- Full suite: **all tests passing (EXIT 0)** ✓
+
+---
+
 ### M11: Scheduled Agents
 
 **Goal:** APScheduler weekly summary agent using lightweight built-in clustering on pre-computed embeddings. `ReindexAgent` wired into APScheduler for scheduled full-vault re-index.

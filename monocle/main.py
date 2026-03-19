@@ -285,6 +285,13 @@ async def lifespan(app: FastAPI):
     app.state.watcher = watcher
 
     # ------------------------------------------------------------------
+    # MCP server state — inject shared layers so tool functions can access them
+    # ------------------------------------------------------------------
+    from monocle.mcp_server import init_mcp_state
+
+    init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue=reindex_queue)
+
+    # ------------------------------------------------------------------
     # Startup re-index (runs if index is empty and vault has notes)
     # ------------------------------------------------------------------
     await reindex_agent.startup_check(vault, index)
@@ -380,6 +387,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(review.router, prefix="/api")
     app.include_router(settings_router.router, prefix="/api")
     app.include_router(teams.router, prefix="/api")
+
+    # ------------------------------------------------------------------
+    # MCP server — mounted at /mcp with key-based auth
+    # ------------------------------------------------------------------
+    from monocle.mcp_server import create_mcp_app
+
+    mcp_key = os.environ.get(cfg.server.mcp_access_key_env, "")
+    app.mount("/mcp", create_mcp_app(mcp_key))
 
     # ------------------------------------------------------------------
     # Static files — serve frontend/dist at root (noop if not built)

@@ -210,7 +210,7 @@ class VaultTools:
             note = await _to_thread(
                 self._vault.create_from_template,
                 note_type,
-                {"title": title, **metadata.model_dump(exclude={"template"})},
+                {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
                 body,
             )
             await _to_thread(self._vault.write_note, note.file_path, note)
