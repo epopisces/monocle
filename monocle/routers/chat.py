@@ -105,6 +105,7 @@ async def _stream_agent_response(
     index = getattr(app.state, "index", None)
     settings = getattr(app.state, "settings", None)
     graph_builder = getattr(app.state, "graph_builder", None)
+    reindex_queue = getattr(app.state, "reindex_queue", None)
 
     if ai is None or vault is None or index is None or settings is None:
         yield _sse("error", {"message": "AI provider not available"})
@@ -117,6 +118,7 @@ async def _stream_agent_response(
             index=index,
             settings=settings,
             graph_builder=graph_builder,
+            reindex_queue=reindex_queue,
         )
 
         # Convert request messages to agent framework format

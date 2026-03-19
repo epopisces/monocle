@@ -176,6 +176,12 @@
   text-decoration: underline dotted;
 }
 
+.note-editor__preview .unsafe-link {
+  color: var(--text-disabled);
+  text-decoration: line-through;
+  cursor: not-allowed;
+}
+
 /* Form mode fills height */
 .note-editor__body .form-editor {
   flex: 1;

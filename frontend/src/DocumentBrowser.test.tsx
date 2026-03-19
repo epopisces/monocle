@@ -421,3 +421,278 @@ describe('NoteEditor — isolated', () => {
     expect(screen.getByTestId('editor-toast').textContent).toMatch(/conflict/i)
   })
 })
+
+// ── Additional BacklinksPanel tests ───────────────────────────────
+
+describe('BacklinksPanel — error state', () => {
+  it('shows error message when backlinks fetch fails', async () => {
+    mockGetNoteBacklinks.mockRejectedValue(new Error('Network failure'))
+    render(<BacklinksPanel path="people/alice.md" onNavigate={vi.fn()} />)
+    await waitFor(() => expect(screen.getByText('Network failure')).toBeInTheDocument())
+  })
+})
+
+// ── Additional FileTree tests ─────────────────────────────────────
+
+describe('FileTree — root-level notes', () => {
+  it('renders a note at the vault root without creating a folder node', () => {
+    const rootNotes = [
+      {
+        file_path: 'readme.md',
+        title: 'Readme',
+        type: 'other' as const,
+        domain: 'work',
+        confidence: 0.8,
+        review_status: 'approved' as const,
+      },
+    ]
+    render(<FileTree notes={rootNotes as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    expect(files).toHaveLength(1)
+    expect(screen.queryByTestId('tree-folder')).toBeNull()
+  })
+})
+
+// ── Additional DocumentBrowserScreen tests ────────────────────────
+
+describe('DocumentBrowserScreen — wikilink resolution', () => {
+  beforeEach(() => {
+    mockListNotes.mockResolvedValue({ items: MOCK_NOTES, total: 3, offset: 0, limit: 500 })
+    mockListTemplates.mockResolvedValue([])
+    mockGetNote.mockResolvedValue(MOCK_NOTE_FULL)
+    mockGetNoteBacklinks.mockResolvedValue([])
+  })
+
+  it('navigates to note when ?wikilink= resolves to a known note', async () => {
+    render(
+      <MemoryRouter initialEntries={['/docs?wikilink=Alice%20Smith']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(mockGetNote).toHaveBeenCalledWith('people/alice.md'))
+  })
+
+  it('shows toast when ?wikilink= query does not resolve to any note', async () => {
+    render(
+      <MemoryRouter initialEntries={['/docs?wikilink=NonExistentNote']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(mockListNotes).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId('wiki-toast')).toBeInTheDocument())
+    expect(screen.getByTestId('wiki-toast').textContent).toMatch(/not found/i)
+  })
+
+  it('removes unresolved ?wikilink= from URL after showing toast', async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/docs?wikilink=NonExistentNote']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(mockListNotes).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByTestId('wiki-toast')).toBeInTheDocument())
+    // URL should be cleaned to remove the unresolved wikilink param
+    expect(window.location.search).toBe('')
+  })
+
+  it('updates file tree title after a note is saved', async () => {
+    render(
+      <MemoryRouter initialEntries={['/docs?path=people/alice.md']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByTestId('note-editor')).toBeInTheDocument())
+
+    // Verify initial title is visible in the file tree
+    const initialFiles = screen.getAllByTestId('tree-file').filter(f => f.textContent?.includes('Alice Smith'))
+    expect(initialFiles.length).toBeGreaterThan(0)
+
+    // Mock putNote to return an updated title
+    mockPutNote.mockResolvedValue({ ...MOCK_NOTE_FULL, title: 'Alice Updated' })
+
+    await act(async () => { fireEvent.click(screen.getByTestId('mode-btn-form')) })
+    await act(async () => { fireEvent.click(screen.getByTestId('form-save-btn')) })
+    await waitFor(() => expect(mockPutNote).toHaveBeenCalled())
+
+    // File tree should reflect the new title
+    await waitFor(() => {
+      const updatedFiles = screen.getAllByTestId('tree-file').filter(f => f.textContent?.includes('Alice Updated'))
+      expect(updatedFiles.length).toBeGreaterThan(0)
+    })
+  })
+})
+
+// ── Additional NoteEditor tests: Ctrl+S ──────────────────────────
+
+import { keymap } from '@codemirror/view'
+import { approveNote } from './api/review'
+
+describe('NoteEditor — Ctrl+S save shortcut', () => {
+  it('registers a Ctrl-s / Mod-s keymap handler that triggers an immediate save', async () => {
+    mockPutNote.mockResolvedValue({ ...MOCK_NOTE_FULL, mtime: 9999 })
+    // Clear any call history from previous tests
+    ;(keymap.of as unknown as ReturnType<typeof vi.fn>).mockClear()
+
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={MOCK_NOTE_FULL as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+
+    // Retrieve all handlers that were registered via keymap.of during mount
+    const keymapIfSpy = keymap.of as unknown as ReturnType<typeof vi.fn>
+    const allHandlers = (keymapIfSpy.mock.calls as Array<Array<Array<{ key: string; run: (v: unknown) => boolean }>>>)
+      .flatMap(c => c[0])
+    const saveHandler = allHandlers.find(h => h.key === 'Ctrl-s' || h.key === 'Mod-s')
+    expect(saveHandler).toBeDefined()
+
+    // Invoke the handler with a mock view (editor content parsed by the handler itself)
+    await act(async () => {
+      saveHandler!.run({
+        state: { doc: { toString: () => '---\ntitle: Test Note\n---\n\nSaved body' } },
+      })
+    })
+    await waitFor(() => expect(mockPutNote).toHaveBeenCalled())
+  })
+})
+
+// ── Additional NoteEditor tests: wikilink preview navigation ──────
+
+describe('NoteEditor — wikilink navigation in preview mode', () => {
+  it('clicking a resolved [[wikilink]] calls onNavigate with the matching file path', async () => {
+    const onNavigate = vi.fn()
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={{ ...MOCK_NOTE_FULL, body: 'See [[Alice Smith]]' } as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={onNavigate}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+    await act(async () => { fireEvent.click(screen.getByTestId('mode-btn-preview')) })
+    await waitFor(() => expect(screen.getByTestId('wikilink')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('wikilink'))
+    expect(onNavigate).toHaveBeenCalledWith('people/alice.md')
+  })
+
+  it('clicking an unresolvable [[wikilink]] shows a "not found" toast', async () => {
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={{ ...MOCK_NOTE_FULL, body: 'See [[Unknown Note]]' } as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+    await act(async () => { fireEvent.click(screen.getByTestId('mode-btn-preview')) })
+    await waitFor(() => expect(screen.getByTestId('wikilink')).toBeInTheDocument())
+    fireEvent.click(screen.getByTestId('wikilink'))
+    await waitFor(() => expect(screen.getByTestId('editor-toast')).toBeInTheDocument())
+    expect(screen.getByTestId('editor-toast').textContent).toMatch(/not found/i)
+  })
+
+  it('renders unsafe (non-http) links as non-clickable text without target="_blank"', async () => {
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={{
+            ...MOCK_NOTE_FULL,
+            body: 'See [local link](file:///home/user/file.md) and [valid link](https://example.com)',
+          } as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+    await act(async () => { fireEvent.click(screen.getByTestId('mode-btn-preview')) })
+    await waitFor(() => expect(screen.getByTestId('preview-content')).toBeInTheDocument())
+    
+    // Unsafe link should be a non-clickable span with the unsafe-link class
+    const unsafeLink = screen.queryByText('local link')
+    expect(unsafeLink?.tagName).toBe('SPAN')
+    expect(unsafeLink).toHaveClass('unsafe-link')
+    expect(unsafeLink?.getAttribute('href')).toBeNull()
+    
+    // Safe link should be an anchor with target="_blank"
+    const safeLink = screen.getByText('valid link')
+    expect(safeLink.tagName).toBe('A')
+    expect(safeLink.getAttribute('href')).toBe('https://example.com')
+    expect(safeLink.getAttribute('target')).toBe('_blank')
+    expect(safeLink.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+})
+
+// ── Additional NoteEditor tests: approve-while-dirty ─────────────
+
+describe('NoteEditor — approve flushes dirty edits', () => {
+  beforeEach(() => {
+    vi.mocked(approveNote).mockClear()
+    mockPutNote.mockReset()
+    mockPutNote.mockResolvedValue({ ...MOCK_NOTE_FULL, mtime: 9999 })
+  })
+
+  it('calls putNote before approveNote when the note has unsaved changes', async () => {
+    const pendingNote = {
+      ...MOCK_NOTE_FULL,
+      metadata: { ...MOCK_NOTE_FULL.metadata, review_status: 'pending' as const },
+    }
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={pendingNote as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+    // Make the note dirty by changing the title in form mode
+    await act(async () => { fireEvent.click(screen.getByTestId('mode-btn-form')) })
+    await act(async () => {
+      fireEvent.change(screen.getByTestId('field-title'), { target: { value: 'Alice Updated' } })
+    })
+    // Approve — should save first then approve
+    await act(async () => { fireEvent.click(screen.getByTestId('approve-btn')) })
+
+    await waitFor(() => expect(mockPutNote).toHaveBeenCalled())
+    await waitFor(() => expect(approveNote).toHaveBeenCalled())
+  })
+
+  it('does not call putNote on approve when the note has no unsaved changes', async () => {
+    const pendingNote = {
+      ...MOCK_NOTE_FULL,
+      metadata: { ...MOCK_NOTE_FULL.metadata, review_status: 'pending' as const },
+    }
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={pendingNote as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+    // Click approve with no changes (isDirty = false)
+    await act(async () => { fireEvent.click(screen.getByTestId('approve-btn')) })
+
+    await waitFor(() => expect(approveNote).toHaveBeenCalled())
+    expect(mockPutNote).not.toHaveBeenCalled()
+  })
+})

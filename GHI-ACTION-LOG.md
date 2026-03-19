@@ -4,6 +4,27 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-03-20
+
+### Claude Sonnet 4.6
+- **Fixed chat agent `create_note` tool silently failing:** Root cause was that `NoteMetadata(type=note_type, ...)` threw a Pydantic `ValidationError` when the LLM sent a `note_type` value not in the `NOTE_TYPES` Literal (e.g. `"person"` instead of `"person_note"`). The exception was caught, logged, and re-raised, causing the agent framework to report "Function failed" without creating the file. Additionally improved `exc_info=True` on the exception log for better diagnostics.
+- **Fix:** Removed the intermediate `NoteMetadata` construction from `VaultTools.create_note()` in `monocle/agents/tools.py`. Now passes a plain dict directly to `vault.create_from_template()`, which already handles NoteMetadata validation gracefully with a fallback. This also applies to any other invalid field values the LLM might send.
+- **Testing:** All 687 backend tests pass.
+- **Fixed `create_note` tool "Argument parsing failed" error:** When the LLM sent `tags` as a Python dict-string (e.g. `"{'hobbies': ['Lego', ...]}"`) instead of a flat list, Pydantic's `list[str] | None` validation raised `ValidationError`, causing agent_framework to return `"Error: Argument parsing failed."` before the function body ran — so no note was created.
+- **Fix:** Added `_normalize_tags()` helper in `monocle/agents/tools.py` that normalises any LLM-produced tags format (JSON array string, Python literal dict/list string, comma-separated plain text, actual list or dict) to a flat `list[str]`. Applied via `pydantic.BeforeValidator` on the `tags` parameter so normalisation runs before Pydantic's type validation. Also updated the `note_type` annotation description to include `'person'` as a valid alias.
+- **Testing:** 687 backend tests passed, 6 deselected, EXIT 0.
+
+## 2026-03-19
+
+### GitHub Copilot (Claude Haiku 4.5)
+- **Fixed critical bug in chat agent note creation:** Agent-created notes via `create_note` tool were not being indexed into ChromaDB, causing subsequent searches to fail. Root cause: missing `reindex_queue.push()` call in `VaultTools.create_note()` and `write_note()` methods after vault writes.
+- **Changes made:**
+  - Added `reindex_queue` parameter to `VaultTools.__init__()` in `monocle/agents/tools.py`
+  - Added `reindex_queue.push(note.file_path)` calls in both `create_note()` and `write_note()` tools to trigger immediate re-indexing
+  - Updated `create_chat_agent()` factory in `monocle/agents/__init__.py` to accept and pass through `reindex_queue` parameter
+  - Updated chat router in `monocle/routers/chat.py` to retrieve and pass `reindex_queue` from app.state
+- **Testing:** All 687 backend tests passing, all frontend tests passing
+
 ## 2026-03-14 
 
 ### Claude Sonnet 4.6
@@ -198,6 +219,18 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Created `monocle/tests/test_ai.py`: 27 mock-based unit tests; 3 live integration tests behind `@pytest.mark.integration` (skipped by default)
   - Updated `pyproject.toml`: added `addopts = "-m 'not integration'"` and registered `integration` marker
   - Updated `.vscode/tasks.json`: added `test: ai` task
+
+## 2026-03-20
+
+### Claude Haiku 4.5
+- **Chat Streaming Fixes & Refactoring (post-development testing)**
+  - Diagnosed and fixed async/await issue in OllamaProvider: Ollama AsyncClient.chat() with `stream=True` returns a coroutine that, when awaited, yields an async generator. Updated [ollama_provider.py](monocle/ai/ollama_provider.py#L166) line 166 to add `await`: `response = await self._client.chat(**chat_kwargs)` before `async for chunk in response:`
+  - Fixed test mock in `test_ai.py::TestOllamaProvider::test_chat_stream_returns_async_iterator`: updated to use `AsyncMock(side_effect=_mock_chat_coro)` where `_mock_chat_coro` is a coroutine that returns the async generator, correctly modeling Ollama AsyncClient.chat(stream=True) behavior
+  - Fixed tool call serialization impedance mismatch: Agent Framework serializes tool arguments as JSON strings; Pydantic models expect dicts. Added defensive `_parse_arguments()` helper in adapter layer that safely handles both formats. Updated tool call parsing at three sites to use the helper
+  - Centralized message normalization in adapter layer (`_AIProviderChatClient._normalize_tool_call_arguments()`): converts string-serialized tool call arguments to dicts before ANY provider sees them. Applied normalization in both `_inner_get_response()` and `_inner_get_streaming_response()` before provider dispatch
+  - Removed duplicate `_normalize_messages()` method from `OllamaProvider` after moving logic to adapter (eliminates duplication across OllamaProvider, FoundryLocalProvider, AzureOpenAIProvider)
+  - Updated OllamaProvider `chat()` and `_stream_chat()` methods: removed calls to `self._normalize_messages()`, now uses messaging directly since adapter guarantees normalization
+  - Streaming chat with tool invocation now works end-to-end without validation errors; resolved TypeError in production chat streaming
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **302 passed, 3 deselected** (all tests), EXIT 0
 
 ---
@@ -462,6 +495,22 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - `npx tsc --noEmit` → EXIT 0 (no type errors)
   - Updated `docs/build-plan.md`: M15 deliverables `[x]`; M16 deliverables `[x]`; Active Milestone → M17; M16 → COMPLETE in tracker
 
+### Claude Haiku 4.5
+- **Fixed double-click and timer issues in graph interaction**
+  - Fixed double-click node detection: added `lastClickedNodeIdRef` to track which node was clicked; only triggers double-click when same node is clicked twice within 250ms (prevents cross-node false positives when rapidly clicking different nodes)
+  - Fixed stale timer on graph reload: `loadGraph()` now clears pending click timers before reloading graph (prevents orphaned timers from re-selecting stale nodes after graph data changes via depth/filter/focus modifications)
+  - Improved type safety in `handleNodeDragEnd()`: refactored from spread operator to `Object.assign` for better TypeScript index signature inference
+  - Updated [GraphScreen.tsx](frontend/src/components/Graph/GraphScreen.tsx#L103) with `lastClickedNodeIdRef`, [handleNodeClick](frontend/src/components/Graph/GraphScreen.tsx#L248-L270) with paired timer+node-ID check, and [loadGraph](frontend/src/components/Graph/GraphScreen.tsx#L126-L135) with timer cleanup
+  - `npx tsc --noEmit` → EXIT 0 (TypeScript clean after type assertion fix)
+  - `npm run test -- --run` → **185 passed** (Graph tests cover new click/drag scenarios), EXIT 0
+
+- **Fixed unsafe link rendering UX in Markdown preview**
+  - **Issue:** Unsafe (non-http(s)) links were rewritten to `href="#"` but still rendered with `target="_blank"`, causing clicks to open a new tab to the current page (confusing UX)
+  - **Solution:** Modified [NoteEditor.tsx](frontend/src/components/DocumentBrowser/NoteEditor.tsx#L362) `a` component renderer to only set `target="_blank" rel="noopener noreferrer"` when href is actually a valid http(s) URL; unsafe links now render as non-clickable `<span>` elements with `.unsafe-link` class
+  - **Styling:** Added `.note-editor__preview .unsafe-link` to [NoteEditor.css](frontend/src/components/DocumentBrowser/NoteEditor.css#L177) — disabled appearance (grayed out, strikethrough) with `cursor: not-allowed`
+  - **Test:** Added test case `renders unsafe (non-http) links as non-clickable text without target="_blank"` to [DocumentBrowser.test.tsx](frontend/src/DocumentBrowser.test.tsx#L596) — verifies `file://` links render as spans (no href attribute) while `https://` links remain clickable anchors with `target="_blank"`
+  - `npx tsc --noEmit` → EXIT 0 (no type errors)
+
 ## 2026-03-20
 
 ### Claude Sonnet 4.6
@@ -482,4 +531,29 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - `npm run test -- --run` → **113 passed (7 files, 51 new tests), EXIT 0**
   - `npx tsc --noEmit` → **CLEAN (exit 0)**
   - Updated `docs/build-plan.md`: M17 → COMPLETE; Active Milestone → M18; tracker row updated; session notes added
+
+- **Executed M18 — Graph UI (COMPLETE)**
+  - Created `frontend/src/components/Graph/GraphScreen.tsx`: ForceGraph2D force-directed graph with focus input + autocomplete (`listNotes({limit:500})`), depth toggle [1][2][3] (updates `max_degree`, re-fetches), type filter chips [Person/Note/Tag] (`buildTypesParam` maps chip state → `types=` query param; all active → no filter; none active → `'__empty__'` sentinel), Reset View button, degree-based visual encoding (`getNodeColor` → `rgba` with opacity `max(0.2, 1.0 - degree * 0.25)`; `getNodeSize` → `max(3, 15 * 0.85^degree)`), node click → side panel with top-5 related notes sorted by edge weight, double-click → `/docs?path=...` navigation using 250ms timer disambiguation, drag-end → node positions persisted to `localStorage` (`monocle.graph.positions`)
+  - Created `frontend/src/components/Graph/GraphScreen.css`: full screen styles using design tokens (graph-specific color vars: `--graph-person`, `--graph-topic`, `--graph-edge`)
+  - Created `frontend/src/Graph.test.tsx`: 31 tests across Layout (7) / Graph fetch (7) / Depth toggle (2) / Type filter chips (4) / Focus input (3) / Reset view (1) / Side panel (5) / Node positions (1) describe blocks; `react-force-graph` mocked as DOM proxy rendering node buttons; fake timers for 250ms click disambiguation
+  - Updated `frontend/src/App.tsx`: replaced `GraphScreen` placeholder with real import; updated placeholder comment from M18–M20 → M19–M20
+  - Updated `frontend/src/test-setup.ts`: added `window.ResizeObserver` stub (implements full DOM interface with typed constructor) — prevents `ResizeObserver is not defined` error in jsdom
+  - Updated `frontend/src/App.test.tsx`: added `vi.mock('react-force-graph', ...)` + `vi.mock('./api/graph', ...)` + `vi.mock('./api/notes', ...)` — prevents `AFRAME is not defined` crash from aframe-extras bundled inside react-force-graph
+  - `npm run test -- --run` → **145 passed (8 files, 32 new tests), EXIT 0**
+  - `npx tsc --noEmit` → **CLEAN (exit 0)**
+  - Updated `docs/build-plan.md`: M18 → COMPLETE; Active Milestone → M19; tracker row updated
+
+- **M17/M18 post-review hardening — 7 source fixes + 72 new tests (185 total, up from 113)**
+  - **Security (XSS)**: `NoteEditor.tsx` ReactMarkdown `a` renderer now sanitizes `href` — filters to `https?://` or replaces with `'#'`; adds `target="_blank" rel="noopener noreferrer"`
+  - **Security**: `GraphScreen.tsx` `loadPositions()` validates deserialized JSON shape — rejects entries where `x` or `y` is not a number
+  - **Bug**: `NoteEditor.tsx` `handleApprove` now flushes dirty edits before approving — `saveNote` returns `Promise<boolean>`; approve returns early on save failure
+  - **Bug**: `GraphScreen.tsx` `handleTypeToggle` guard — when all chips are deactivated, sets empty graph locally instead of making API call with `__empty__` sentinel; also added comment to document the sentinel's purpose
+  - **Bug**: `DocumentBrowserScreen.tsx` — wikilink no-match now shows a 4-second toast (`data-testid="wiki-toast"`) with "Note not found: …"
+  - **Bug**: `SearchScreen.tsx` — `approvedPaths` state tracks approved file paths; Approve button hidden (`{!approvedPaths.has(r.file_path) && ...}`) after successful approval
+  - **Bug**: `yamlUtils.ts` — string quoting regex now includes `!` (`/[:#\[\]{},|>&*'"?!]/`) to prevent unquoted YAML tags
+  - **New file `frontend/src/utils/yamlUtils.test.ts`** (25 tests): scalar serialization, string quoting rules (including `!`), arrays, round-trip `buildRawDoc → splitFrontmatter → parseFrontmatter`, edge cases
+  - **`DocumentBrowser.test.tsx`** — 11 new tests: BacklinksPanel error state, FileTree root-level notes, DocumentBrowserScreen wikilink resolve/no-match/handleSaved, NoteEditor Ctrl+S shortcut, NoteEditor wikilink preview navigation, NoteEditor approve-flushes-dirty
+  - **`Graph.test.tsx`** — 4 new tests: invalid localStorage positions (non-object, non-numeric coords), drag persistence to localStorage, double-click navigation via `useNavigate`; mock infrastructure added (`mockNavigate`, `vi.mock('react-router-dom')`, ForceGraph2D `onNodeDragEnd` prop exposed)
+  - **`Search.test.tsx`** — 1 new test: approve button disappears after successful approval (verifies `approvedPaths` conditional render)
+  - `npm run test -- --run` → **185 passed (9 files, 40 new tests), EXIT 0**
 

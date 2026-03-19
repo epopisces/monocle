@@ -158,13 +158,13 @@ class OllamaProvider(AIProvider):
             provider=self._provider_name,
             model=self._chat_model,
         ):
-            # ollama.AsyncClient.chat() with stream=True is an async generator;
-            # it must NOT be awaited — iterate directly.
+            # ollama.AsyncClient.chat() with stream=True returns a coroutine yielding an async generator.
             chat_kwargs: dict = {"model": self._chat_model, "messages": messages, "stream": True}
             if tools:
                 chat_kwargs["tools"] = tools
             tool_calls_buf: list = []
-            async for chunk in self._client.chat(**chat_kwargs):
+            response = await self._client.chat(**chat_kwargs)
+            async for chunk in response:
                 content = chunk.message.content
                 if content:
                     yield content
@@ -181,9 +181,9 @@ class OllamaProvider(AIProvider):
                             "function": {
                                 "name": tc.function.name,
                                 "arguments": (
-                                    json.dumps(dict(tc.function.arguments))
+                                    dict(tc.function.arguments)
                                     if hasattr(tc.function.arguments, "items")
-                                    else tc.function.arguments or "{}"
+                                    else json.loads(tc.function.arguments or "{}")
                                 ),
                             },
                         }

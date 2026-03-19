@@ -6,9 +6,9 @@ import SettingsModal from './components/SettingsModal'
 import ChatScreen from './components/Chat/ChatScreen'
 import DocumentBrowserScreen from './components/DocumentBrowser/DocumentBrowserScreen'
 import SearchScreen from './components/Search/SearchScreen'
+import GraphScreen from './components/Graph/GraphScreen'
 
-/* Placeholder screen components — replaced in M18–M20 */
-const GraphScreen = () => <div className="screen-placeholder">◉ Graph — coming in M18</div>
+/* Placeholder screen components — replaced in M19–M20 */
 const StatsScreen = () => <div className="screen-placeholder">📊 Stats — coming in M20</div>
 
 function App() {

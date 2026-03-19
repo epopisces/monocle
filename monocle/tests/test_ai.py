@@ -163,11 +163,18 @@ class TestOllamaProvider:
     async def test_chat_stream_returns_async_iterator(self):
         mock_client = AsyncMock()
 
-        async def _fake_stream(*args, **kwargs):
+        # Create the async generator directly
+        async def _stream_gen():
             for token in ["Hello", " world", "!"]:
                 yield MagicMock(message=MagicMock(content=token))
 
-        mock_client.chat = _fake_stream
+        # Wrap in a coroutine that returns the generator
+        # This models Ollama AsyncClient.chat(stream=True) behavior
+        async def _mock_chat_coro(*args, **kwargs):
+            return _stream_gen()
+
+        # Set the mock's return value to the coroutine function result
+        mock_client.chat = AsyncMock(side_effect=_mock_chat_coro)
         provider = self._make_provider(mock_client)
 
         result = await provider.chat(

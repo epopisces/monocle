@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import React, { useRef, useState, forwardRef } from 'react'
 import './ChatInput.css'
 
 interface Props {
@@ -7,9 +7,34 @@ interface Props {
   disabled?: boolean
 }
 
-export default function ChatInput({ onSend, onVoiceClick, disabled }: Props) {
+export interface ChatInputHandle {
+  populate: (text: string) => void
+  focus: () => void
+}
+
+const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, disabled }, ref) => {
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Expose methods for parent to populate the input
+  React.useImperativeHandle(ref, () => ({
+    populate: (text: string) => {
+      setValue(text)
+      // Focus and position cursor at end
+      setTimeout(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus()
+          textareaRef.current.setSelectionRange(text.length, text.length)
+          // Adjust height
+          textareaRef.current.style.height = 'auto'
+          textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 144)}px`
+        }
+      }, 0)
+    },
+    focus: () => {
+      textareaRef.current?.focus()
+    },
+  }), [])
 
   const doSend = () => {
     const trimmed = value.trim()
@@ -76,4 +101,7 @@ export default function ChatInput({ onSend, onVoiceClick, disabled }: Props) {
       </div>
     </div>
   )
-}
+})
+
+ChatInput.displayName = 'ChatInput'
+export default ChatInput
