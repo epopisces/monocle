@@ -40,8 +40,8 @@ export default function BacklinksPanel({ path, onNavigate }: BacklinksPanelProps
       )}
       {!loading && backlinks.length > 0 && (
         <ul className="backlinks-panel__list" data-testid="backlinks-list">
-          {backlinks.map((bl, i) => (
-            <li key={i} className="backlinks-panel__item">
+          {backlinks.map((bl) => (
+            <li key={`${bl.source}|${bl.relation || ''}`} className="backlinks-panel__item">
               {/* eslint-disable-next-line jsx-a11y/no-static-element-interactions */}
               <div
                 className="backlinks-panel__link"

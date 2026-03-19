@@ -242,20 +242,26 @@ describe('DocumentBrowserScreen', () => {
     await waitFor(() => expect(mockGetNote).toHaveBeenCalledWith('people/alice.md'))
     await waitFor(() => expect(screen.getByTestId('note-editor')).toBeInTheDocument())
   })
-})
 
-describe('NoteEditor', () => {
-  it('shows mode toggle buttons', async () => {
+  it('shows error state when listNotes fails', async () => {
+    mockListNotes.mockRejectedValue(new Error('API error'))
     render(
-      <MemoryRouter>
+      <MemoryRouter initialEntries={['/docs']}>
         <DocumentBrowserScreen />
       </MemoryRouter>,
     )
-    // Load a note
-    mockListNotes.mockResolvedValue({ items: MOCK_NOTES, total: 3 })
-    mockGetNote.mockResolvedValue(MOCK_NOTE_FULL)
-    mockGetNoteBacklinks.mockResolvedValue([])
-    mockListTemplates.mockResolvedValue([])
+    await waitFor(() => expect(screen.getByTestId('notes-list-error')).toBeInTheDocument())
+    expect(screen.getByText(/Failed to load vault/)).toBeInTheDocument()
+  })
+
+  it('shows loading state initially when fetching notes', async () => {
+    mockListNotes.mockReturnValue(new Promise(() => {})) // never resolves
+    render(
+      <MemoryRouter initialEntries={['/docs']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+    await waitFor(() => expect(screen.getByText('Loading notes…')).toBeInTheDocument())
   })
 })
 

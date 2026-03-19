@@ -91,9 +91,18 @@ export default function NoteEditor({
 
   const debouncedSave = useDebouncedCallback(saveNote, 2000)
 
+  // Cancel any pending debounced saves on unmount
+  useEffect(() => {
+    return () => {
+      debouncedSave.cancel()
+    }
+  }, [debouncedSave])
+
   // ── Re-sync localNote when the note prop changes (new note selected) ──
 
   useEffect(() => {
+    // Cancel any pending auto-save from the previous note
+    debouncedSave.cancel()
     setLocalNote(note)
     setIsDirty(false)
     setMode('yaml')
@@ -107,7 +116,7 @@ export default function NoteEditor({
       })
       externalUpdateRef.current = false
     }
-  }, [note, computeRaw])
+  }, [note, computeRaw, debouncedSave])
 
   // ── CodeMirror setup ──────────────────────────────────────────
 
@@ -122,10 +131,10 @@ export default function NoteEditor({
         // Parse raw doc back to note
         const { frontmatter, body } = splitFrontmatter(newText)
         const parsedMeta = parseFrontmatter(frontmatter)
-        const title = typeof parsedMeta.title === 'string' ? parsedMeta.title : note.title
         const { title: _t, ...metaWithoutTitle } = parsedMeta
 
         setLocalNote(prev => {
+          const title = typeof parsedMeta.title === 'string' ? parsedMeta.title : prev.title
           const updated: Note = {
             ...prev,
             title,
@@ -156,13 +165,14 @@ export default function NoteEditor({
             {
               key: saveKey,
               run: (_v) => {
-                // Immediate save — read current doc
+                // Immediate save — cancel any pending debounced save first
+                debouncedSave.cancel()
                 const text = _v.state.doc.toString()
                 const { frontmatter, body } = splitFrontmatter(text)
                 const parsedMeta = parseFrontmatter(frontmatter)
-                const title = typeof parsedMeta.title === 'string' ? parsedMeta.title : note.title
                 const { title: _title, ...metaWithoutTitle } = parsedMeta
                 setLocalNote(prev => {
+                  const title = typeof parsedMeta.title === 'string' ? parsedMeta.title : prev.title
                   const updated: Note = {
                     ...prev,
                     title,
@@ -200,6 +210,8 @@ export default function NoteEditor({
 
   const handleApprove = async () => {
     try {
+      // Cancel any pending debounced save before approving
+      debouncedSave.cancel()
       await approveNote(localNote.file_path)
       const updated: Note = {
         ...localNote,
@@ -242,6 +254,8 @@ export default function NoteEditor({
   // ── Form mode save ─────────────────────────────────────────────
 
   const handleFormSave = () => {
+    // Cancel any pending debounced save
+    debouncedSave.cancel()
     saveNote(localNote)
   }
 
@@ -296,7 +310,10 @@ export default function NoteEditor({
           {isDirty && !isSaving && (
             <button
               className="note-editor__save-now-btn"
-              onClick={() => saveNote(localNote)}
+              onClick={() => {
+                debouncedSave.cancel()
+                saveNote(localNote)
+              }}
               data-testid="save-now-btn"
             >
               Save

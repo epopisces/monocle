@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   semanticSearch,
@@ -21,11 +21,25 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const showToast = (msg: string) => {
+    // Clear any pending toast timer
+    if (toastTimerRef.current !== undefined) {
+      clearTimeout(toastTimerRef.current)
+    }
     setToast(msg)
-    setTimeout(() => setToast(null), 4000)
+    toastTimerRef.current = setTimeout(() => setToast(null), 4000)
   }
+
+  // Clean up toast timer on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current !== undefined) {
+        clearTimeout(toastTimerRef.current)
+      }
+    }
+  }, [])
 
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault()
@@ -189,8 +203,8 @@ export default function SearchScreen() {
 
         {/* Keyword results */}
         {mode === 'keyword' &&
-          keywordResults.map((r, i) => (
-            <div key={i} className="search-result-card" data-testid="search-result">
+          keywordResults.map((r) => (
+            <div key={r.file_path} className="search-result-card" data-testid="search-result">
               <div className="search-result-card__header">
                 <span className="search-result-card__title">{r.title}</span>
                 <span className="search-result-card__path">{r.file_path}</span>

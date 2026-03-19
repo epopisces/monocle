@@ -17,11 +17,29 @@ export default function DocumentBrowserScreen() {
   const [openNote, setOpenNote] = useState<Note | null>(null)
   const [loadingNote, setLoadingNote] = useState(false)
   const [noteError, setNoteError] = useState<string | null>(null)
+  const [loadingNotes, setLoadingNotes] = useState(true)
+  const [notesError, setNotesError] = useState<string | null>(null)
 
   // Load note list + templates on mount
   useEffect(() => {
-    listNotes({ limit: 500 }).then(page => setNotes(page.items)).catch(() => {})
-    listTemplates().then(schemata => setTemplates(schemata as unknown as TemplateSchema[])).catch(() => {})
+    setLoadingNotes(true)
+    setNotesError(null)
+    listNotes({ limit: 500 })
+      .then(page => setNotes(page.items))
+      .catch(err => {
+        const errorMsg = String(err?.message ?? 'Failed to load notes')
+        console.error('[DocumentBrowser] listNotes error:', err)
+        setNotesError(errorMsg)
+        setNotes([])
+      })
+      .finally(() => setLoadingNotes(false))
+
+    listTemplates()
+      .then(schemata => setTemplates(schemata as unknown as TemplateSchema[]))
+      .catch(err => {
+        console.error('[DocumentBrowser] listTemplates error:', err)
+        setTemplates([])
+      })
   }, [])
 
   // If URL has ?path= or ?wikilink=, resolve them
@@ -98,11 +116,32 @@ export default function DocumentBrowserScreen() {
         <div className="doc-browser__sidebar-header">
           <span className="doc-browser__sidebar-title">Vault</span>
         </div>
-        <FileTree
-          notes={notes}
-          selectedPath={selectedPath}
-          onSelect={handleSelectNote}
-        />
+        {loadingNotes && (
+          <div style={{ padding: '1rem', fontSize: '0.875rem', color: '#aaa' }}>
+            Loading notes…
+          </div>
+        )}
+        {notesError && (
+          <div
+            data-testid="notes-list-error"
+            style={{
+              padding: '1rem',
+              fontSize: '0.875rem',
+              color: '#ff6b6b',
+              borderTop: '1px solid #444',
+            }}
+          >
+            <p style={{ margin: '0 0 0.5rem 0', fontWeight: 500 }}>Failed to load vault</p>
+            <p style={{ margin: 0, fontSize: '0.8125rem', opacity: 0.9 }}>{notesError}</p>
+          </div>
+        )}
+        {!loadingNotes && !notesError && (
+          <FileTree
+            notes={notes}
+            selectedPath={selectedPath}
+            onSelect={handleSelectNote}
+          />
+        )}
       </aside>
 
       {/* ── Right: editor + backlinks ─────────────────────── */}
