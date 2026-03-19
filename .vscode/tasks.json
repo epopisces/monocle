@@ -159,6 +159,38 @@
       "problemMatcher": []
     },
     {
+      "label": "cli: reindex",
+      "type": "shell",
+      "command": "uv run python -m monocle reindex",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "cli: reindex --force",
+      "type": "shell",
+      "command": "uv run python -m monocle reindex --force",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "cli: stats",
+      "type": "shell",
+      "command": "uv run python -m monocle stats",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "cli: export",
+      "type": "shell",
+      "command": "uv run python -m monocle export --output ./export.zip",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
       // Start a local whisper.cpp HTTP server for transcription.
       // Prerequisites and usage: see scripts/start_whisper_server.py
       // Override binary/model paths via WHISPER_CPP_SERVER / WHISPER_CPP_MODEL env vars.
