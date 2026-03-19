@@ -252,3 +252,103 @@ def api_client(tmp_path: Path, mock_ai):
         test_app = create_app()
         with TestClient(test_app, raise_server_exceptions=False) as client:
             yield client
+
+
+# ---------------------------------------------------------------------------
+# Fixture: live_server  (session-scoped; used by integration tests + Playwright)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="session")
+def live_server(tmp_path_factory):
+    """Start a real Monocle server on a random available port.
+
+    Polls ``GET /api/health`` until the server reports ``ready`` (or
+    ``degraded``) — times out after 15 seconds.
+
+    Yields
+    ------
+    str
+        Base URL of the running server, e.g. ``http://127.0.0.1:54321``.
+
+    Cleanup
+    -------
+    Sends SIGINT (Ctrl-C equivalent) and waits up to 5 seconds for the process
+    to exit cleanly.  On Windows, ``subprocess.terminate()`` is used instead
+    because SIGINT is not available for subprocesses.
+    """
+    import signal
+    import socket
+    import subprocess
+    import sys
+    import time
+
+    import httpx
+
+    # Pick a random available port
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        port = s.getsockname()[1]
+
+    base_url = f"http://127.0.0.1:{port}"
+
+    # Start the server in a subprocess.  Use a temp vault so tests are isolated.
+    vault_dir = tmp_path_factory.mktemp("live_vault")
+    (vault_dir / "inbox").mkdir(exist_ok=True)
+
+    env = os.environ.copy()
+    env["MONOCLE_DEV"] = "false"
+    env["MONOCLE_VAULT_PATH"] = str(vault_dir)
+    env["MONOCLE_VAULT_INBOX_PATH"] = str(vault_dir / "inbox")
+    env["MONOCLE_TELEMETRY_ENABLED"] = "false"  # avoid gRPC noise when AI Toolkit isn't running
+
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "monocle.main:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    deadline = time.monotonic() + 15.0
+    ready = False
+    while time.monotonic() < deadline:
+        try:
+            resp = httpx.get(f"{base_url}/api/health", timeout=1.0)
+            status = resp.json().get("status", "")
+            if status in ("ready", "degraded"):
+                ready = True
+                break
+        except Exception:
+            pass
+        time.sleep(0.25)
+
+    if not ready:
+        proc.terminate()
+        out, err = proc.communicate(timeout=5)
+        pytest.fail(
+            f"live_server did not become ready within 15s on port {port}.\n"
+            f"stdout: {out.decode()[-2000:]}\nstderr: {err.decode()[-2000:]}"
+        )
+
+    yield base_url
+
+    # Graceful shutdown
+    if sys.platform == "win32":
+        proc.terminate()
+    else:
+        proc.send_signal(signal.SIGINT)
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()

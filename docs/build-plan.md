@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M14 — CLI Commands
-**Last Completed:** M13 — Settings & Review API (2026-03-18)
+**Active Milestone:** M15 — Frontend Scaffold & Typed API Wrappers
+**Last Completed:** M14 — CLI Commands (2026-03-18)
 **Blocked By:** None
 **Session Notes (M13 — Settings & Review API):** M13 fully executed + post-review hardened. `monocle/config.py`: `save_config_patch(patch: dict)` function — deep-merges allowed sections (`ai`, `vault`, `index`, `agents`, `review`, `server`, `telemetry`, `ui`) into `config.yaml` atomically via mkstemp+os.replace; respects `MONOCLE_CONFIG` env var. `monocle/index/base.py`: `patch_file_metadata(file_path, updates)` abstract method added. `monocle/index/chroma.py`: `patch_file_metadata` implementation uses `collection.get(where=file_path_filter)` + `collection.update()` with scalar-only metadata merge. `monocle/index/memory.py`: `patch_file_metadata` implementation updates `chunk.metadata` dict in-place. `monocle/routers/settings.py`: `GET /api/settings` returns all settings sections + `mcp_key_last4` (masked); `PATCH /api/settings` accepts `{review: ..., ai: ...}` partial patch — `AIPatch.provider` and `AIPatch.transcribe_backend` typed as `Literal` (invalid values → 422); `ReviewPatch` fields have `ge`/`le` range guards (out-of-range → 422); writes to config.yaml via `save_config_patch`, hot-reloads `AIProvider` when `ai.provider` changes; rate-limited 30/min; `POST /api/settings/rotate-mcp-key` generates `secrets.token_hex(32)`, writes to `.env` atomically, updates `os.environ`, rate-limited 10/min; `_write_env_key` strips newlines from value. `monocle/routers/review.py`: `GET /api/review` warms `app.state._review_pending_count` cache as side-effect; `GET /api/review/count` returns O(1) from cache when warm, falls back to vault scan; `PATCH /api/review/{path}/approve` rate-limited 60/min, decrements count cache; `POST /api/review/approve-all` parallelized via `asyncio.gather` + `asyncio.Semaphore(10)`, rate-limited 30/min, sets cache to remainder. `app.state._review_pending_count` initialized `None` in lifespan and in `_reindex_file` callback; `notes.py` PUT/PATCH/DELETE and `ingest.py` POST/stream also invalate cache on vault write. `monocle/tests/test_settings.py`: 28 tests (was 19); added `TestInputValidation` (9 tests: Literal constraints, range validators), `TestAIProviderHotReload` (2 tests: hot-reload triggered, not triggered), `TestRotateMcpKey.test_rotate_replaces_old_key_in_os_environ`. `monocle/tests/test_review.py`: 34 tests (was 25); added `test_approve_all_sets_all_approval_fields`, `test_approve_all_partial_failure_count`, `TestPendingCountCache` (3 tests), `TestPaginationEdgeCases` (1 test). `monocle/tests/test_security.py`: added `test_approve_path_traversal_blocked`, `test_approve_absolute_path_blocked`. **644 tests passing (18 new post-review), 6 deselected, EXIT 0.**
 **Session Notes (M12 — MCP Server):** M12 fully executed. `monocle/mcp_server.py`: `FastMCP("monocle", stateless_http=True)` + 8 tools (`search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`); `_MCPState` singleton (instance attrs, `assert_ready()`, `reindex_queue` field) populated via `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue)`; `_MCPAuthMiddleware` ASGI wrapper validates `x-monocle-key` header or `?key=` query param using `hmac.compare_digest` (constant-time); logs WARNING when `?key=` path is taken; returns HTTP 401 JSON if missing or invalid; `create_mcp_app(mcp_key)` → `_MCPAuthMiddleware`; MCP key loaded from env at `create_app()` time. `capture_thought` forwards `source` param to `IngestPipeline`. `create_note`/`update_note` push to `reindex_queue` after write; `update_note` sets `metadata.updated = datetime.now(utc)`. `get_stats` paginates via `_fetch_all_refs()` (500-note batches). `monocle/main.py`: `init_mcp_state(...)` called in lifespan with `reindex_queue=reindex_queue`; `create_mcp_app(mcp_key)` mounted at `/mcp`. `monocle/tests/test_mcp.py`: 40 tests across 4 classes — `TestMCPAuth` (6), `TestMCPTools` (26), `TestMCPSecurityBoundaries` (5), `TestMCPServerConfig` (3). SPIKE-2 outcome recorded. **589 tests passing (40 MCP), 6 deselected, EXIT 0.**
@@ -112,7 +112,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M11 | Scheduled Agents | COMPLETE |
 | M12 | MCP Server | COMPLETE |
 | M13 | Settings & Review API | COMPLETE |
-| M14 | CLI Commands | NOT STARTED |
+| M14 | CLI Commands | COMPLETE |
 | M15 | Frontend Scaffold & Typed API Wrappers | NOT STARTED |
 | M16 | Chat UI | NOT STARTED |
 | M17 | Document Browser & Search UI | NOT STARTED |
@@ -530,46 +530,11 @@ tests/e2e/            Playwright tests (require running server)
 
 ### M14: CLI Commands
 
-**Goal:** Core CLI commands operational via `python -m monocle`, including the unified local dev runner and shared live-server test harness needed before M22.
+**Status:** COMPLETE (2026-03-18)
 
-**Deliverables:**
-- [ ] `monocle/cli.py` — Typer app:
-  - `serve` — start uvicorn with host/port from config
-  - `reindex [--force]` — calls `ReindexAgent.run(force=...)`; `--force` clears existing index first
-  - `pull-models` — download configured AI models via Ollama
-  - `stats` — print vault stats to stdout
-  - `search <query>` — semantic search, pretty-print results
-  - `export [--output <path>]` — zip vault contents (excluding `.versions/`, `.trash/`, `data/`)
-  - `versions list <file_path>` — list stored versions
-  - `versions restore <file_path> <timestamp>` — restore a version
-  - `dev` — starts the unified FastAPI + watcher + scheduler process with prefixed logging; on startup prints a telemetry status block: OTLP endpoint (or `disabled`), log level, log format
-  - `watch` / `capture` — reserved stubs for future optional process separation
-- [ ] `monocle/__main__.py` — `python -m monocle` entry point connecting to `cli.py`
-- [ ] `monocle/tests/conftest.py` — add `live_server` session-scoped fixture:
-  - Starts a single unified process on a random available port
-  - Polls `GET /api/health` until ready/indexed (timeout: 15s)
-  - Stores the base URL (`http://127.0.0.1:{port}`) for integration tests and Playwright
-  - `yield`-based teardown sends Ctrl+C and waits up to 5s for clean shutdown
-- [ ] `monocle/tests/test_dev_mode.py` — assert unified dev startup, clean shutdown, and watcher/scheduler startup
-- [ ] `monocle/tests/test_cli.py` — using `typer.testing.CliRunner`
-- [ ] Extend `.vscode/tasks.json`:
-  - `cli: reindex` — `python -m monocle reindex`
-  - `cli: reindex --force` — `python -m monocle reindex --force`
-  - `cli: stats` — `python -m monocle stats`
-  - `cli: export` — `python -m monocle export --output ./export.zip`
-- [ ] Extend `.vscode/launch.json`:
-  - `CLI: Reindex (debug)` — debugpy launch of `python -m monocle reindex`; useful for stepping through index logic interactively
+**Summary:** Full Typer CLI with 9 commands (`serve`, `dev`, `reindex`, `pull-models`, `stats`, `search`, `export`, `versions list/restore`, plus `watch`/`capture` stubs). `dev` prints `[TELEMETRY]` block before uvicorn. `live_server` session fixture added to conftest.py. 21 new CLI tests + test_dev_mode.py. `.vscode/tasks.json` + `launch.json` extended.
 
-**Acceptance Criteria:**
-- [ ] `python -m monocle --help` shows all commands (including stubbed dev/watch/capture)
-- [ ] `python -m monocle reindex --force` completes without error (using `MemoryIndex`)
-- [ ] `python -m monocle export --output /tmp/export.zip` creates a valid zip
-- [ ] `python -m monocle versions list <path>` lists stored version timestamps
-- [ ] `python -m monocle dev` starts a single unified process and shuts down cleanly on Ctrl+C
-- [ ] `python -m monocle dev` prints a telemetry block on startup, e.g. `[TELEMETRY] OTLP endpoint: http://localhost:4317 | log_level: DEBUG | format: text`
-- [ ] `live_server` fixture is available for integration tests and Playwright before M22 begins
-- [ ] `CLI: Reindex (debug)` launch config runs `reindex` with the debugger attached
-- [ ] `uv run python -m pytest monocle/tests/test_cli.py -x --tb=short -q` passes
+**Full details:** [docs/milestones.md#m14-cli-commands](milestones.md#m14-cli-commands)
 
 ---
 

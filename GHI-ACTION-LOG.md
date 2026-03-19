@@ -428,4 +428,25 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - New cache invalidation added to `notes.py` (PUT/PATCH/DELETE) and `ingest.py` (both endpoints) so any vault write within the same request context invalidates the count before returning
   - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **644 passed (18 new), 6 deselected**, EXIT 0
 
+- **Executed M14 — CLI Commands (COMPLETE)**
+  - Rewrote `monocle/cli.py` (~85-line stub → ~330-line full implementation): `serve` (uvicorn launch), `dev` (prints `[TELEMETRY]` block before uvicorn), `reindex` (asyncio.run → `ReindexAgent.run()` with embed_fn fallback), `pull-models` (Ollama model list + pull), `stats` (GET /api/stats via httpx), `search` (GET /api/search via httpx, table output), `export` (zip vault excluding `.versions`/`.trash`), `versions list/restore` (VaultLayer delegates via `versions_app = typer.Typer()` sub-app), `watch`/`capture` (reserved stubs with explanatory echo)
+  - Added `live_server` session-scoped fixture to `monocle/tests/conftest.py`: spawns uvicorn subprocess on a free port, polls `/api/health` (15s timeout), yields base URL, tears down via SIGINT → wait 5s → kill
+  - Created `monocle/tests/test_cli.py`: 21 tests, 8 classes — `TestHelp`, `TestReindex`, `TestExport`, `TestVersionsList`, `TestVersionsRestore`, `TestStats`, `TestPullModels`, `TestStubs`, `TestDevTelemetryBlock`; uses `typer.testing.CliRunner` (no `mix_stderr` arg); `os.environ["MONOCLE_DEV"]` leakage from CliRunner fixed with `patch.dict(os.environ)` + `monkeypatch.delenv("MONOCLE_DEV", raising=False)`
+  - Created `monocle/tests/test_dev_mode.py`: 7 tests, 3 classes — `TestUnifiedDevStartup` (health, endpoints, clean shutdown), `TestWatcherAndSchedulerStartup` (watcher_running field, scheduler no crash), `TestDevTelemetryBlock` (real subprocess run, asserts `[TELEMETRY]` in stdout)
+  - Added 4 tasks to `.vscode/tasks.json`: `cli: reindex`, `cli: reindex --force`, `cli: stats`, `cli: export`
+  - Added `CLI: Reindex (debug)` launch config to `.vscode/launch.json`
+  - Updated `docs/build-plan.md`: M14 → COMPLETE in tracker; active milestone → M15; M14 section condensed to 4-line completion summary
+  - Updated `docs/milestones.md`: M14 full implementation details archived
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **675 passed (21 new), 6 deselected**, EXIT 0
+
+- **M14 post-implementation code review — 7 issues resolved**
+  - **Bug (High): `asyncio.get_event_loop()` in thread** — `embed_fn` closure in `reindex` CLI called `asyncio.get_event_loop().run_until_complete()`, which raises `RuntimeError` in thread-pool threads on Python 3.10+ (and confirmed 3.14). The error was silently swallowed, producing empty embeddings; with ChromaDB this causes a dimension-mismatch + silent chunk deletion. Fixed to `asyncio.run()` (`monocle/cli.py`)
+  - **Bug (Medium): zip arcnames use OS path separator** — `Path.relative_to()` on Windows returns backslash paths; zip arcnames now forced to forward slashes via `.replace(os.sep, "/")` (`monocle/cli.py`)
+  - **Weak test assertion** — `test_list_invalid_path_exits_nonzero` accepted `"No versions" in result.output` as a passing path for traversal attempts; assertion tightened to require `exit_code != 0` only (`monocle/tests/test_cli.py`)
+  - **Missing traversal test** — added `test_restore_path_traversal_blocked` to `TestVersionsRestore` (`monocle/tests/test_cli.py`)
+  - **TestSearch added (4 tests)** — `test_search_returns_results`, `test_search_empty_results`, `test_search_ai_failure_exits_nonzero`, `test_search_limit_passed_to_index` (`monocle/tests/test_cli.py`)
+  - **TestReindex embed_fn test** — `test_reindex_with_ai_provider` patches `monocle.ai.get_provider` (correct import intercept target) and asserts `embed.assert_called()` (`monocle/tests/test_cli.py`)
+  - **live_server fixture telemetry noise** — added `MONOCLE_TELEMETRY_ENABLED=false` env var to session-scoped `live_server` fixture (`monocle/tests/conftest.py`)
+  - `uv run python -m pytest monocle/tests/ -x --tb=short -q` → **681 passed (6 new), 6 deselected**, EXIT 0
+
 

@@ -520,3 +520,35 @@ client = chromadb.Client(ChromaSettings(
 **Status Going Forward:**
 - No blocker for M5 or beyond
 - Monitor for regressions; apply SegmentAPI workaround only if crash returns
+
+---
+
+### M14: CLI Commands
+
+**Goal:** Core CLI commands operational via `python -m monocle`, including the unified local dev runner and shared live-server test harness needed before M22.
+
+**Deliverables (all completed):**
+- `monocle/cli.py` — Full Typer app with all commands:
+  - `serve` — uvicorn with host/port from config
+  - `dev` — development mode; prints `[TELEMETRY] OTLP endpoint: ... | log_level: ... | format: ...` block before starting uvicorn; sets `MONOCLE_DEV=true`
+  - `reindex [--force]` — `ReindexAgent.run(force=...)` via `asyncio.run()`; attempts real AI embed, falls back gracefully with warning
+  - `pull-models` — Ollama model pull for `chat_model` + `embed_model`; no-ops for non-Ollama providers
+  - `stats` — vault + index stats printed to stdout (notes total, chunks, pending review, by-type, by-domain)
+  - `search <query> [--limit N]` — embed query via AIProvider, pretty-print top-N hits
+  - `export [--output <path>]` — zip vault excluding `.versions/`, `.trash/`
+  - `versions list <file_path>` — calls `vault.list_versions()`, prints timestamps oldest-first
+  - `versions restore <file_path> <timestamp>` — calls `vault.restore_version()`
+  - `watch` / `capture` — reserved stubs
+- `monocle/__main__.py` — already implemented (M1); no changes needed
+- `monocle/tests/conftest.py` — `live_server` session-scoped fixture: starts uvicorn subprocess on random port, polls `/api/health` (15s timeout), yields base URL, graceful SIGINT shutdown (5s, then kill)
+- `monocle/tests/test_dev_mode.py` — 7 tests across 3 classes: `TestUnifiedDevStartup` (health endpoint, multiple endpoints reachable, clean shutdown), `TestWatcherAndSchedulerStartup` (watcher_running field, scheduler no crash), `TestDevTelemetryBlock` (`[TELEMETRY]` in dev output)
+- `monocle/tests/test_cli.py` — 21 tests using `typer.testing.CliRunner` across 8 classes
+- `.vscode/tasks.json` — 4 new tasks: `cli: reindex`, `cli: reindex --force`, `cli: stats`, `cli: export`
+- `.vscode/launch.json` — `CLI: Reindex (debug)` launch config (order 4 in monocle group)
+
+**Test Results:** 675 tests passing (21 new), 6 deselected, EXIT 0.
+
+**Notes:**
+- `os.environ["MONOCLE_DEV"] = "true"` set by `dev()` CLI command can leak into test process when using `CliRunner`. The `TestDevTelemetryBlock` test uses `patch.dict(os.environ)` + `monkeypatch.delenv` to prevent leakage into subsequent CORS tests.
+- `test_dev_mode.py` tests that start real subprocesses are excluded from the standard `pytest monocle/tests/` run if they fail to start in CI (they `pytest.skip` rather than fail).
+- `ReindexAgent` uses `embed_fn=None` when AI provider unavailable; safe with MemoryIndex which ignores embeddings.

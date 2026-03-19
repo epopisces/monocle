@@ -48,6 +48,20 @@
         "group": "monocle",
         "order": 3
       }
+    },
+    {
+      "name": "CLI: Reindex (debug)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "monocle",
+      "args": ["reindex"],
+      "cwd": "${workspaceFolder}",
+      "jinja": true,
+      "justMyCode": false,
+      "presentation": {
+        "group": "monocle",
+        "order": 4
+      }
     }
   ]
 }
