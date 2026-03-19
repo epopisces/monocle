@@ -125,6 +125,19 @@ class TestPatchSettings:
         assert r.status_code == 200
         assert r.json()["ai"]["chat_model"] == "llama3.3"
 
+    def test_patch_preserves_other_review_fields(self, api_client: TestClient) -> None:
+        """Patching review.queue_threshold must not affect auto_approve_threshold_pct."""
+        # First set auto_approve_threshold_pct
+        api_client.patch(
+            "/api/settings", json={"review": {"auto_approve_threshold_pct": 50}}
+        )
+        # Then patch queue_threshold
+        r = api_client.patch("/api/settings", json={"review": {"queue_threshold": 0.75}})
+        body = r.json()
+        # Both fields must still be present and correct
+        assert body["review"]["queue_threshold"] == 0.75
+        assert body["review"]["auto_approve_threshold_pct"] == 50
+
 
 # ===========================================================================
 # POST /api/settings/rotate-mcp-key
@@ -233,6 +246,36 @@ class TestInputValidation:
         )
         assert r.status_code == 200
 
+    def test_patch_ollama_with_native_transcribe_returns_422(self, api_client: TestClient) -> None:
+        """Patching provider='ollama' + transcribe_backend='native' must fail (invalid combo).
+        
+        Ollama has no built-in transcription API. Validators should reject this.
+        """
+        r = api_client.patch(
+            "/api/settings",
+            json={
+                "ai": {
+                    "provider": "ollama",
+                    "transcribe_backend": "native",
+                }
+            },
+        )
+        assert r.status_code == 422, "Invalid ollama+native combo should be rejected"
+
+    def test_patch_to_ollama_preserves_valid_transcribe_backend(
+        self, api_client: TestClient
+    ) -> None:
+        """Patching provider='ollama' alone should auto-adjust transcribe_backend if needed."""
+        # First ensure we start with a non-ollama provider
+        api_client.patch("/api/settings", json={"ai": {"provider": "foundry_local"}})
+        
+        # Patch to ollama (no transcribe_backend specified)
+        r = api_client.patch("/api/settings", json={"ai": {"provider": "ollama"}})
+        assert r.status_code == 200
+        body = r.json()
+        # transcribe_backend should be set to subprocess (default for ollama)
+        assert body["ai"]["transcribe_backend"] in ["subprocess", "whisper_cpp"]
+
 
 # ===========================================================================
 # AI provider hot-reload (B3)
@@ -261,3 +304,191 @@ class TestAIProviderHotReload:
             r = api_client.patch("/api/settings", json={"ai": {"chat_model": "mistral"}})
         assert r.status_code == 200
         mock_get.assert_not_called()
+
+    def test_patch_ai_provider_hot_reload_failure_rejects_entire_patch(
+        self, api_client: TestClient, _temp_config: Path
+    ) -> None:
+        """If hot-reload fails, the entire patch must be rejected (no partial state).
+        
+        Config file must not be updated, and app.state must not be changed.
+        """
+        from unittest.mock import patch
+        from monocle.config import _load_yaml
+
+        # Record initial config state
+        initial_config = _load_yaml(_temp_config)
+        initial_chat_model = api_client.get("/api/settings").json()["ai"]["chat_model"]
+
+        # Attempt patch with provider change, but mock get_provider to fail
+        with patch("monocle.ai.get_provider", side_effect=RuntimeError("Provider init failed")):
+            r = api_client.patch(
+                "/api/settings",
+                json={"ai": {"provider": "foundry_local", "chat_model": "meta-llama"}},
+            )
+
+        # Must return 500 due to hot-reload failure
+        assert r.status_code == 500
+
+        # Config file must NOT have been updated
+        current_config = _load_yaml(_temp_config)
+        assert current_config == initial_config, "Config should not be written on hot-reload failure"
+
+        # app.state.settings must NOT have been updated
+        current_chat_model = api_client.get("/api/settings").json()["ai"]["chat_model"]
+        assert (
+            current_chat_model == initial_chat_model
+        ), "Settings should not be persisted on hot-reload failure"
+
+    def test_patch_ai_provider_success_updates_app_state_consistently(
+        self, api_client: TestClient
+    ) -> None:
+        """On successful provider change, app.state.ai and returned provider must match."""
+        from unittest.mock import MagicMock, patch
+
+        mock_new_ai = MagicMock()
+        with patch("monocle.ai.get_provider", return_value=mock_new_ai):
+            r = api_client.patch(
+                "/api/settings", json={"ai": {"provider": "foundry_local"}}
+            )
+
+        assert r.status_code == 200
+        response_provider = r.json()["ai"]["provider"]
+
+        # Get current settings from a subsequent request
+        state_provider = api_client.get("/api/settings").json()["ai"]["provider"]
+
+        # Response and app state must be consistent
+        assert response_provider == state_provider == "foundry_local"
+
+
+# ===========================================================================
+# save_config_patch() deep-merge behavior
+# ===========================================================================
+
+
+class TestSaveConfigPatchDeepMerge:
+    """Test that save_config_patch() properly performs deep merging of nested dicts,
+    not shallow replacement (which would lose nested config structures)."""
+
+    def test_deep_merge_nested_dicts(self, _temp_config: Path) -> None:
+        """Patching a nested dict field must preserve sibling nested fields."""
+        from monocle.config import save_config_patch, _load_yaml
+
+        # Write initial config with nested structure
+        _temp_config.write_text(
+            """
+review:
+  queue_threshold: 1.0
+  confidence_weights:
+    template_match: 0.35
+    metadata_coverage: 0.30
+    tag_plausibility: 0.20
+    entity_match: 0.15
+"""
+        )
+
+        # Patch only template_match within confidence_weights
+        save_config_patch(
+            {"review": {"confidence_weights": {"template_match": 0.5}}}
+        )
+
+        # Verify the patch was applied AND siblings were preserved
+        config = _load_yaml(_temp_config)
+        assert config["review"]["queue_threshold"] == 1.0
+        assert config["review"]["confidence_weights"]["template_match"] == 0.5
+        assert config["review"]["confidence_weights"]["metadata_coverage"] == 0.30
+        assert config["review"]["confidence_weights"]["tag_plausibility"] == 0.20
+        assert config["review"]["confidence_weights"]["entity_match"] == 0.15
+
+    def test_deep_merge_multiple_nested_levels(self, _temp_config: Path) -> None:
+        """Deep merge must work across multiple nesting levels."""
+        from monocle.config import save_config_patch, _load_yaml
+
+        # Write initial config
+        _temp_config.write_text(
+            """
+agents:
+  weekly_summary:
+    enabled: true
+    cron: "0 17 * * 5"
+    domains:
+      - work
+      - personal
+"""
+        )
+
+        # Patch a nested field
+        save_config_patch(
+            {"agents": {"weekly_summary": {"enabled": False}}}
+        )
+
+        # Verify the patch and sibling preservation
+        config = _load_yaml(_temp_config)
+        assert config["agents"]["weekly_summary"]["enabled"] is False
+        assert config["agents"]["weekly_summary"]["cron"] == "0 17 * * 5"
+        assert config["agents"]["weekly_summary"]["domains"] == ["work", "personal"]
+
+    def test_deep_merge_none_values_skipped(self, _temp_config: Path) -> None:
+        """None values in the patch must be skipped (not merged)."""
+        from monocle.config import save_config_patch, _load_yaml
+
+        _temp_config.write_text(
+            """
+review:
+  queue_threshold: 1.0
+  confidence_weights:
+    template_match: 0.35
+    metadata_coverage: 0.30
+"""
+        )
+
+        # Patch with None values (should be ignored)
+        save_config_patch(
+            {"review": {"confidence_weights": {"template_match": 0.5, "metadata_coverage": None}}}
+        )
+
+        config = _load_yaml(_temp_config)
+        assert config["review"]["confidence_weights"]["template_match"] == 0.5
+        assert config["review"]["confidence_weights"]["metadata_coverage"] == 0.30
+
+    def test_secret_keys_filtered_at_top_level(self, _temp_config: Path) -> None:
+        """Secret keys (azure_*, foundry_local_*) at top-level section names must be filtered out."""
+        from monocle.config import save_config_patch, _load_yaml
+
+        _temp_config.write_text("review:\n  queue_threshold: 1.0\n")
+
+        # Try to sneak in a secret at the top level (should be filtered)
+        save_config_patch(
+            {
+                "review": {"queue_threshold": 0.5},
+                "azure_openai_api_key": "secret_value",
+                "foundry_local_api_key": "another_secret",
+            }
+        )
+
+        config = _load_yaml(_temp_config)
+        assert "azure_openai_api_key" not in config
+        assert "foundry_local_api_key" not in config
+        assert config["review"]["queue_threshold"] == 0.5
+
+    def test_secret_keys_filtered_in_nested_dicts(self, _temp_config: Path) -> None:
+        """Secret keys within nested dicts must be filtered out during merge."""
+        from monocle.config import save_config_patch, _load_yaml
+
+        _temp_config.write_text("ai:\n  provider: ollama\n")
+
+        # Try to inject secrets within a section (should be filtered)
+        save_config_patch(
+            {
+                "ai": {
+                    "chat_model": "mistral",
+                    "azure_openai_api_key": "secret",
+                    "foundry_local_base_url": "http://secret",
+                }
+            }
+        )
+
+        config = _load_yaml(_temp_config)
+        assert config["ai"]["chat_model"] == "mistral"
+        assert "azure_openai_api_key" not in config["ai"]
+        assert "foundry_local_base_url" not in config["ai"]

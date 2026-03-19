@@ -184,6 +184,25 @@ def _load_yaml(path: Path) -> dict:
         return yaml.safe_load(fh) or {}
 
 
+def _deep_merge(target: dict, source: dict) -> None:
+    """Recursively merge *source* into *target*, modifying *target* in-place.
+
+    Nested dicts are merged recursively; non-dict values are overwritten.
+    None values in *source* are skipped (not merged).
+    Secret keys (matching azure_* or foundry_local_*) are filtered out.
+    """
+    for key, value in source.items():
+        if value is None:
+            continue
+        # Filter out secret keys
+        if key.startswith("azure_") or key.startswith("foundry_local_"):
+            continue
+        if key in target and isinstance(target[key], dict) and isinstance(value, dict):
+            _deep_merge(target[key], value)
+        else:
+            target[key] = value
+
+
 def save_config_patch(patch: dict) -> None:
     """Deep-merge *patch* into ``config.yaml`` atomically.
 
@@ -200,13 +219,16 @@ def save_config_patch(patch: dict) -> None:
     current = _load_yaml(config_path)
 
     for section, values in patch.items():
+        # Filter out secret sections at the top level
+        if section.startswith("azure_") or section.startswith("foundry_local_"):
+            continue
         if section not in _ALLOWED:
             continue
         if not isinstance(values, dict):
             continue
         if section not in current:
             current[section] = {}
-        current[section].update({k: v for k, v in values.items() if v is not None})
+        _deep_merge(current[section], values)
 
     content = yaml.dump(current, default_flow_style=False, allow_unicode=True)
 

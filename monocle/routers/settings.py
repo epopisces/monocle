@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from monocle.rate_limit import limiter
 
@@ -126,48 +126,78 @@ async def get_settings(request: Request) -> dict:
 @router.patch("/settings")
 @limiter.limit("30/minute")
 async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
-    """Hot-patch runtime settings.  Changes are persisted to config.yaml."""
+    """Hot-patch runtime settings.  Changes are persisted to config.yaml.
+    
+    If AI provider changes, hot-reload is attempted BEFORE persisting.
+    If hot-reload fails, the entire patch is rejected (no partial state).
+    """
+    from monocle.config import AIConfig, ReviewConfig
+    from monocle.ai import get_provider
+
     settings = request.app.state.settings
 
     config_patch: dict[str, dict] = {}
     ai_provider_changed = False
+    new_ai_provider = None
 
     if patch.review is not None:
         review_updates = {k: v for k, v in patch.review.model_dump().items() if v is not None}
         if review_updates:
-            new_review = settings.review.model_copy(update=review_updates)
-            settings = settings.model_copy(update={"review": new_review})
-            config_patch["review"] = review_updates
+            try:
+                # Reconstruct via constructor to run validators
+                review_data = settings.review.model_dump()
+                review_data.update(review_updates)
+                new_review = ReviewConfig(**review_data)
+                settings = settings.model_copy(update={"review": new_review})
+                config_patch["review"] = review_updates
+            except ValidationError as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=422, detail=str(exc))
 
     if patch.ai is not None:
         ai_updates = {k: v for k, v in patch.ai.model_dump().items() if v is not None}
         if ai_updates:
-            old_provider = settings.ai.provider
-            new_ai = settings.ai.model_copy(update=ai_updates)
-            settings = settings.model_copy(update={"ai": new_ai})
-            config_patch["ai"] = ai_updates
-            if ai_updates.get("provider") and ai_updates["provider"] != old_provider:
-                ai_provider_changed = True
+            try:
+                # Reconstruct via constructor to run validators (including cross-field checks)
+                ai_data = settings.ai.model_dump()
+                ai_data.update(ai_updates)
+                old_provider = settings.ai.provider
+                new_ai = AIConfig(**ai_data)
+                settings = settings.model_copy(update={"ai": new_ai})
+                config_patch["ai"] = ai_updates
+                if ai_updates.get("provider") and ai_updates["provider"] != old_provider:
+                    ai_provider_changed = True
+            except ValidationError as exc:
+                from fastapi import HTTPException
 
-    # Persist to config.yaml (atomic merge-write)
+                raise HTTPException(status_code=422, detail=str(exc))
+
+    # If AI provider is changing, attempt hot-reload BEFORE persisting.
+    # This ensures all changes (disk + app state) are atomic.
+    if ai_provider_changed:
+        try:
+            new_ai_provider = await asyncio.to_thread(get_provider, settings)
+            logger.info("[API] AI provider hot-reload succeeded: %s", settings.ai.provider)
+        except Exception as exc:
+            from fastapi import HTTPException
+
+            logger.error("[API] AI provider hot-reload failed: %s", exc)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to initialize new AI provider: {exc}",
+            )
+
+    # Persist to config.yaml (atomic merge-write) — only if hot-reload succeeded above
     if config_patch:
         from monocle.config import save_config_patch
 
         await asyncio.to_thread(save_config_patch, config_patch)
 
-    # Update app state
+    # Update app state (now that all validations have passed)
     request.app.state.settings = settings
-
-    # Hot-reload AI provider when provider type changed
-    if ai_provider_changed:
-        try:
-            from monocle.ai import get_provider
-
-            new_ai_provider = await asyncio.to_thread(get_provider, settings)
-            request.app.state.ai = new_ai_provider
-            logger.info("[API] AI provider hot-reloaded: %s", settings.ai.provider)
-        except Exception as exc:
-            logger.warning("[API] AI provider hot-reload failed: %s", exc)
+    if new_ai_provider is not None:
+        request.app.state.ai = new_ai_provider
 
     data = _settings_to_dict(settings)
     mcp_key = os.environ.get(settings.server.mcp_access_key_env, "")
