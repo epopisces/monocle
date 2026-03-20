@@ -1,1 +1,1 @@
-Python was not found; run without arguments to install from the Microsoft Store, or disable this shortcut from Settings > Apps > Advanced app settings > App execution aliases.
+This file is intentionally left blank and should not contain environment-specific error output.
