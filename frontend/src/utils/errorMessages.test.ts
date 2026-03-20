@@ -31,19 +31,43 @@ describe('mapErrorToUserMessage', () => {
   it('returns client error message for 400', () => {
     const error = new Error('400 Bad Request')
     const message = mapErrorToUserMessage(error)
-    expect(message).toBe('Request failed. Please try again.')
+    expect(message).toBe('Bad request. Please check your input and try again.')
   })
 
   it('returns client error message for 401', () => {
     const error = new Error('401 Unauthorized')
     const message = mapErrorToUserMessage(error)
-    expect(message).toBe('Request failed. Please try again.')
+    expect(message).toBe('Authentication failed. Please log in and try again.')
   })
 
   it('returns client error message for 403', () => {
     const error = new Error('403 Forbidden')
     const message = mapErrorToUserMessage(error)
-    expect(message).toBe('Request failed. Please try again.')
+    expect(message).toBe('Access denied. You do not have permission to perform this action.')
+  })
+
+  it('returns client error message for 404', () => {
+    const error = new Error('404 Not Found')
+    const message = mapErrorToUserMessage(error)
+    expect(message).toBe('Resource not found. It may have been deleted or moved.')
+  })
+
+  it('returns client error message for 409', () => {
+    const error = new Error('409 Conflict')
+    const message = mapErrorToUserMessage(error)
+    expect(message).toBe('Conflict detected. This item may have been modified. Please refresh and try again.')
+  })
+
+  it('returns client error message for 422', () => {
+    const error = new Error('422 Unprocessable Entity')
+    const message = mapErrorToUserMessage(error)
+    expect(message).toBe('Invalid input. Please check your entry and try again.')
+  })
+
+  it('returns client error message for 429', () => {
+    const error = new Error('429 Too Many Requests')
+    const message = mapErrorToUserMessage(error)
+    expect(message).toBe('Too many requests. Please wait a moment and try again.')
   })
 
   it('returns server error message for 500', () => {
@@ -55,13 +79,13 @@ describe('mapErrorToUserMessage', () => {
   it('returns server error message for 502', () => {
     const error = new Error('502 Bad Gateway')
     const message = mapErrorToUserMessage(error)
-    expect(message).toBe('Server error. Please try again later.')
+    expect(message).toBe('Service temporarily unavailable. Please try again later.')
   })
 
   it('returns server error message for 503', () => {
     const error = new Error('503 Service Unavailable')
     const message = mapErrorToUserMessage(error)
-    expect(message).toBe('Server error. Please try again later.')
+    expect(message).toBe('Service temporarily unavailable. Please try again later.')
   })
 
   it('returns generic message for non-Error objects', () => {

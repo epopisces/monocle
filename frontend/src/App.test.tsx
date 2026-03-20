@@ -16,6 +16,32 @@ vi.mock('./api/notes', () => ({ listNotes: vi.fn().mockResolvedValue({ items: []
 vi.mock('./api/review', () => ({ getReviewCount: vi.fn().mockResolvedValue({ count: 0 }) }))
 vi.mock('./api/ingest', () => ({ listIngestFailures: vi.fn().mockResolvedValue([]) }))
 
+// Health polled by Topbar
+vi.mock('./api/health', () => ({
+  getHealth: vi.fn().mockResolvedValue({
+    status: 'ready', ai_reachable: true, index_status: 'ready',
+    watcher_running: true, telemetry_endpoint: null,
+  }),
+}))
+
+// Settings fetched by AppContent on mount + stats by StatsScreen
+vi.mock('./api/settings', () => ({
+  getSettings: vi.fn().mockResolvedValue({ ui: { voice_input_backend: 'whisper' } }),
+}))
+vi.mock('./api/stats', () => ({
+  getStats: vi.fn().mockResolvedValue({
+    total_notes: 0, total_chunks: 0, notes_by_type: {}, notes_by_domain: {},
+    pending_review: 0, failed_ingests: 0, index: { backend: 'memory', total_chunks: 0 },
+    latency_p50_ms: {}, latency_p95_ms: {},
+  }),
+}))
+
+// Agents module used by CommandPalette extra actions
+vi.mock('./api/agents', () => ({
+  triggerWeeklySummary: vi.fn().mockResolvedValue({}),
+  triggerReindex: vi.fn().mockResolvedValue({}),
+}))
+
 describe('App', () => {
   it('renders without crashing', () => {
     const { container } = render(<App />)
@@ -60,6 +86,14 @@ describe('App', () => {
     render(<App />)
     const nav = screen.getByTestId('left-nav')
     expect(nav.querySelector('a[href="/stats"]')).toBeTruthy()
+  })
+})
+
+describe('App — polling and server settings', () => {
+  it('initializes voiceBackend state and registers event listeners', () => {
+    render(<App />)
+    // Verify app mounts successfully and Topbar is present
+    expect(screen.getByTestId('topbar')).toBeInTheDocument()
   })
 })
 

@@ -98,6 +98,88 @@ describe('ChatInput', () => {
   })
 })
 
+// ── ChatInput history navigation tests ───────────────────────────
+
+describe('ChatInput history navigation', () => {
+  beforeEach(() => {
+    mockSend.mockReset()
+  })
+
+  it('ArrowUp with no history has no effect', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('')
+  })
+
+  it('ArrowUp after sending shows the last sent message', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'first message' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    expect(textarea.value).toBe('')
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('first message')
+  })
+
+  it('ArrowUp twice shows older message', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'first' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    fireEvent.change(textarea, { target: { value: 'second' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('second')
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('first')
+  })
+
+  it('ArrowUp clamped at oldest entry', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'only' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('only')
+  })
+
+  it('ArrowDown after ArrowUp restores unsent draft', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'sent msg' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    fireEvent.change(textarea, { target: { value: 'my draft' } })
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('sent msg')
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+    expect(textarea.value).toBe('my draft')
+  })
+
+  it('ArrowDown when not browsing history has no effect', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'typing' } })
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' })
+    expect(textarea.value).toBe('typing')
+  })
+
+  it('duplicate consecutive sends are deduplicated in history', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea') as HTMLTextAreaElement
+    fireEvent.change(textarea, { target: { value: 'same' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    fireEvent.change(textarea, { target: { value: 'same' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    // ArrowUp twice should still show 'same' (not navigate past it)
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('same')
+    fireEvent.keyDown(textarea, { key: 'ArrowUp' })
+    expect(textarea.value).toBe('same')
+  })
+})
+
 // ── ChatMessage tests ─────────────────────────────────────────────
 
 describe('ChatMessage', () => {

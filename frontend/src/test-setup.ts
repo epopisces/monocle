@@ -7,3 +7,6 @@ window.ResizeObserver = class implements ResizeObserver {
   unobserve(_target: Element) {}
   disconnect() {}
 }
+
+// scrollIntoView is not implemented in jsdom — provide a no-op stub
+Element.prototype.scrollIntoView = function () {}

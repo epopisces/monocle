@@ -9,6 +9,7 @@ Tools:
   search_vault      — Semantic search returning scored note chunks
   read_note         — Read a full note by vault-relative path
   write_note        — Overwrite an existing note body/metadata
+  append_to_note    — Find a note by name/query and append content to it
   create_note       — Create a new note via VaultLayer.create_from_template
   get_stats         — Return BrainStats summary
   list_notes        — List notes with optional type/domain filter
@@ -116,6 +117,7 @@ class VaultTools:
             self.search_vault,
             self.read_note,
             self.write_note,
+            self.append_to_note,
             self.create_note,
             self.get_stats,
             self.list_notes,
@@ -437,6 +439,104 @@ class VaultTools:
             )
         except Exception as exc:
             logger.warning("get_person_graph tool error: %s", exc)
+            raise
+
+    # ------------------------------------------------------------------
+    # Tool: append_to_note
+    # ------------------------------------------------------------------
+
+    @ai_function
+    async def append_to_note(
+        self,
+        query: Annotated[str, "Person name, title, or topic to search for the note (e.g. 'Lucas Gallagher')"],
+        content: Annotated[str, "New content to append to the existing note body"],
+    ) -> str:
+        """Find an existing note by searching the vault and append new content to it.
+
+        Use this whenever a user wants to ADD information to an existing note
+        without providing a file path — e.g. 'add to my note on Alice' or
+        'update Lucas Gallagher\'s note with ...'.
+
+        The tool uses three strategies in order:
+          1. Wikilink resolution — exact stem / slug match on filename (no index needed)
+          2. Title scan — iterates vault notes, exact then prefix title match
+          3. Semantic search — embedding similarity (requires indexed notes)
+
+        Returns JSON with file_path, title, and status.
+        """
+        if len(content) > _MAX_BODY_LENGTH:
+            raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
+        try:
+            # Step 1: Prefer exact wikilink resolution (works even when index is empty)
+            file_path: str | None = await _to_thread(self._vault.resolve_wikilink, query)
+
+            # Step 2: Fall back to title-prefix scan across all notes
+            if not file_path:
+                query_lower = query.lower()
+                page = await _to_thread(
+                    self._vault.list_notes,
+                    None,  # folder
+                    None,  # type
+                    None,  # domain
+                    "updated",
+                    500,
+                    0,
+                )
+                # Prefer an exact title match, then a starts-with match
+                exact = next(
+                    (r for r in page.items if r.title.lower() == query_lower), None
+                )
+                starts = next(
+                    (r for r in page.items if r.title.lower().startswith(query_lower)), None
+                )
+                best = exact or starts
+                if best:
+                    file_path = best.file_path
+
+            # Step 3: Fall back to semantic search when the index is populated
+            if not file_path:
+                if self._ai is not None:
+                    embedding = await self._ai.embed(query)
+                    scored = await _to_thread(
+                        self._index.search,
+                        embedding,
+                        1,
+                        None,
+                        query,
+                    )
+                else:
+                    scored = await _to_thread(
+                        self._index.search,
+                        [],
+                        1,
+                        None,
+                        query,
+                    )
+                if scored:
+                    file_path = scored[0].file_path
+
+            if not file_path:
+                return json.dumps(
+                    {"error": f"No note found matching {query!r}. Use create_note to start one."}
+                )
+
+            # Step 2: read the full note
+            note = await _to_thread(self._vault.read_note, file_path)
+
+            # Step 3: append content as a new paragraph
+            separator = "\n\n" if note.body.strip() else ""
+            note.body = note.body.rstrip() + separator + content.strip()
+
+            # Step 4: persist and re-index
+            await _to_thread(self._vault.write_note, file_path, note)
+            if self._reindex_queue is not None:
+                self._reindex_queue.push(file_path)
+
+            return json.dumps(
+                {"file_path": file_path, "title": note.title, "status": "updated"}
+            )
+        except Exception as exc:
+            logger.warning("append_to_note tool error for %r: %s", query, exc)
             raise
 
 
