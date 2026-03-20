@@ -165,9 +165,20 @@ describe('ChatMessage', () => {
       content: 'Done',
       noteCreated: { filePath: 'people/alice.md', type: 'person_note' },
     }
-    render(<ChatMessage message={msg} />)
+    renderWithRouter(<ChatMessage message={msg} />)
     expect(screen.getByTestId('note-card')).toBeInTheDocument()
     expect(screen.getByTestId('note-card').textContent).toContain('alice.md')
+  })
+
+  it('double-click on note card navigates to document browser', () => {
+    const msg: ThreadMessage = {
+      role: 'assistant',
+      content: 'Done',
+      noteCreated: { filePath: 'inbox/lucas-gallagher.md', type: 'other' },
+    }
+    renderWithRouter(<ChatMessage message={msg} />)
+    fireEvent.dblClick(screen.getByTestId('note-card'))
+    expect(window.location.pathname).toBe('/docs')
   })
 
   it('shows blinking cursor when streaming', () => {

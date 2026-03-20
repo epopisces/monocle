@@ -54,10 +54,11 @@ class ChromaIndex(IndexLayer):
         import chromadb  # lazy — only required for production usage
 
         self._settings = settings
-        self._embed_dimensions: int = settings.ai.embed_dimensions
+        self._embed_dimensions: int | None = settings.ai.embed_dimensions
         self._collection_name: str = settings.index.collection_name
         self._client = chromadb.PersistentClient(path=settings.index.chroma_persist_path)
         self._collection = self._open_collection()
+        # After opening collection, dimensions are finalized (either from config or metadata)
         logger.info(
             "ChromaIndex ready — collection=%s dims=%d backend=chroma",
             self._collection_name,
@@ -68,6 +69,31 @@ class ChromaIndex(IndexLayer):
     # IndexLayer interface
     # ------------------------------------------------------------------
 
+    def update_embed_dimensions(self, detected_dims: int) -> None:
+        """Update collection metadata with auto-detected embedding dimensions.
+
+        Called after AI provider auto-detection to synchronize the index with
+        the actual embedding dimensions. Updates both the internal state and
+        the collection metadata.
+        """
+        if self._embed_dimensions != detected_dims:
+            self._embed_dimensions = detected_dims
+            try:
+                # Update collection metadata
+                self._collection.metadata["embed_dimensions"] = detected_dims
+                logger.info(
+                    "[INDEX] Updated collection '%s' metadata: embed_dimensions=%d",
+                    self._collection_name,
+                    detected_dims,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "[INDEX] Failed to update collection metadata: %s "
+                    "(will use in-memory value %d)",
+                    exc,
+                    detected_dims,
+                )
+
     def upsert_chunks(self, chunks: list[NoteChunk]) -> None:
         if not chunks:
             return
@@ -75,11 +101,35 @@ class ChromaIndex(IndexLayer):
         # Validate embedding dimensions before touching ChromaDB.  Catching this
         # early produces a clear error rather than an opaque ChromaDB exception.
         expected = self._embed_dimensions
-        for c in chunks:
-            actual = len(c.embedding)
-            if actual != expected:
+        
+        # Collect actual dimensions from chunks (should all be the same)
+        actual_dims = {len(c.embedding) for c in chunks}
+        
+        if len(actual_dims) != 1:
+            raise ValueError(
+                f"Chunk embedding dimension mismatch within the same batch: {actual_dims}. "
+                "All chunks must have the same embedding dimension."
+            )
+        
+        actual = actual_dims.pop()
+        
+        # If there's a mismatch, try to be lenient in auto-detect mode
+        if actual != expected:
+            # In auto-detect mode (config.ai.embed_dimensions was None), we allow
+            # dimension changes and auto-update. This handles cases where the embedding
+            # model was changed or dimensions were previously misconfigured.
+            if self._settings.ai.embed_dimensions is None:
+                logger.warning(
+                    "[INDEX] Auto-correcting embedding dimensions: "
+                    "expected %d but chunks have %d. Updating to match actual embeddings.",
+                    expected,
+                    actual,
+                )
+                self.update_embed_dimensions(actual)
+            else:
+                # Explicit config — strict validation
                 raise ValueError(
-                    f"Embedding dimension mismatch for chunk '{c.chunk_id}': "
+                    f"Embedding dimension mismatch for chunk '{chunks[0].chunk_id}': "
                     f"expected {expected} but got {actual}. "
                     "Ensure the embedding was produced by the same model/settings "
                     "as settings.ai.embed_dimensions."
@@ -285,25 +335,54 @@ class ChromaIndex(IndexLayer):
     # ------------------------------------------------------------------
 
     def _open_collection(self):
-        """Get existing collection (with dimension validation) or create a new one."""
+        """Get existing collection (with dimension validation) or create a new one.
+
+        Stores and validates two pieces of metadata:
+        - embed_model: name of the embedding model (e.g. 'nomic-embed-text')
+        - embed_dimensions: dimension of embeddings from that model
+
+        If config.ai.embed_dimensions is None (auto-detect mode), collection is opened
+        without strict validation. The actual dimensions will be synchronized after the
+        AI provider is initialized and detects them via detect_embed_dimensions().
+        """
         existing_names = [c.name for c in self._client.list_collections()]
+        model = self._settings.ai.embed_model
+
         if self._collection_name in existing_names:
             collection = self._client.get_collection(name=self._collection_name)
+            stored_model = collection.metadata.get("embed_model")
             stored_dims = collection.metadata.get("embed_dimensions")
-            if stored_dims is not None and int(stored_dims) != self._embed_dimensions:
-                raise DimensionMismatch(
-                    f"Collection '{self._collection_name}' was created with "
-                    f"embed_dimensions={stored_dims} but settings.ai.embed_dimensions="
-                    f"{self._embed_dimensions}. "
-                    "Either update your config to match the existing collection, "
-                    "or delete the collection and re-index."
-                )
+
+            # If config specifies dimensions explicitly, validate against stored
+            if self._embed_dimensions is not None:
+                if stored_dims is not None and int(stored_dims) != self._embed_dimensions:
+                    raise DimensionMismatch(
+                        f"Collection '{self._collection_name}' was created with model "
+                        f"'{stored_model}' and embed_dimensions={stored_dims}, "
+                        f"but config specifies embed_dimensions={self._embed_dimensions}. "
+                        "Either update config.ai.embed_dimensions to match, or delete "
+                        "the collection and re-index."
+                    )
+            else:
+                # Auto-detect mode: use stored dims as a starting point, but allow
+                # update_embed_dimensions() to refresh them after AI detection
+                if stored_dims is not None:
+                    self._embed_dimensions = int(stored_dims)
+                    logger.debug(
+                        "[INDEX] Collection '%s' has stored embed_dimensions=%d, "
+                        "will validate after AI provider detection",
+                        self._collection_name,
+                        self._embed_dimensions,
+                    )
+                # Note: if no stored_dims, we'll get them from AI detection below
+
             return collection
 
-        return self._client.create_collection(
-            name=self._collection_name,
-            metadata={**_COSINE_META, "embed_dimensions": self._embed_dimensions},
-        )
+        # Creating new collection — use provided dims or will be set after AI provider detects
+        meta = {**_COSINE_META, "embed_model": model}
+        if self._embed_dimensions is not None:
+            meta["embed_dimensions"] = self._embed_dimensions
+        return self._client.create_collection(name=self._collection_name, metadata=meta)
 
 
 # ---------------------------------------------------------------------------

@@ -194,6 +194,16 @@ details[open] .tool-call__summary::before {
   font-size: var(--text-sm);
 }
 
+.note-card--clickable {
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.note-card--clickable:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover, var(--bg-elevated));
+}
+
 .note-card__icon {
   flex-shrink: 0;
 }

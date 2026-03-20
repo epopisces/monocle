@@ -20,6 +20,7 @@ reference so every chunk is properly embedded.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import os
 from collections.abc import Callable
@@ -251,7 +252,12 @@ class ReindexAgent:
             embedding: list[float] = []
             if self._embed_fn is not None:
                 try:
-                    embedding = await asyncio.to_thread(self._embed_fn, text)
+                    result = self._embed_fn(text)
+                    # If _embed_fn is async, result is a coroutine; await it
+                    if inspect.iscoroutine(result):
+                        embedding = await result
+                    else:
+                        embedding = result
                 except Exception as exc:  # noqa: BLE001
                     logger.warning(
                         "[INGEST] ReindexAgent: embed failed for %s chunk %d: %s",

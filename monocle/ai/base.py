@@ -138,6 +138,9 @@ class AIProvider(ABC):
     # Subclasses set these for OTel attribute values
     _provider_name: str = "unknown"
 
+    # Cache for auto-detected embedding dimensions (determined on first embed call)
+    _cached_embed_dimensions: int | None = None
+
     # ------------------------------------------------------------------
     # Abstract methods — must be implemented by each provider
     # ------------------------------------------------------------------
@@ -171,6 +174,21 @@ class AIProvider(ABC):
         provider accumulates streaming tool-call deltas and emits the same
         JSON string as a single final chunk so the adapter can detect it.
         """
+
+    async def detect_embed_dimensions(self) -> int:
+        """Auto-detect embedding dimensions by performing a test embedding.
+
+        Caches the result so subsequent calls are instantaneous.
+        """
+        if self._cached_embed_dimensions is None:
+            test_embedding = await self.embed("test")
+            self._cached_embed_dimensions = len(test_embedding)
+            logger.info(
+                "[AI] Auto-detected embed_dimensions=%d for provider=%s",
+                self._cached_embed_dimensions,
+                self._provider_name,
+            )
+        return self._cached_embed_dimensions
 
     # Each provider sets this in __init__ to its configured TranscriptionProvider.
     # Providers with a native transcription API (Foundry, Azure) default to that;

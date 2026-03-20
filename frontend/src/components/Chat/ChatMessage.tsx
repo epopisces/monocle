@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import type { ThreadMessage, ToolCallEntry, NoteCardEntry } from '../../hooks/useChat'
 import './ChatMessage.css'
@@ -21,8 +22,14 @@ function ToolCallDisclosure({ call }: { call: ToolCallEntry }) {
 }
 
 function NoteCard({ note }: { note: NoteCardEntry }) {
+  const navigate = useNavigate()
   return (
-    <div className="note-card" data-testid="note-card">
+    <div
+      className="note-card note-card--clickable"
+      data-testid="note-card"
+      title="Double-click to open"
+      onDoubleClick={() => navigate(`/docs?path=${encodeURIComponent(note.filePath)}`)}
+    >
       <span className="note-card__icon">📄</span>
       <span className="note-card__info">
         <span className="note-card__type">{note.type}</span>

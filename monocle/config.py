@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class AIConfig(BaseModel):
     provider: Literal["ollama", "foundry_local", "azure"] = "ollama"
     embed_model: str = "nomic-embed-text"
-    embed_dimensions: int = 1536
+    embed_dimensions: int | None = None  # None = auto-detect from first embedding
     chat_model: str = "llama3.2"
     transcribe_model: str = "whisper"
     # Transcription back-end — pluggable at config time:
