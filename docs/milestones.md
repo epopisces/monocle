@@ -7,7 +7,7 @@ last-updated: 2026-03-18
 
 # Monocle â€” Completed Milestones & Technical Spike Resolutions
 
-This document archives full details for completed milestones (M1â€“M11) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
+This document archives full details for completed milestones (M1–M11, M19–M20) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
 
 ---
 
@@ -580,3 +580,85 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - rontend/src/VoiceCapture.test.tsx — 38 tests covering VoiceModal (closed/idle/ESC/backdrop), ReviewQueue (loading/empty/sorted/approve/approve-all/ESC), FailedCaptures (loading/empty/retry/dismiss/ESC), and Topbar badge visibility
 
 **Test Results:** 224 frontend tests passing (38 new), EXIT 0.
+---
+
+### M20: Stats, Keyboard Shortcuts & Command Palette
+
+**Goal:** Display live analytics dashboard, implement all keyboard shortcuts from SRS FR-WEB-12, and provide searchable command palette for quick navigation.
+
+**Deliverables (all completed):**
+- `frontend/src/components/Stats/StatsScreen.tsx` — Full analytics dashboard with:
+  - 4 stat cards (total_notes, person_note count, pending_review, failed_ingests) using live data from `GET /api/stats`
+  - Recharts `BarChart` for notes_by_type distribution (person_note, decision, idea, other)
+  - Recharts `BarChart` for notes_by_domain distribution (work, personal)
+  - Source Quality Index section with star ratings (0–5 stars) derived from type distribution
+  - Latency table showing p50/p95 milliseconds for embed and chat operations
+  - Loading/error states with fallback empty content guard
+  - `StatCard`, `QualityRow`, `LatencyTable` subcomponents; `toChartData()` and `qualityStars()` helpers
+  - Responsive `ResponsiveContainer` from Recharts for mobile compatibility
+- `frontend/src/components/Stats/StatsScreen.css` — CSS Grid layout for 4-column stat cards, 2-column chart row, quality index grid, latency table styling
+- `frontend/src/hooks/useHotkeys.ts` — Global keyboard shortcut registration (useEffect on window keydown) with:
+  - Ctrl+/ → CommandPalette open
+  - Ctrl+K → Search input focus (skipped in input elements)
+  - Ctrl+Shift+K → Keyword search (skipped in input elements)
+  - Ctrl+N → New note (skipped in input elements)
+  - Ctrl+S → Save note (NOT skipped in inputs — allows native save in textarea)
+  - Ctrl+\ → Toggle sidebar (skipped in input elements)
+  - Escape → Close modal/palette
+  - `HotkeyHandlers` interface for optional callback registration
+  - `inEditableContext()` guard prevents shortcuts in `<input>`/`<textarea>` (except where noted)
+  - macOS Cmd support via `e.metaKey` fallback for Ctrl
+  - Cleanup via return unmount handler (removes listener)
+- `frontend/src/components/CommandPalette/CommandPalette.tsx` — Searchable action palette with:
+  - Triggered by Ctrl+/ (via useHotkeys integration)
+  - Modal overlay with backdrop click and Escape to close
+  - Fuzzy search scoring: prefix=3pts, substring=2pts, keyword=1pt, initials=0.5pts, no-match=0
+  - `PaletteAction` interface `{id, label, keywords?, icon?, onExecute}`
+  - Base navigation actions: Chat, Documents, Search, Graph, Stats
+  - `extraActions` prop for runtime-injected custom actions (open-settings, open-voice, run-weekly-summary, trigger-reindex, etc.)
+  - Keyboard navigation: ArrowUp/Down cycles selection, Enter executes, Escape closes
+  - Click-to-execute on any action
+  - ARIA compliant: `role="dialog"`, `role="listbox"`, `aria-selected`, `aria-autocomplete="list"`, `aria-activedescendant`
+  - Active item auto-scrolls into view with `scrollIntoView({block:'nearest'})`
+- `frontend/src/components/CommandPalette/CommandPalette.css` — Modal overlay styles, panel centering, input field, action list, active/hover states
+- `frontend/src/api/agents.ts` — API wrappers for agent endpoints:
+  - `triggerWeeklySummary()` — POST /api/agents/weekly-summary
+  - `triggerWeeklySummaryUrl()` — returns URL for SSE streaming
+  - `triggerReindex()` — POST /api/agents/reindex
+- `frontend/src/App.tsx` — Complete rewrite with:
+  - `AppContent` inner component (requires `<BrowserRouter>` context for `useNavigate`)
+  - Outer `App` wraps `ThemeContext.Provider` + `BrowserRouter`
+  - `commandPaletteOpen` state + `closeAllModals()` callback
+  - `useHotkeys` registration with navigation callbacks and search focus
+  - `extraActions` array for CommandPalette (open-settings, open-voice, open-review, run-weekly-summary, trigger-reindex)
+  - `<CommandPalette>` rendered at app root level with state wired
+  - StatsScreen import and route (not placeholder const)
+- `frontend/src/speech.d.ts` — Type declarations for Web Speech API types not in TypeScript DOM lib:
+  - `SpeechRecognitionEvent` extends Event with `readonly results: SpeechRecognitionResultList`
+  - `SpeechRecognitionErrorEvent` extends Event with `readonly error: string`, `readonly message: string`
+- `frontend/src/Stats.test.tsx` — 33 comprehensive tests across 3 suites:
+  - `StatsScreen` (11 tests): loading state, stat cards with live data, notes-by-type chart, notes-by-domain chart, quality index, latency table, error state, no-data guard
+  - `useHotkeys` (9 tests): Ctrl+K fires handler, Ctrl+/ fires handler, shortcuts skipped in inputs, Ctrl+S NOT skipped in inputs, unmount removes listener, macOS Cmd support
+  - `CommandPalette` (13 tests): closed state, base nav actions, extra actions, filter by keyword, no-results message, Escape closes, backdrop click closes, arrow key navigation, Enter execute, click execute, role=dialog ARIA, aria-autocomplete, aria-activedescendant
+- `frontend/src/test-setup.ts` — Added stub: `Element.prototype.scrollIntoView = function () {}` (jsdom compatibility)
+- `frontend/src/App.test.tsx` — Added mocks: `./api/health`, `./api/settings`, `./api/stats`, `./api/agents` (prevent uncaught async calls)
+
+**Bug Fixes (pre-existing):**
+- `frontend/src/components/VoiceModal/VoiceModal.tsx` — Fixed missing `content_type: 'text/plain'` in ingest call; fixed SpeechRecognitionEvent / SpeechRecognitionErrorEvent type casting via new `speech.d.ts`
+- `frontend/src/VoiceCapture.test.tsx` — Fixed: BrowserRouter unused import removed; `breakdown` field replaced with proper `IngestConfidence` fields (template_match, metadata_coverage, tag_plausibility, entity_match); missing `mime_type: 'audio/wav'` added to transcribeAudio mock
+
+**Test Results:** 295 frontend tests passing (+71 new: 33 M20 tests + adjustments to App.test.tsx), EXIT 0; TypeScript clean (all M20 files error-free).
+
+**Post-completion addition (2026-03-20):** Chat input history navigation
+
+- `frontend/src/components/Chat/ChatInput.tsx` — Shell-like ArrowUp/Down history:
+  - `historyRef` stores all sent messages (most-recent last); deduplicates consecutive identical entries
+  - `historyIndexRef` cursor (-1 = not browsing); `draftRef` preserves unsent text before browsing starts
+  - **ArrowUp** (when cursor is on first line): saves current draft, walks back through history
+  - **ArrowDown** (when cursor is on last line): walks forward; once past newest restores the draft
+  - Multi-line messages are supported — cursor arrow key moves within text on non-boundary lines
+  - `_adjustHeight` helper resizes the textarea and moves cursor to end after each navigation step
+- `frontend/src/Chat.test.tsx` — 7 new tests in `ChatInput history navigation` suite:
+  - ArrowUp empty history no-op, ArrowUp shows last sent, ArrowUp twice shows older, clamp at oldest, ArrowDown restores draft, ArrowDown no-op when not browsing, consecutive-duplicate deduplication
+
+**Revised test count:** 313 frontend tests passing.

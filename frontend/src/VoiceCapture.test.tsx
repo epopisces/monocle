@@ -10,7 +10,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { BrowserRouter, MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from 'react-router-dom'
 import VoiceModal from './components/VoiceModal/VoiceModal'
 import ReviewQueue from './components/ReviewQueue/ReviewQueue'
 import FailedCaptures from './components/FailedCaptures/FailedCaptures'
@@ -46,6 +46,14 @@ vi.mock('./api/health', () => ({
   }),
 }))
 
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return {
+    ...actual,
+    useNavigate: vi.fn(),
+  }
+})
+
 import {
   listReview,
   approveNote,
@@ -60,6 +68,8 @@ import {
 } from './api/ingest'
 
 import { transcribeAudio } from './api/transcribe'
+
+import { useNavigate } from 'react-router-dom'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -156,7 +166,7 @@ describe('VoiceModal — review state (direct dispatch)', () => {
     onSaved = vi.fn()
     mockIngest.mockResolvedValue({
       note: NOTE_LOW_CONFIDENCE as never,
-      confidence: { score: 0.42, breakdown: {} as never, similar_note_detected: false, similar_note_path: null },
+      confidence: { score: 0.42, template_match: 0.4, metadata_coverage: 0.4, tag_plausibility: 0.4, entity_match: 0.4, similar_note_detected: false, similar_note_path: null },
     })
   })
 
@@ -239,10 +249,10 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
     })
 
     // Default mocks
-    mockTranscribeAudio.mockResolvedValue({ transcript: 'hello from whisper' })
+    mockTranscribeAudio.mockResolvedValue({ transcript: 'hello from whisper', mime_type: 'audio/wav' })
     mockIngestFn.mockResolvedValue({
       note: NOTE_LOW_CONFIDENCE as never,
-      confidence: { score: 0.7, breakdown: {} as never, similar_note_detected: false, similar_note_path: null },
+      confidence: { score: 0.7, template_match: 0.7, metadata_coverage: 0.7, tag_plausibility: 0.7, entity_match: 0.7, similar_note_detected: false, similar_note_path: null },
     })
   })
 
@@ -331,8 +341,14 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
     render(<VoiceModal open={true} onClose={vi.fn()} />)
     await startAndStop()
     await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
+    // Verify the error message
     expect(screen.getByTestId('voice-error')).toHaveTextContent('too large')
+    // Verify transcribeAudio was NOT called (blob size check blocked it)
     expect(mockTranscribeAudio).not.toHaveBeenCalled()
+    // CRITICAL: Verify we're in idle state (not review state with empty textarea)
+    // In idle state, the start button is shown. In review state, the textarea is shown.
+    expect(screen.getByTestId('start-recording-btn')).toBeInTheDocument()
+    expect(screen.queryByTestId('transcript-textarea')).toBeNull()
   })
 
   it('shows microphone access denied error when getUserMedia rejects', async () => {
@@ -346,7 +362,28 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
     await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
     expect(screen.getByTestId('voice-error')).toHaveTextContent('Microphone access denied.')
   })
-})
+  it('shows error when transcript exceeds 50,000 characters before save', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} />)
+    await startAndStop()
+    await waitFor(() => expect(screen.getByTestId('transcript-textarea')).toBeInTheDocument())
+
+    // Simulate a very long transcript (51k chars)
+    const longTranscript = 'x'.repeat(50_001)
+    fireEvent.change(screen.getByTestId('transcript-textarea'), {
+      target: { value: longTranscript },
+    })
+
+    // Click save
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('save-btn'))
+    })
+
+    // Error message should appear in review state (not dropped to idle)
+    await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
+    expect(screen.getByTestId('voice-error')).toHaveTextContent('too long')
+    // ingest should NOT have been called
+    expect(vi.mocked(ingest)).not.toHaveBeenCalled()
+  })})
 
 // ═══════════════════════════════════════════════════════════════════════════════
 //  ReviewQueue
@@ -396,6 +433,8 @@ describe('ReviewQueue — empty state', () => {
 })
 
 describe('ReviewQueue — loaded state', () => {
+  const mockNavigate = vi.fn()
+
   beforeEach(() => {
     vi.mocked(listReview).mockResolvedValue({
       items: [NOTE_HIGH_CONFIDENCE, NOTE_LOW_CONFIDENCE],
@@ -403,8 +442,12 @@ describe('ReviewQueue — loaded state', () => {
       offset: 0,
       limit: 50,
     })
+    vi.mocked(useNavigate).mockReturnValue(mockNavigate)
   })
-  afterEach(() => vi.clearAllMocks())
+  afterEach(() => {
+    vi.clearAllMocks()
+    mockNavigate.mockClear()
+  })
 
   it('renders review items after load', async () => {
     renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
@@ -504,7 +547,43 @@ describe('ReviewQueue — loaded state', () => {
     expect(approveBtns[0]).toHaveAttribute('aria-label', `Approve ${noteNoTitle.file_path}`)
     expect(fixBtns[0]).toHaveAttribute('aria-label', `Fix ${noteNoTitle.file_path}`)
   })
-})
+  it('navigates to /docs?path=<encoded> on Fix click', async () => {
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const fixBtns = await screen.findAllByTestId('fix-btn')
+    fireEvent.click(fixBtns[0])
+
+    const expectedPath = NOTE_LOW_CONFIDENCE.file_path
+    const expectedEncoded = encodeURIComponent(expectedPath)
+    const expectedUrl = `/docs?path=${expectedEncoded}`
+
+    expect(mockNavigate).toHaveBeenCalledWith(expectedUrl)
+  })
+
+  it('approve button keeps item in list when error occurs', async () => {
+    vi.mocked(approveNote).mockRejectedValue(new Error('HTTP 500'))
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const initialItems = await screen.findAllByTestId('review-item')
+    expect(initialItems).toHaveLength(2)
+    const approveBtns = await screen.findAllByTestId('approve-btn')
+    await act(async () => { fireEvent.click(approveBtns[0]) })
+    // Items must still be present because error doesn't remove them
+    await waitFor(() => {
+      const remainingItems = screen.getAllByTestId('review-item')
+      expect(remainingItems).toHaveLength(2)
+    })
+  })
+
+  it('Approve All button keeps items when approveAll fails', async () => {
+    vi.mocked(approveAll).mockRejectedValue(new Error('HTTP 500'))
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    await screen.findAllByTestId('review-item')
+    const initialCount = screen.getAllByTestId('review-item').length
+    await act(async () => { fireEvent.click(screen.getByTestId('approve-all-btn')) })
+    // All items must still be present after error
+    await waitFor(() => {
+      expect(screen.getAllByTestId('review-item')).toHaveLength(initialCount)
+    })
+  })})
 
 describe('ReviewQueue — error state', () => {
   beforeEach(() => {
@@ -588,7 +667,7 @@ describe('FailedCaptures — loaded state', () => {
   it('retry button calls retryIngestFailure and removes item', async () => {
     vi.mocked(retryIngestFailure).mockResolvedValue({
       note: NOTE_LOW_CONFIDENCE as never,
-      confidence: { score: 0.7, breakdown: {} as never, similar_note_detected: false, similar_note_path: null },
+      confidence: { score: 0.7, template_match: 0.7, metadata_coverage: 0.7, tag_plausibility: 0.7, entity_match: 0.7, similar_note_detected: false, similar_note_path: null },
     })
     const onUpdate = vi.fn()
     render(<FailedCaptures open={true} onClose={vi.fn()} onUpdate={onUpdate} />)
@@ -628,6 +707,24 @@ describe('FailedCaptures — loaded state', () => {
     await screen.findAllByTestId('failed-item')
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('does NOT call onUpdate when panel closes', async () => {
+    const onUpdate = vi.fn()
+    const { rerender } = render(
+      <FailedCaptures open={true} onClose={vi.fn()} onUpdate={onUpdate} />
+    )
+    // Wait for item load and the initial onCountUpdate call
+    await screen.findByTestId('failed-item')
+    const initialCalls = onUpdate.mock.calls.length
+    onUpdate.mockClear()
+
+    // Close the panel
+    rerender(<FailedCaptures open={false} onClose={vi.fn()} onUpdate={onUpdate} />)
+
+    // onUpdate must NOT be called on close
+    await waitFor(() => {}, { timeout: 100 })
+    expect(onUpdate).not.toHaveBeenCalled()
   })
 })
 

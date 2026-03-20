@@ -16,6 +16,11 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const [value, setValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
+  // History navigation — shell-like ArrowUp/Down through sent messages
+  const historyRef = useRef<string[]>([])
+  const historyIndexRef = useRef<number>(-1) // -1 = not browsing
+  const draftRef = useRef<string>('')       // saved value before browsing started
+
   // Expose methods for parent to populate the input
   React.useImperativeHandle(ref, () => ({
     populate: (text: string) => {
@@ -39,6 +44,13 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const doSend = () => {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
+    // Push to history; ignore duplicates of the most-recent entry
+    const hist = historyRef.current
+    if (hist.length === 0 || hist[hist.length - 1] !== trimmed) {
+      historyRef.current = [...hist, trimmed]
+    }
+    historyIndexRef.current = -1
+    draftRef.current = ''
     onSend(trimmed)
     setValue('')
     if (textareaRef.current) {
@@ -46,10 +58,60 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     }
   }
 
+  const _adjustHeight = (el: HTMLTextAreaElement, newVal: string) => {
+    setTimeout(() => {
+      el.style.height = 'auto'
+      el.style.height = `${Math.min(el.scrollHeight, 144)}px`
+      el.setSelectionRange(newVal.length, newVal.length)
+    }, 0)
+  }
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       doSend()
+      return
+    }
+
+    const el = textareaRef.current
+    const cursorPos = el?.selectionStart ?? 0
+
+    if (e.key === 'ArrowUp') {
+      // Only hijack when cursor is on the first line (no newline before it)
+      const beforeCursor = value.slice(0, cursorPos)
+      if (beforeCursor.includes('\n')) return
+      const hist = historyRef.current
+      if (hist.length === 0) return
+      e.preventDefault()
+      if (historyIndexRef.current === -1) {
+        draftRef.current = value
+        historyIndexRef.current = hist.length - 1
+      } else if (historyIndexRef.current > 0) {
+        historyIndexRef.current -= 1
+      }
+      const newVal = hist[historyIndexRef.current]
+      setValue(newVal)
+      if (el) _adjustHeight(el, newVal)
+      return
+    }
+
+    if (e.key === 'ArrowDown') {
+      // Only hijack when cursor is on the last line (no newline after it)
+      const afterCursor = value.slice(cursorPos)
+      if (afterCursor.includes('\n')) return
+      if (historyIndexRef.current === -1) return
+      e.preventDefault()
+      historyIndexRef.current += 1
+      if (historyIndexRef.current >= historyRef.current.length) {
+        historyIndexRef.current = -1
+        const draft = draftRef.current
+        setValue(draft)
+        if (el) _adjustHeight(el, draft)
+      } else {
+        const newVal = historyRef.current[historyIndexRef.current]
+        setValue(newVal)
+        if (el) _adjustHeight(el, newVal)
+      }
     }
   }
 

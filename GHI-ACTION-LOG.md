@@ -4,6 +4,25 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-03-21
+
+### Claude Haiku 4.5
+- **Executed M20 â€” Stats, Keyboard Shortcuts & Command Palette (COMPLETE)**
+  - Created `frontend/src/components/Stats/StatsScreen.tsx` with 4 stat cards, Recharts bar charts (notes_by_type, notes_by_domain), quality index section, latency table, loading/error states
+  - Created `frontend/src/components/Stats/StatsScreen.css` with CSS Grid layout for mobile-responsive dashboard
+  - Created `frontend/src/hooks/useHotkeys.ts` with all SRS FR-WEB-12 keyboard shortcuts (Ctrl+/, Ctrl+K, Ctrl+Shift+K, Ctrl+N, Ctrl+S, Ctrl+\, Escape); input context guards; macOS Cmd support
+  - Created `frontend/src/components/CommandPalette/CommandPalette.tsx` with fuzzy search (prefix/substring/keyword/initials scoring), keyboard navigation, 8 base + N custom actions, ARIA accessibility
+  - Created `frontend/src/components/CommandPalette/CommandPalette.css` with modal overlay and panel styles
+  - Created `frontend/src/api/agents.ts` with `triggerWeeklySummary()`, `triggerReindex()` API wrappers
+  - Created `frontend/src/speech.d.ts` with type declarations for Web Speech API (SpeechRecognitionEvent, SpeechRecognitionErrorEvent) not in TypeScript DOM lib
+  - Created `frontend/src/Stats.test.tsx` with 33 comprehensive tests (StatsScreen, useHotkeys, CommandPalette)
+  - Refactored `frontend/src/App.tsx`: extracted AppContent inner component (requires BrowserRouter context for useNavigate); wired commandPaletteOpen state, useHotkeys, CommandPalette with extraActions, removed placeholder StatsScreen
+  - Fixed pre-existing bugs: `VoiceModal.tsx` missing content_type in ingest call + SpeechRecognition type casting; `VoiceCapture.test.tsx` breakdownâ†’individual fields, mime_type missing
+  - Fixed TypeScript errors in test-setup.ts (added scrollIntoView stub) and App.test.tsx (added missing API mocks)
+  - **Test results:** 295 frontend tests passing (+71 new); TypeScript clean on all M20 files (pre-existing 11 TS errors in unrelated files remain)
+  - Updated `docs/build-plan.md`: M20â†’COMPLETE in tracker; Active Milestoneâ†’M21; added brief summary section
+  - Updated `docs/milestones.md`: added full M20 details under "Completed Milestones"
+
 ## 2026-03-20
 
 ### Claude Haiku 4.5
@@ -597,11 +616,28 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 
 ## 2026-03-20
 ### Claude Sonnet 4.6 (Code Review)
-- **M19 Post-release code review** — reviewed VoiceModal, ReviewQueue, FailedCaptures, Topbar, App.tsx, transcribe.ts, ingest_failures.py, failed_registry.py
+- **M19 Post-release code review** ï¿½ reviewed VoiceModal, ReviewQueue, FailedCaptures, Topbar, App.tsx, transcribe.ts, ingest_failures.py, failed_registry.py
 - **Bug fixed: stale closure on oiceBackend prop** (VoiceModal.tsx): startRecording useCallback had [] deps but used oiceBackend prop; users with web_speech backend configured would always fall through to MediaRecorder. Fixed by adding oiceBackend to deps array.
 - **Bug fixed: FailedCaptures badge erases after panel close** (FailedCaptures.tsx): useEffect watching state.items.length called onCountUpdate(0) on RESET (panel close), clearing the Topbar badge permanently. Fixed by guarding the effect with if (!open) return.
 - **Bug fixed: retry/dismiss errors silently swallowed** (FailedCaptures.tsx): RETRY_ERROR/DISMISS_ERROR reducer actions set state.error but the component only rendered the error alert when status === 'error' (load failures). Errors from retry/dismiss operations were never shown to users. Fixed: changed condition from status === 'error' to error !== null.
 - **Security note**: FailedIngestRegistry stores raw exception strings (str(exc)) as error_message and the FailedCaptures panel renders them. No XSS risk (React text escaping), but these can expose internal file paths and service URLs. Mitigated by existing 1000-char truncation; full fix deferred (requires backend change to categorize errors).
-- **Testing gaps addressed**: Added 6 tests — retry error display, dismiss error display (×2 each), badge count persistence after panel close, voiceBackend prop change picked up by startRecording
+- **Testing gaps addressed**: Added 6 tests ï¿½ retry error display, dismiss error display (ï¿½2 each), badge count persistence after panel close, voiceBackend prop change picked up by startRecording
 - **Result**: 689 backend tests passing, 260 frontend tests passing (6 new), EXIT 0
+
+
+## 2026-03-20
+### Claude Sonnet 4.6
+- Added `append_to_note` tool to `VaultTools` (monocle/agents/tools.py)
+  - Searches for best-matching note by query, reads it, appends content, persists and re-indexes
+  - Returns error JSON when no note found (instead of raising)
+- Updated agent system instructions to direct the LLM to use `append_to_note` when user asks to add to existing notes
+- Updated tool count docstring in create_chat_agent (7 ? 8) and TestVaultTools assertion
+- Added 5 new tests in TestVaultToolsExecution for append_to_note; 693 backend tests passing
+
+
+## 2026-03-20
+### Claude Sonnet 4.6
+- Added chat input history navigation (ArrowUp/Down) to ChatInput.tsx
+- 7 new tests in Chat.test.tsx history suite; 313 frontend tests passing
+- Documented addition in docs/milestones.md M20 section
 

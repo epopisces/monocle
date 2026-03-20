@@ -356,7 +356,7 @@ def create_chat_agent(
     graph_builder: "GraphBuilder | None" = None,
     reindex_queue: "ReindexQueue | None" = None,
 ):
-    """Create a ``ChatAgent`` wired with all 7 vault tools.
+    """Create a ``ChatAgent`` wired with all 8 vault tools.
 
     Args:
         ai: The configured ``AIProvider`` instance.
@@ -385,7 +385,12 @@ def create_chat_agent(
             "You have access to the user's private vault of notes and can search, read, "
             "create, and update notes. Always cite the note file_path when referencing "
             "specific information. When creating notes, choose the most appropriate "
-            "note type. Be concise and factual — do not invent details not found in the vault."
+            "note type. Be concise and factual — do not invent details not found in the vault.\n\n"
+            "IMPORTANT — when a user asks to add information to or update an existing note "
+            "(e.g. 'add to my note on X', 'update my note about Y', 'I want to add to my note on Z'), "
+            "ALWAYS use the append_to_note tool with the person name or topic as the query. "
+            "Do NOT ask the user for a file path. Do NOT offer to create a new note unless "
+            "append_to_note returns an error saying no note was found."
         ),
         name="monocle",
         model_id=settings.ai.chat_model,

@@ -1,0 +1,127 @@
+/* ── Command Palette ──────────────────────────────────────────── */
+
+.cp-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 80px;
+  z-index: 800;
+  animation: cp-fade-in 0.1s ease;
+}
+
+@keyframes cp-fade-in {
+  from { opacity: 0 }
+  to   { opacity: 1 }
+}
+
+.cp-panel {
+  width: 100%;
+  max-width: 560px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+  animation: cp-slide-in 0.12s ease;
+}
+
+@keyframes cp-slide-in {
+  from { transform: translateY(-12px); opacity: 0 }
+  to   { transform: translateY(0);    opacity: 1 }
+}
+
+/* ── Search row ──────────────────────────────────────────────── */
+
+.cp-search-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cp-search-icon {
+  color: var(--text-secondary);
+  font-size: var(--text-base);
+  flex-shrink: 0;
+}
+
+.cp-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-size: var(--text-md);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  caret-color: var(--accent);
+}
+
+.cp-input::placeholder {
+  color: var(--text-secondary);
+}
+
+.cp-esc-hint {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 2px 5px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+/* ── Results list ────────────────────────────────────────────── */
+
+.cp-list {
+  list-style: none;
+  margin: 0;
+  padding: 8px 0;
+  max-height: 360px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.cp-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-radius: 0;
+  transition: background 0.08s;
+}
+
+.cp-item:hover,
+.cp-item--active {
+  background: var(--bg-surface);
+}
+
+.cp-item--active {
+  outline: none;
+}
+
+.cp-item__icon {
+  font-size: var(--text-base);
+  width: 20px;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+.cp-item__label {
+  font-size: var(--text-base);
+  color: var(--text-primary);
+}
+
+/* ── Empty state ─────────────────────────────────────────────── */
+
+.cp-empty {
+  padding: 16px;
+  text-align: center;
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}

@@ -168,11 +168,12 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
       recognition.lang = 'en-US'
       recognitionRef.current = recognition
 
-      recognition.onresult = (e: SpeechRecognitionEvent) => {
+      recognition.onresult = (e: Event) => {
+        const event = e as unknown as SpeechRecognitionEvent
         let accumulated = ''
         let interim = ''
-        for (let i = 0; i < e.results.length; i++) {
-          const r = e.results[i]
+        for (let i = 0; i < event.results.length; i++) {
+          const r = event.results[i]
           if (r.isFinal) accumulated += r[0].transcript
           else interim += r[0].transcript
         }
@@ -185,15 +186,16 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
       // Tracks whether onerror already handled state — prevents onend double-dispatch
       let errorHandled = false
 
-      recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
+      recognition.onerror = (e: Event) => {
+        const event = e as unknown as SpeechRecognitionErrorEvent
         errorHandled = true
-        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
           dispatch({ type: 'IDLE_ERROR', message: 'Microphone access denied.' })
-        } else if (e.error === 'network') {
+        } else if (event.error === 'network') {
           dispatch({ type: 'IDLE_ERROR', message: 'Speech recognition unavailable — check network connectivity.' })
-        } else if (e.error === 'audio-capture') {
+        } else if (event.error === 'audio-capture') {
           dispatch({ type: 'IDLE_ERROR', message: 'No microphone found or audio capture failed.' })
-        } else if (e.error !== 'aborted') {
+        } else if (event.error !== 'aborted') {
           // no-speech, bad-grammar, language-not-supported, etc. → silently reset to idle
           dispatch({ type: 'RESET' })
         }
@@ -230,7 +232,7 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
 
           const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' })
           if (blob.size > MAX_AUDIO_BYTES) {
-            dispatch({ type: 'SAVE_ERROR', message: 'Recording too large (max 25 MB). Please try a shorter note.' })
+            dispatch({ type: 'IDLE_ERROR', message: 'Recording too large (max 25 MB). Please try a shorter note.' })
             return
           }
           dispatch({ type: 'TRANSCRIBING' })
@@ -258,11 +260,17 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
   }, [])
 
   const handleSave = useCallback(async () => {
-    if (!state.transcript.trim()) return
+    const trimmed = state.transcript.trim()
+    if (!trimmed) return
+    if (trimmed.length > 50_000) {
+      dispatch({ type: 'SAVE_ERROR', message: 'Note too long (max 50,000 characters). Please edit and try again.' })
+      return
+    }
     dispatch({ type: 'SAVING' })
     try {
       await ingest({
-        content: state.transcript,
+        content: trimmed,
+        content_type: 'text/plain',
         source: 'voice',
         template_hint: state.template,
         allow_duplicate: false,

@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M20 — Stats, Keyboard Shortcuts & Command Palette
-**Last Completed:** M19 — Voice Capture & Review Queue UI (2026-03-21)
+**Active Milestone:** M21 — Integration Testing & Obsidian Compatibility
+**Last Completed:** M20 — Stats, Keyboard Shortcuts & Command Palette (2026-03-21)
 **Blocked By:** None
 **Session Notes (M17 — Document Browser, Search & Template Editor UI):**
 - **Status:** COMPLETE (2026-03-20)
@@ -123,12 +123,12 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M17 | Document Browser & Search UI | COMPLETE |
 | M18 | Graph UI | COMPLETE |
 | M19 | Voice Capture & Review Queue UI | COMPLETE |
-| M20 | Stats, Keyboard Shortcuts & Command Palette | NOT STARTED |
-| M21 | Teams Integration | NOT STARTED |
-| M22 | Integration Testing & Obsidian Compatibility | NOT STARTED |
-| M23 | Process Manager & Dev Automation | NOT STARTED |
-| M24 | OneNote Import Plugin | NOT STARTED |
-| M25 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
+| M20 | Stats, Keyboard Shortcuts & Command Palette | COMPLETE |
+| M21 | Integration Testing & Obsidian Compatibility | NOT STARTED |
+| M22 | Process Manager & Dev Automation | NOT STARTED |
+| M23 | OneNote Import Plugin | NOT STARTED |
+| M24 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
+| M25 | Teams Integration | NOT STARTED |
 
 ---
 
@@ -174,7 +174,7 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 
 ### SPIKE-5: Web Speech API Cross-Browser Validation
 
-**Resolve by:** M25 (Voice Feature Hardening & Cross-Browser Compatibility)
+**Resolve by:** M24 (Voice Feature Hardening & Cross-Browser Compatibility)
 **Status:** PENDING — discovered during M19 code review (2026-03-20)
 **Context:** The `VoiceModal` component has two recording paths:
   1. **Web Speech API** (primary when SpeechRecognition is available) — real-time interim transcript, no server call during recording
@@ -649,38 +649,13 @@ Added voice capture modal (Web Speech API primary, MediaRecorder + Whisper fallb
 
 ### M20: Stats, Keyboard Shortcuts & Command Palette
 
-**Deliverables:**
-- [ ] `frontend/src/components/Stats/StatsScreen.tsx` — 4 stat cards, Recharts ingestion-by-source bar, notes-by-type bar, 8-week sparkline, source quality star ratings
-- [ ] `frontend/src/hooks/useHotkeys.ts` — all shortcuts from SRS FR-WEB-12 (Ctrl+K, Ctrl+Shift+K, Ctrl+N, Ctrl+S, Ctrl+/, Ctrl+\, Escape, Enter, Shift+Enter)
-- [ ] `frontend/src/components/CommandPalette/` — `Ctrl+/` trigger; fuzzy-search all actions (search, create note, run weekly summary, open settings, etc.); keyboard navigation (arrows + Enter)
-
-**Acceptance Criteria:**
-- [ ] Stats screen renders all charts with live data from `GET /api/stats`
-- [ ] `Ctrl+K` moves focus to semantic search input from any screen
-- [ ] `Ctrl+/` opens command palette; typing "weekly" surfaces "Run weekly summary"
-- [ ] `Escape` closes command palette and all modals
-- [ ] `cd frontend && npm run test -- --run` passes
+**Status:** COMPLETE (2026-03-21)
+Implemented StatsScreen with live stat cards and Recharts charts, useHotkeys hook for all SRS FR-WEB-12 keyboard shortcuts (Ctrl+K, Ctrl+/, Shift+, etc.), and CommandPalette with fuzzy search and keyboard navigation. 295 frontend tests passing (+71 new); TypeScript clean.
+**Full details:** [docs/milestones.md#m20-stats-keyboard-shortcuts--command-palette](milestones.md#m20-stats-keyboard-shortcuts--command-palette)
 
 ---
 
-### M21: Teams Integration
-
-**Goal:** Bot Framework webhook with JWT validation and slash command support.
-
-**Deliverables:**
-- [ ] `routers/teams.py` — Bot Framework Activity handler; JWT validation via `botbuilder-core` `BotFrameworkAuthentication`
-- [ ] Slash commands: `/search <query>`, `/notes [type]`, `/weekly`, `/stats`
-- [ ] `monocle/tests/test_teams.py` — mock Activity objects; assert note created; assert 401 without JWT
-
-**Acceptance Criteria:**
-- [ ] `POST /api/teams/messages` without valid Bot Framework JWT → 401
-- [ ] Teams message ingest creates a note with `source: "teams"`
-- [ ] `/search query` replies with top 3 results
-- [ ] `uv run python -m pytest monocle/tests/test_teams.py -x --tb=short -q` passes
-
----
-
-### M22: Integration Testing & Obsidian Compatibility
+### M21: Integration Testing & Obsidian Compatibility
 
 **Goal:** Full E2E test suite, Obsidian compatibility verified, CI pipeline, complete README.
 
@@ -721,7 +696,7 @@ cd .. && playwright test
 
 ---
 
-### M23: Dev Automation & Optional Process Separation
+### M22: Dev Automation & Optional Process Separation
 
 **Goal:** Optional process separation and additional developer ergonomics beyond the already-operational unified dev flow delivered in M14.
 
@@ -739,7 +714,7 @@ cd .. && playwright test
 
 ---
 
-### M24: OneNote Import Plugin
+### M23: OneNote Import Plugin
 
 **Goal:** Implement an `OneNotePlugin` ingest plugin that accepts OneNote HTML exports and converts them to vault notes. Extends the Phase 1 plugin registry with no changes to the core ingest pipeline.
 
@@ -765,6 +740,56 @@ cd .. && playwright test
 - [ ] `python -m monocle import-onenote ./exports/` imports all `.html` files in the directory and prints a success count
 - [ ] Adding the plugin required zero changes to `IngestPipeline` or `IngestPluginRegistry` core code
 - [ ] `uv run python -m pytest monocle/tests/plugins/test_onenote_plugin.py -x --tb=short -q` passes
+
+---
+
+### M24: Voice Feature Hardening & Cross-Browser Compatibility
+
+**Goal:** Comprehensive testing and hardening of the voice capture feature across browsers and failure modes (SPIKE-5 validation tasks).
+
+**Deliverables:**
+- [ ] Comprehensive Web Speech API tests in `frontend/src/VoiceCapture.test.tsx`:
+  - `recognition.onresult` handler with interim + final transcript sequences
+  - `recognition.onerror` handler for all error types (not-allowed, network, audio-capture, no-speech, etc.)
+  - `recognition.onend` handler and clean shutdown
+  - `errorHandled` flag to prevent double-dispatch
+- [ ] Cross-browser validation matrix (document results):
+  - Chrome/Edge (expected: full support)
+  - Safari (expected: partial)
+  - Firefox (expected: partial)
+  - iOS Safari (expected: fallback to MediaRecorder)
+  - Android Chrome (expected: full or fallback)
+- [ ] UI/UX hardening:
+  - Real-time interim transcript display in Web Speech path
+  - Error messaging specific to each browser capability and error code
+  - Graceful fallback messaging if Web Speech is unavailable
+  - Document browser-specific quirks in code comments
+- [ ] Decision: commit to full Web Speech support with test coverage, OR mark as "best-effort" with UI warning
+
+**Acceptance Criteria:**
+- [ ] Web Speech API path has comprehensive test coverage matching MediaRecorder fallback
+- [ ] Cross-browser testing documented (pass/fail per browser)
+- [ ] All error handling tested (no-speech, not-allowed, network, etc.)
+- [ ] Real-time interim transcript visible in supported browsers
+- [ ] Fallback gracefully handles unsupported browsers with clear messaging
+- [ ] `cd frontend && npm run test -- --run` all VoiceCapture tests pass
+
+---
+
+### M25: Teams Integration
+
+**Goal:** Bot Framework webhook with JWT validation and slash command support.
+
+**Deliverables:**
+- [ ] `routers/teams.py` — Bot Framework Activity handler; JWT validation via `botbuilder-core` `BotFrameworkAuthentication`
+- [ ] Slash commands: `/search <query>`, `/notes [type]`, `/weekly`, `/stats`
+- [ ] `monocle/tests/test_teams.py` — mock Activity objects; assert note created; assert 401 without JWT
+
+**Acceptance Criteria:**
+- [ ] `POST /api/teams/messages` without valid Bot Framework JWT → 401
+- [ ] Teams message ingest creates a note with `source: "teams"`
+- [ ] `/search query` replies with top 3 results
+- [ ] `uv run python -m pytest monocle/tests/test_teams.py -x --tb=short -q` passes
 
 ---
 

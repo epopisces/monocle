@@ -280,13 +280,13 @@ class TestChatSSEStream:
 class TestVaultTools:
     """Tests that VaultTools builds correctly and exposes the right tools."""
 
-    def test_tools_list_has_7_entries(self, tmp_vault, memory_index, mock_ai):
+    def test_tools_list_has_8_entries(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
         from monocle.agents.tools import VaultTools
 
         vault = VaultLayer(str(tmp_vault))
         vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=None)
-        assert len(vt.tools) == 7
+        assert len(vt.tools) == 8
 
     def test_all_tools_are_callable(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
@@ -478,6 +478,73 @@ class TestVaultToolsExecution:
         # Should return graph structure even if focus has no edges
         assert "focus" in parsed
         assert "node_count" in parsed
+
+    # -----------------------------------------------------------------------
+    # append_to_note tests
+    # -----------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_append_to_note_updates_existing_body(self, vault_tools, tmp_vault):
+        """append_to_note should find alice-example.md and append new content."""
+        result = await vault_tools.append_to_note("Alice", "She also leads the infra guild.")
+        parsed = json.loads(result)
+        assert parsed["status"] == "updated"
+        assert "file_path" in parsed
+        content = (tmp_vault / "people" / "alice-example.md").read_text()
+        assert "She also leads the infra guild." in content
+
+    @pytest.mark.asyncio
+    async def test_append_to_note_preserves_existing_body(self, vault_tools, tmp_vault):
+        """append_to_note must keep the original content intact."""
+        # Read original to know what we started with
+        original = (tmp_vault / "people" / "alice-example.md").read_text()
+        await vault_tools.append_to_note("Alice", "New fact.")
+        updated = (tmp_vault / "people" / "alice-example.md").read_text()
+        # Frontmatter is preserved
+        assert "---" in updated
+        # New content added
+        assert "New fact." in updated
+
+    @pytest.mark.asyncio
+    async def test_append_to_note_no_match_returns_error_json(self, tmp_vault, memory_index, mock_ai):
+        """When no indexed note matches, return an error JSON (not exception)."""
+        from monocle.vault import VaultLayer
+        from monocle.agents.tools import VaultTools
+
+        # Use an empty index (no chunks)
+        vault = VaultLayer(str(tmp_vault))
+        vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai)
+        result = await vt.append_to_note("ZZZ_nonexistent_person_xyz", "Content.")
+        parsed = json.loads(result)
+        assert "error" in parsed
+
+    @pytest.mark.asyncio
+    async def test_append_to_note_content_length_cap(self, vault_tools):
+        """append_to_note must reject content over 50,000 chars."""
+        with pytest.raises(ValueError, match="50,000"):
+            await vault_tools.append_to_note("Alice", "x" * 50_001)
+
+    @pytest.mark.asyncio
+    async def test_append_to_note_triggers_reindex(self, tmp_vault, memory_index, mock_ai):
+        """append_to_note must push to reindex_queue when one is configured."""
+        from monocle.vault import VaultLayer
+        from monocle.agents.tools import VaultTools
+        from monocle.models import NoteChunk
+
+        vault = VaultLayer(str(tmp_vault))
+        memory_index.upsert_chunks([
+            NoteChunk(
+                chunk_id="people/alice-example.md::0",
+                file_path="people/alice-example.md",
+                chunk_index=0,
+                text="Alice is an engineer.",
+                embedding=[0.1] * 1536,
+            )
+        ])
+        mock_rq = MagicMock()
+        vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, reindex_queue=mock_rq)
+        await vt.append_to_note("Alice", "New fact.")
+        mock_rq.push.assert_called_once()
 
 
 # ---------------------------------------------------------------------------
