@@ -11,6 +11,7 @@ import VoiceModal from './components/VoiceModal/VoiceModal'
 import ReviewQueue from './components/ReviewQueue/ReviewQueue'
 import FailedCaptures from './components/FailedCaptures/FailedCaptures'
 import { getReviewCount } from './api/review'
+import { getSettings } from './api/settings'
 
 /* Placeholder screen components — replaced in M20 */
 const StatsScreen = () => <div className="screen-placeholder">📊 Stats — coming in M20</div>
@@ -23,6 +24,14 @@ function App() {
   const [failedOpen, setFailedOpen] = useState(false)
   const [reviewCount, setReviewCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
+  const [voiceBackend, setVoiceBackend] = useState<'whisper' | 'web_speech'>('whisper')
+
+  // Fetch server settings once on mount to get the voice_input_backend preference
+  useEffect(() => {
+    getSettings()
+      .then(s => setVoiceBackend(s.ui.voice_input_backend))
+      .catch(() => { /* non-fatal: keep default 'whisper' */ })
+  }, [])
 
   const refreshReviewCount = useCallback(async () => {
     try {
@@ -66,6 +75,7 @@ function App() {
           open={voiceOpen}
           onClose={() => setVoiceOpen(false)}
           onSaved={handleVoiceSaved}
+          voiceBackend={voiceBackend}
         />
         <ReviewQueue
           open={reviewOpen}

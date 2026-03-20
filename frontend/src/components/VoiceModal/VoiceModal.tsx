@@ -24,6 +24,7 @@ type Action =
   | { type: 'SET_TRANSCRIPT'; text: string }
   | { type: 'SAVING' }
   | { type: 'SAVE_ERROR'; message: string }
+  | { type: 'IDLE_ERROR'; message: string }
   | { type: 'RESET' }
 
 const INITIAL: State = {
@@ -52,6 +53,8 @@ function reducer(state: State, action: Action): State {
       return { ...state, recordingState: 'saving', error: null }
     case 'SAVE_ERROR':
       return { ...state, recordingState: 'review', error: action.message }
+    case 'IDLE_ERROR':
+      return { ...INITIAL, error: action.message }
     case 'RESET':
       return INITIAL
     default:
@@ -93,11 +96,17 @@ interface Props {
   open: boolean
   onClose: () => void
   onSaved?: () => void
+  /** Controls which capture path is used.
+   *  'whisper'    — always use MediaRecorder + backend Whisper (default).
+   *  'web_speech' — prefer Web Speech API; falls back to MediaRecorder+Whisper
+   *                 if SpeechRecognition is not available in the browser.
+   */
+  voiceBackend?: 'whisper' | 'web_speech'
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function VoiceModal({ open, onClose, onSaved }: Props) {
+export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whisper' }: Props) {
   const [state, dispatch] = useReducer(reducer, INITIAL)
   const overlayRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -147,7 +156,7 @@ export default function VoiceModal({ open, onClose, onSaved }: Props) {
     dispatch({ type: 'START_RECORDING' })
     accumulatedRef.current = ''
 
-    const SpeechRec = getSpeechRecognitionClass()
+    const SpeechRec = voiceBackend === 'web_speech' ? getSpeechRecognitionClass() : null
     if (SpeechRec) {
       // ── Web Speech API path ──────────────────────────────────────────────
       const recognition = new SpeechRec()
@@ -170,15 +179,29 @@ export default function VoiceModal({ open, onClose, onSaved }: Props) {
         dispatch({ type: 'INTERIM', text: interim })
       }
 
+      // Tracks whether onerror already handled state — prevents onend double-dispatch
+      let errorHandled = false
+
       recognition.onerror = (e: SpeechRecognitionErrorEvent) => {
-        if (e.error === 'not-allowed') {
-          dispatch({ type: 'SAVE_ERROR', message: 'Microphone access denied.' })
+        errorHandled = true
+        if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+          dispatch({ type: 'IDLE_ERROR', message: 'Microphone access denied.' })
+        } else if (e.error === 'network') {
+          dispatch({ type: 'IDLE_ERROR', message: 'Speech recognition unavailable — check network connectivity.' })
+        } else if (e.error === 'audio-capture') {
+          dispatch({ type: 'IDLE_ERROR', message: 'No microphone found or audio capture failed.' })
+        } else if (e.error !== 'aborted') {
+          // no-speech, bad-grammar, language-not-supported, etc. → silently reset to idle
+          dispatch({ type: 'RESET' })
         }
+        // 'aborted' means stopAll() was called (modal close) — useEffect(!open) already dispatches RESET
       }
 
       recognition.onend = () => {
-        dispatch({ type: 'TO_REVIEW', text: accumulatedRef.current.trim() })
         recognitionRef.current = null
+        if (!errorHandled) {
+          dispatch({ type: 'TO_REVIEW', text: accumulatedRef.current.trim() })
+        }
       }
 
       recognition.start()
@@ -286,6 +309,11 @@ export default function VoiceModal({ open, onClose, onSaved }: Props) {
               <p className="voice-modal__hint">
                 Click the microphone to start capturing a voice note.
               </p>
+              {error && (
+                <p className="voice-modal__error" role="alert" data-testid="voice-error">
+                  {error}
+                </p>
+              )}
               <button
                 className="voice-modal__mic-btn"
                 onClick={startRecording}

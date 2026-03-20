@@ -144,6 +144,12 @@ class TelemetryConfig(BaseModel):
 
 class UIConfig(BaseModel):
     chat_session_history_limit: int = 10
+    # Controls which voice-input path the frontend uses.
+    # "whisper"   — always use MediaRecorder + backend Whisper transcription.
+    # "web_speech" — use Web Speech API (requires browser + network access to
+    #                Google's speech service); falls back to MediaRecorder+Whisper
+    #                automatically if SpeechRecognition is absent from window.
+    voice_input_backend: Literal["whisper", "web_speech"] = "whisper"
 
 
 # ---------------------------------------------------------------------------

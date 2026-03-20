@@ -197,13 +197,12 @@ class WhisperCppTranscriptionProvider(TranscriptionProvider):
 
 
 class SubprocessTranscriptionProvider(TranscriptionProvider):
-    """Transcription via the ``openai-whisper`` CLI subprocess.
+    """Transcription via the ``whisper`` Python API.
 
-    Use as a fallback when no HTTP server is available.  Slower than the HTTP
-    path but requires no separate server process.
+    Calls the openai-whisper library's transcribe() function directly rather
+    than invoking the CLI subprocess. More reliable in venv/uv environments.
 
-    Requires ``uv add openai-whisper`` (downloads ~150 MB–1.5 GB model on
-    first use depending on model size).
+    Requires ``uv add openai-whisper`` (~150 MB–1.5 GB model on first use).
     """
 
     def __init__(self, model: str = "base") -> None:
@@ -211,60 +210,68 @@ class SubprocessTranscriptionProvider(TranscriptionProvider):
 
     async def transcribe(self, audio_bytes: bytes, mime_type: str) -> str:
         ext = _EXT_MAP.get(mime_type, ".webm")
+        # If mime_type includes codec info (e.g., "audio/webm;codecs=opus"),
+        # try the base type first
+        if ext == ".webm" and ";" in mime_type:
+            base_mime = mime_type.split(";")[0]
+            ext = _EXT_MAP.get(base_mime, ".webm")
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(
-            None, _run_whisper_subprocess, audio_bytes, ext, self._model
+            None, _run_whisper_api, audio_bytes, ext, self._model
         )
 
 
-def _run_whisper_subprocess(audio_bytes: bytes, ext: str, model: str) -> str:
-    """Blocking helper — runs openai-whisper CLI and returns the transcript."""
-    import shutil
-    import subprocess
+def _run_whisper_api(audio_bytes: bytes, ext: str, model: str) -> str:
+    """Blocking helper — uses the openai-whisper Python API directly."""
+    import logging as _logging
 
-    if shutil.which("whisper") is None:
+    _log = _logging.getLogger(__name__)
+
+    try:
+        import whisper
+    except ImportError:
         raise RuntimeError(
-            "openai-whisper CLI not found on PATH.  "
-            "Install it with: uv add openai-whisper"
+            "openai-whisper module not found. Install it with: uv add openai-whisper"
+        )
+
+    # Check for ffmpeg availability (required by whisper)
+    import shutil as _shutil
+    if _shutil.which("ffmpeg") is None:
+        raise RuntimeError(
+            "ffmpeg is required by openai-whisper but not found on PATH. "
+            "Install it with: conda install ffmpeg (if using conda) "
+            "or download from https://ffmpeg.org/download.html"
         )
 
     tmp_dir = tempfile.mkdtemp(prefix="monocle_whisper_")
     tmp_audio = os.path.join(tmp_dir, f"audio{ext}")
+
+    _log.info(f"[TRANSCRIBE] Using whisper Python API (model={model})")
+    _log.info(f"[TRANSCRIBE] Writing audio to: {tmp_audio}")
+
     try:
         with open(tmp_audio, "wb") as fh:
             fh.write(audio_bytes)
 
-        result = subprocess.run(
-            [
-                "whisper",
-                tmp_audio,
-                "--model",
-                model,
-                "--output_format",
-                "txt",
-                "--fp16",
-                "False",
-                "--output_dir",
-                tmp_dir,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-            check=False,
-        )
+        _log.info(f"[TRANSCRIBE] Wrote {len(audio_bytes)} bytes to {tmp_audio}")
 
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"whisper subprocess failed (exit {result.returncode}): "
-                f"{result.stderr.strip()}"
-            )
+        # Load model and transcribe
+        _log.info(f"[TRANSCRIBE] Loading whisper model: {model}")
+        whisper_model = whisper.load_model(model, device="cpu")
 
-        txt_path = os.path.join(tmp_dir, "audio.txt")
-        if os.path.exists(txt_path):
-            with open(txt_path, encoding="utf-8") as fh:
-                return fh.read().strip()
+        _log.info(f"[TRANSCRIBE] Transcribing audio...")
+        result = whisper_model.transcribe(tmp_audio)
 
-        return result.stdout.strip()
+        transcript = result.get("text", "").strip()
+        _log.info(f"[TRANSCRIBE] Got {len(transcript)} chars from transcription")
+
+        return transcript
+    except RuntimeError:
+        # Re-raise our custom errors (ffmpeg not found, etc.)
+        raise
+    except Exception as exc:
+        _log.error(f"[TRANSCRIBE] Whisper API error: {exc}")
+        raise RuntimeError(f"Whisper transcription failed: {exc}") from exc
     finally:
         import shutil as _sh
 

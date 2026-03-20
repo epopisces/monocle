@@ -741,42 +741,31 @@ class TestWhisperCppTranscriptionProvider:
 
 
 class TestSubprocessTranscriptionProvider:
-    """Tests for the subprocess (openai-whisper CLI) provider."""
+    """Tests for the subprocess (openai-whisper Python API) provider."""
 
     @pytest.mark.asyncio
-    async def test_transcribe_success(self, tmp_path):
+    async def test_transcribe_success(self):
         from monocle.ai.transcription import SubprocessTranscriptionProvider
 
-        txt_file = tmp_path / "audio.txt"
-        txt_file.write_text("transcribed text")
+        # Mock the whisper module to return a transcribed result
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {"text": "transcribed text"}
 
-        mock_result = MagicMock()
-        mock_result.returncode = 0
-        mock_result.stdout = ""
+        mock_whisper = MagicMock()
+        mock_whisper.load_model.return_value = mock_model
 
-        def fake_run(cmd, **kwargs):
-            # Write the expected .txt output file in the tmp dir
-            out_dir = cmd[cmd.index("--output_dir") + 1]
-            import os
-            (type(tmp_path)(out_dir) / "audio.txt").write_text("transcribed text")
-            return mock_result
-
-        with patch("shutil.which", return_value="/usr/bin/whisper"):
-            with patch("subprocess.run", side_effect=fake_run):
-                with patch("tempfile.mkdtemp", return_value=str(tmp_path)):
-                    provider = SubprocessTranscriptionProvider()
-                    result = await provider.transcribe(b"audio-bytes", "audio/wav")
+        # Patch at the import point inside the function, and also mock ffmpeg availability
+        import sys
+        import shutil
+        with patch.dict(sys.modules, {"whisper": mock_whisper}):
+            # Mock shutil.which (at the standard library level) to pretend ffmpeg is available
+            with patch.object(shutil, "which", return_value="/usr/bin/ffmpeg"):
+                provider = SubprocessTranscriptionProvider()
+                result = await provider.transcribe(b"audio-bytes", "audio/wav")
 
         assert result == "transcribed text"
-
-    @pytest.mark.asyncio
-    async def test_raises_when_whisper_not_installed(self):
-        from monocle.ai.transcription import SubprocessTranscriptionProvider
-
-        with patch("shutil.which", return_value=None):
-            provider = SubprocessTranscriptionProvider()
-            with pytest.raises(RuntimeError, match="openai-whisper"):
-                await provider.transcribe(b"audio", "audio/wav")
+        mock_whisper.load_model.assert_called_once()
+        mock_model.transcribe.assert_called_once()
 
 
 class TestNativeOpenAITranscriptionProvider:
