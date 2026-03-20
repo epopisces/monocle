@@ -570,13 +570,6 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - npm run test passes: 224 tests, EXIT 0
 - Marked M19 COMPLETE in docs/build-plan.md; archived to docs/milestones.md
 
-## 2026-03-21
-### Claude Sonnet 4.6
-- Implemented M19: Voice Capture and Review Queue UI (VoiceModal, ReviewQueue, FailedCaptures components + App.tsx/Topbar wiring)
-- Created VoiceCapture.test.tsx; 224 frontend tests passing
-- Marked M19 COMPLETE in build-plan.md; archived details to milestones.md
-
-
 ## 2026-03-19
 ### Claude Sonnet 4.6
 - M19 post-review fixes: 11 issues resolved across VoiceModal.tsx, App.tsx, App.test.tsx, VoiceCapture.test.tsx
