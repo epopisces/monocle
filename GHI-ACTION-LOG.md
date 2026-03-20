@@ -6,6 +6,11 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ## 2026-03-20
 
+### Claude Haiku 4.5
+- **Fixed Pydantic model schema generation error in chat agent:** When the agent framework's observability code tried to serialize tools for OTel spans, the `create_note` tool's Pydantic input model failed with `PydanticUserError: 'create_note_input' is not fully defined; you should define BeforeValidator, then call create_note_input.model_rebuild()`. Root cause: `BeforeValidator(_normalize_tags)` annotation on the `tags` parameter created an unresolved forward reference because Pydantic couldn't find the `BeforeValidator` and `_normalize_tags` in the dynamically generated model's namespace.
+- **Fix:** Removed the `BeforeValidator` annotation from the `tags` parameter and instead handle tag normalization inline in the `create_note()` function by calling `_normalize_tags(tags)`. This avoids the Pydantic forward reference issue while preserving the same tag normalization behavior. Updated `_rebuild_tool_input_models()` to use a simpler approach: just eagerly call `tool.parameters()` to trigger schema generation and log warnings for any issues, without trying to manually rebuild models.
+- **Testing:** All 687 backend tests pass, including 42 agent tests. Schema generation now succeeds for all 7 tools.
+
 ### Claude Sonnet 4.6
 - **Fixed chat agent `create_note` tool silently failing:** Root cause was that `NoteMetadata(type=note_type, ...)` threw a Pydantic `ValidationError` when the LLM sent a `note_type` value not in the `NOTE_TYPES` Literal (e.g. `"person"` instead of `"person_note"`). The exception was caught, logged, and re-raised, causing the agent framework to report "Function failed" without creating the file. Additionally improved `exc_info=True` on the exception log for better diagnostics.
 - **Fix:** Removed the intermediate `NoteMetadata` construction from `VaultTools.create_note()` in `monocle/agents/tools.py`. Now passes a plain dict directly to `vault.create_from_template()`, which already handles NoteMetadata validation gracefully with a fallback. This also applies to any other invalid field values the LLM might send.
@@ -556,4 +561,47 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - **`Graph.test.tsx`** â€” 4 new tests: invalid localStorage positions (non-object, non-numeric coords), drag persistence to localStorage, double-click navigation via `useNavigate`; mock infrastructure added (`mockNavigate`, `vi.mock('react-router-dom')`, ForceGraph2D `onNodeDragEnd` prop exposed)
   - **`Search.test.tsx`** â€” 1 new test: approve button disappears after successful approval (verifies `approvedPaths` conditional render)
   - `npm run test -- --run` â†’ **185 passed (9 files, 40 new tests), EXIT 0**
+
+
+## 2026-03-21
+### Claude Sonnet 4.6
+- Implemented M19: Voice Capture and Review Queue UI
+  - Created frontend/src/api/transcribe.ts
+  - Created frontend/src/components/VoiceModal/ (state machine + Web Speech API + MediaRecorder fallback + 8 templates)
+  - Created frontend/src/components/ReviewQueue/ (slide-over, sorted confidence ascending, Approve/Fix/Approve All)
+  - Created frontend/src/components/FailedCaptures/ (Retry/Dismiss wired to ingest-failure endpoints)
+  - Modified App.tsx, AppShell.tsx, Topbar.tsx, Topbar.css, Chat/ChatScreen.tsx
+  - Created frontend/src/VoiceCapture.test.tsx (38 tests)
+  - npm run test passes: 224 tests, EXIT 0
+- Marked M19 COMPLETE in docs/build-plan.md; archived to docs/milestones.md
+
+## 2026-03-19
+### Claude Sonnet 4.6
+- M19 post-review fixes: 11 issues resolved across VoiceModal.tsx, App.tsx, App.test.tsx, VoiceCapture.test.tsx
+- Bug fixes: moved handleDiscard before ESC useEffect (TDZ crash), show accumulated speech finals in live transcript, TODO comment on over-fetching in refreshFailedCount
+- Security: replaced raw String(e) in transcription and save error dispatches with generic user-facing messages; added client-side 25 MB audio size guard before transcribeAudio call
+- Tests: 11 new tests (MediaRecorder fallback path, review-state UI, save/discard/error actions, size guard, ReviewQueue Fix action + error state, FailedCaptures error state, App API mocks); 235 passing
+
+
+- Fixed ReviewQueue aria-label accessibility issue: approve/fix buttons now use file_path fallback when note title is empty, preventing 'undefined' announcements to screen readers (matching visible text fallback); added regression test
+
+
+## 2026-03-20
+### Claude Sonnet 4.6
+- Fixed Pydantic model serialization error in chat agent: Added \_rebuild_tool_input_models()\ method to \VaultTools\ class to rebuild input models with \BeforeValidator\ annotations after tool initialization. Resolves 'create_note_input is not fully defined' error when agent framework tries to generate JSON schema for tools.
+- All backend tests passing (687/687); no regressions.
+
+
+- Updated fix: Enhanced \_rebuild_tool_input_models()\ with:  1) \orce=True\ parameter for aggressive rebuild of MockCoreSchema; 2) Eager call to \	ool.parameters()\ to trigger schema generation at init time rather than lazily during agent.run_stream(). This resolves forward references and validators before observability code tries to serialize tools.
+
+
+## 2026-03-20
+### Claude Sonnet 4.6 (Code Review)
+- **M19 Post-release code review** — reviewed VoiceModal, ReviewQueue, FailedCaptures, Topbar, App.tsx, transcribe.ts, ingest_failures.py, failed_registry.py
+- **Bug fixed: stale closure on oiceBackend prop** (VoiceModal.tsx): startRecording useCallback had [] deps but used oiceBackend prop; users with web_speech backend configured would always fall through to MediaRecorder. Fixed by adding oiceBackend to deps array.
+- **Bug fixed: FailedCaptures badge erases after panel close** (FailedCaptures.tsx): useEffect watching state.items.length called onCountUpdate(0) on RESET (panel close), clearing the Topbar badge permanently. Fixed by guarding the effect with if (!open) return.
+- **Bug fixed: retry/dismiss errors silently swallowed** (FailedCaptures.tsx): RETRY_ERROR/DISMISS_ERROR reducer actions set state.error but the component only rendered the error alert when status === 'error' (load failures). Errors from retry/dismiss operations were never shown to users. Fixed: changed condition from status === 'error' to error !== null.
+- **Security note**: FailedIngestRegistry stores raw exception strings (str(exc)) as error_message and the FailedCaptures panel renders them. No XSS risk (React text escaping), but these can expose internal file paths and service URLs. Mitigated by existing 1000-char truncation; full fix deferred (requires backend change to categorize errors).
+- **Testing gaps addressed**: Added 6 tests — retry error display, dismiss error display (×2 each), badge count persistence after panel close, voiceBackend prop change picked up by startRecording
+- **Result**: 689 backend tests passing, 260 frontend tests passing (6 new), EXIT 0
 

@@ -21,7 +21,11 @@ const CHAT_STARTERS: Starter[] = [
   { icon: '📁', label: 'Summarize project',   prompt: 'Summarize my notes about ', sendImmediately: false },
 ]
 
-export default function ChatScreen() {
+interface Props {
+  onVoiceOpen?: () => void
+}
+
+export default function ChatScreen({ onVoiceOpen }: Props) {
   const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession } = useChat()
   const threadEndRef = useRef<HTMLDivElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
@@ -33,7 +37,7 @@ export default function ChatScreen() {
 
   const handleStarterClick = (starter: Starter) => {
     if (starter.action === 'voice') {
-      // Voice modal wired in M19
+      onVoiceOpen?.()
       return
     }
     if (starter.prompt) {
@@ -112,7 +116,7 @@ export default function ChatScreen() {
 
       {/* Input area */}
       <div className="chat-screen__input-area">
-        <ChatInput ref={chatInputRef} onSend={send} disabled={isStreaming} />
+        <ChatInput ref={chatInputRef} onSend={send} disabled={isStreaming} onVoiceClick={onVoiceOpen} />
       </div>
     </div>
   )

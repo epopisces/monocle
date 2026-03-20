@@ -2,7 +2,7 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-19
+last-updated: 2026-03-20
 active-milestone: M13
 ---
 
@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M19 — Voice Capture & Review Queue UI
-**Last Completed:** M18 — Graph UI (2026-03-19)
+**Active Milestone:** M20 — Stats, Keyboard Shortcuts & Command Palette
+**Last Completed:** M19 — Voice Capture & Review Queue UI (2026-03-21)
 **Blocked By:** None
 **Session Notes (M17 — Document Browser, Search & Template Editor UI):**
 - **Status:** COMPLETE (2026-03-20)
@@ -122,12 +122,13 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M16 | Chat UI | COMPLETE |
 | M17 | Document Browser & Search UI | COMPLETE |
 | M18 | Graph UI | COMPLETE |
-| M19 | Voice Capture & Review Queue UI | NOT STARTED |
+| M19 | Voice Capture & Review Queue UI | COMPLETE |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | NOT STARTED |
 | M21 | Teams Integration | NOT STARTED |
 | M22 | Integration Testing & Obsidian Compatibility | NOT STARTED |
 | M23 | Process Manager & Dev Automation | NOT STARTED |
 | M24 | OneNote Import Plugin | NOT STARTED |
+| M25 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
 
 ---
 
@@ -168,6 +169,26 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 
 **Status: RESOLVED — 2026-03-17**
 **Resolution:** Observable crash on 2026-03-16 but re-test on 2026-03-17 passed all tests. Transient environment issue or silent wheel re-release. Rust backend now fully operational. If crash reappears, apply `SegmentAPI` fallback. See [full details](milestones.md#spike-4-chromedb-rust-backend-crash-on-python-314-windows).
+
+---
+
+### SPIKE-5: Web Speech API Cross-Browser Validation
+
+**Resolve by:** M25 (Voice Feature Hardening & Cross-Browser Compatibility)
+**Status:** PENDING — discovered during M19 code review (2026-03-20)
+**Context:** The `VoiceModal` component has two recording paths:
+  1. **Web Speech API** (primary when SpeechRecognition is available) — real-time interim transcript, no server call during recording
+  2. **MediaRecorder + Whisper** (fallback) — always works, uploads audio blob for transcription
+
+Currently the Web Speech API path has **zero test coverage**. The fallback always kicks in (particularly after the stale-closure bug fix), so untested code paths could hide production bugs for users with Web Speech enabled. Cross-browser support is also uncertain (Safari partial, Firefox spotty, mobile varies).
+
+**Validation tasks:**
+  - Write comprehensive tests for `recognition.onresult`, `recognition.onerror` (per error type), `recognition.onend`, and `errorHandled` flag
+  - Cross-browser testing: Chrome/Edge (full support), Safari (partial), Firefox, mobile (iOS/Android)
+  - Verify real-time interim transcript UX in supported browsers
+  - Document browser-specific quirks
+
+**Decision point:** Commit to full Web Speech API support with test coverage, or mark as "best-effort, primary path is MediaRecorder" with a UI warning?
 
 ---
 
@@ -620,19 +641,9 @@ Force-directed graph screen with focus input (autocomplete), depth [1][2][3] tog
 
 ### M19: Voice Capture & Review Queue UI
 
-**Deliverables:**   
-- [ ] `frontend/src/components/VoiceModal/` — recording state machine; Web Speech API (primary); Whisper fallback (`POST /api/transcribe`; shows "Transcribing…" spinner); template selector; Save/Edit/Discard actions
-- [ ] `frontend/src/components/ReviewQueue/` — slide-over panel; sorted by confidence ascending; per-item Approve/Fix actions; Approve All button; badge count; empty state with auto-close
-- [ ] `frontend/src/components/FailedCaptures/` — warning button + slide-over panel; inspect/retry/dismiss actions wired to ingest-failure endpoints
-- [ ] Badge count: poll `GET /api/review/count` on page load + after every ingest API call
-
-**Acceptance Criteria:**
-- [ ] Voice modal shows real-time transcript during recording
-- [ ] Whisper fallback correctly fills transcript after `POST /api/transcribe` returns
-- [ ] Review queue sorts lowest-confidence first; approve removes card and decrements badge
-- [ ] Failed captures warning only appears when failures exist; Retry removes the item after successful re-ingest
-- [ ] Approve All button clears all cards and shows "All reviewed" state
-- [ ] `cd frontend && npm run test -- --run` passes
+**Status:** COMPLETE (2026-03-21)
+Added voice capture modal (Web Speech API primary, MediaRecorder + Whisper fallback), review-queue slide-over sorted by confidence ascending, and failed-captures warning panel. Badge counts poll `GET /api/review/count` and ingest-failure list every 30 s. 224 frontend tests passing.
+**Full details:** [docs/milestones.md#m19-voice-capture--review-queue-ui](milestones.md#m19-voice-capture--review-queue-ui)
 
 ---
 

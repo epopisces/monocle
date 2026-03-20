@@ -63,6 +63,10 @@ async def transcribe(
 
     try:
         transcript = await ai.transcribe(audio_bytes, effective_mime)
+        logger.info(
+            "[TRANSCRIBE] Successfully transcribed, got %d bytes of text",
+            len(transcript),
+        )
     except Exception as exc:
         logger.error("[TRANSCRIBE] Transcription failed: %s", exc)
         raise HTTPException(status_code=502, detail="Transcription failed. See server logs for details.")

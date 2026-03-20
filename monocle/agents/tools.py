@@ -22,7 +22,7 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 from agent_framework import ai_function
-from pydantic import BeforeValidator, Field
+from pydantic import Field
 
 if TYPE_CHECKING:
     from monocle.ai.base import AIProvider
@@ -121,6 +121,29 @@ class VaultTools:
             self.list_notes,
             self.get_person_graph,
         ]
+        
+        # Rebuild input models for tools that use Annotated validators.
+        # This resolves any forward references and ensures JSON schema generation works.
+        self._rebuild_tool_input_models()
+
+    def _rebuild_tool_input_models(self) -> None:
+        """Initialize tool input models for proper schema generation.
+        
+        The agent framework's observability code calls tool.parameters() which
+        triggers model_json_schema() generation. We trigger this eagerly to catch
+        any Pydantic validation errors before the agent runs.
+        """
+        for tool in self.tools:
+            try:
+                # Eagerly call parameters() to trigger schema generation and catch
+                # any Pydantic model errors before agent.run_stream()
+                if hasattr(tool, 'parameters'):
+                    tool.parameters()
+            except Exception as exc:
+                # Log at warning level to ensure visibility of model issues
+                tool_name = getattr(tool, 'name', str(tool))
+                logger.warning("Tool %s schema generation failed: %s", 
+                             tool_name, exc)
 
     # ------------------------------------------------------------------
     # Tool: search_vault
@@ -239,9 +262,8 @@ class VaultTools:
         note_type: Annotated[str, "Note type: 'person_note' (or 'person'), 'idea', 'decision', 'observation', 'reference', 'meeting_note', 'project', 'action_item', 'other'"] = "other",
         domain: Annotated[str, "Domain, e.g. 'work' or 'personal'"] = "personal",
         tags: Annotated[
-            list[str] | None,
-            BeforeValidator(_normalize_tags),
-            Field(description="Flat list of string tags, e.g. ['python', 'automation']. Do NOT send a dict."),
+            str | list[str] | None,
+            Field(description="List of string tags or a string representation, e.g. ['python', 'automation']."),
         ] = None,
     ) -> str:
         """Create a new note in the vault using the appropriate template.
@@ -251,6 +273,10 @@ class VaultTools:
         """
         if len(body) > _MAX_BODY_LENGTH:
             raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
+        
+        # Normalize tags from various LLM-produced formats
+        normalized_tags = _normalize_tags(tags)
+        
         try:
             note = await _to_thread(
                 self._vault.create_from_template,
@@ -258,7 +284,7 @@ class VaultTools:
                 {
                     "title": title,
                     "domain": domain,
-                    "tags": tags or [],
+                    "tags": normalized_tags or [],
                     "review_status": "pending",
                 },
                 body,

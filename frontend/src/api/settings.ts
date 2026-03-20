@@ -43,7 +43,10 @@ export interface SettingsResponse {
     log_level: string
     log_format: string
   }
-  ui: Record<string, unknown>
+  ui: {
+    chat_session_history_limit: number
+    voice_input_backend: 'whisper' | 'web_speech'
+  }
   mcp_key_last4: string | null
 }
 
@@ -63,9 +66,14 @@ export interface ReviewPatch {
   auto_approve_threshold_pct?: number
 }
 
+export interface UIPatch {
+  voice_input_backend?: 'whisper' | 'web_speech'
+}
+
 export interface SettingsPatch {
   ai?: AIPatch
   review?: ReviewPatch
+  ui?: UIPatch
 }
 
 export interface RotateMcpKeyResponse {

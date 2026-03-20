@@ -96,6 +96,31 @@ async def lifespan(app: FastAPI):
     try:
         ai = get_provider(cfg)
         logger.info("[API] AI provider initialised: %s", cfg.ai.provider)
+
+        # Auto-detect embedding dimensions if not explicitly configured
+        if cfg.ai.embed_dimensions is None and ai is not None:
+            detected_dims = await ai.detect_embed_dimensions()
+            logger.info(
+                "[API] Auto-detected embedding dimensions: %d (model=%s)",
+                detected_dims,
+                cfg.ai.embed_model,
+            )
+            # Update index with detected dimensions (updates metadata if needed)
+            if hasattr(index, "update_embed_dimensions"):
+                index.update_embed_dimensions(detected_dims)
+        elif cfg.ai.embed_dimensions is not None and ai is not None:
+            # Explicit config — validate that AI provider matches
+            detected_dims = await ai.detect_embed_dimensions()
+            if detected_dims != cfg.ai.embed_dimensions:
+                logger.warning(
+                    "[API] Embedding dimension mismatch: config specifies %d but "
+                    "model '%s' produces %d-dimensional embeddings. "
+                    "Update config.ai.embed_dimensions or switch to a compatible model.",
+                    cfg.ai.embed_dimensions,
+                    cfg.ai.embed_model,
+                    detected_dims,
+                )
+
     except Exception as exc:  # pragma: no cover
         logger.warning("[API] AI provider init failed (non-fatal): %s", exc)
     app.state.ai = ai

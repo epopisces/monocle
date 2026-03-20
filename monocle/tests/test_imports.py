@@ -72,7 +72,7 @@ def test_settings_defaults() -> None:
     s = Settings()
     assert s.server.host == "127.0.0.1"
     assert s.server.port == 8000
-    assert s.ai.embed_dimensions == 1536
+    assert s.ai.embed_dimensions is None  # None = auto-detect from model
     assert s.review.confidence_weights.template_match == 0.35
 
 

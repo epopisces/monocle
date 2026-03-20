@@ -38,9 +38,14 @@ class AIPatch(BaseModel):
     ollama_base_url: str | None = None
 
 
+class UIPatch(BaseModel):
+    voice_input_backend: Literal["whisper", "web_speech"] | None = None
+
+
 class SettingsPatch(BaseModel):
     review: ReviewPatch | None = None
     ai: AIPatch | None = None
+    ui: UIPatch | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +173,22 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
                 config_patch["ai"] = ai_updates
                 if ai_updates.get("provider") and ai_updates["provider"] != old_provider:
                     ai_provider_changed = True
+            except ValidationError as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=422, detail=str(exc))
+
+    if patch.ui is not None:
+        ui_updates = {k: v for k, v in patch.ui.model_dump().items() if v is not None}
+        if ui_updates:
+            from monocle.config import UIConfig
+
+            try:
+                ui_data = settings.ui.model_dump()
+                ui_data.update(ui_updates)
+                new_ui = UIConfig(**ui_data)
+                settings = settings.model_copy(update={"ui": new_ui})
+                config_patch["ui"] = ui_updates
             except ValidationError as exc:
                 from fastapi import HTTPException
 

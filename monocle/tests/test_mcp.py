@@ -462,6 +462,57 @@ class TestMCPTools:
         assert note.metadata.review_status == "pending"
 
     @pytest.mark.asyncio
+    async def test_create_note_tags_json_string(self, mcp_state):
+        """Tags sent as a JSON array string should be parsed to a list."""
+        from monocle.mcp_server import mcp
+
+        result = await mcp.call_tool(
+            "create_note",
+            {
+                "title": "Tag Test",
+                "body": "Content",
+                "note_type": "idea",
+                "tags": '["python", "automation"]',
+            },
+        )
+        data = json.loads(_extract_text(result))
+        assert data["status"] == "created"
+
+    @pytest.mark.asyncio
+    async def test_create_note_tags_python_dict_string(self, mcp_state):
+        """Tags sent as a Python dict literal string should not cause 'Argument parsing failed'."""
+        from monocle.mcp_server import mcp
+
+        result = await mcp.call_tool(
+            "create_note",
+            {
+                "title": "Dict Tag Test",
+                "body": "Content",
+                "note_type": "idea",
+                "tags": "{'hobbies': ['Lego', 'coding']}",
+            },
+        )
+        data = json.loads(_extract_text(result))
+        assert data["status"] == "created"
+
+    @pytest.mark.asyncio
+    async def test_create_note_tags_comma_string(self, mcp_state):
+        """Tags sent as comma-separated plain text should be split into a list."""
+        from monocle.mcp_server import mcp
+
+        result = await mcp.call_tool(
+            "create_note",
+            {
+                "title": "Comma Tag Test",
+                "body": "Content",
+                "note_type": "idea",
+                "tags": "python, ai, work",
+            },
+        )
+        data = json.loads(_extract_text(result))
+        assert data["status"] == "created"
+
+    @pytest.mark.asyncio
     async def test_update_note_changes_body(self, mcp_state, mock_vault):
         from monocle.mcp_server import mcp
 

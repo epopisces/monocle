@@ -47,6 +47,7 @@ dependencies = [
     "opentelemetry-instrumentation-fastapi",
     "opentelemetry-instrumentation-logging",
     "opentelemetry-instrumentation-httpx",
+    "openai-whisper>=20250625",
 ]
 
 [project.scripts]

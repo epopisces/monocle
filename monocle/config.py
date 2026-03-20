@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 class AIConfig(BaseModel):
     provider: Literal["ollama", "foundry_local", "azure"] = "ollama"
     embed_model: str = "nomic-embed-text"
-    embed_dimensions: int = 1536
+    embed_dimensions: int | None = None  # None = auto-detect from first embedding
     chat_model: str = "llama3.2"
     transcribe_model: str = "whisper"
     # Transcription back-end — pluggable at config time:
@@ -144,6 +144,12 @@ class TelemetryConfig(BaseModel):
 
 class UIConfig(BaseModel):
     chat_session_history_limit: int = 10
+    # Controls which voice-input path the frontend uses.
+    # "whisper"   — always use MediaRecorder + backend Whisper transcription.
+    # "web_speech" — use Web Speech API (requires browser + network access to
+    #                Google's speech service); falls back to MediaRecorder+Whisper
+    #                automatically if SpeechRecognition is absent from window.
+    voice_input_backend: Literal["whisper", "web_speech"] = "whisper"
 
 
 # ---------------------------------------------------------------------------

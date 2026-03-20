@@ -12,6 +12,10 @@ vi.mock('react-force-graph', () => ({
 vi.mock('./api/graph', () => ({ getGraph: vi.fn().mockResolvedValue({ focus: null, nodes: [], edges: [] }) }))
 vi.mock('./api/notes', () => ({ listNotes: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }) }))
 
+// Review and ingest polled by App on mount every 30 s
+vi.mock('./api/review', () => ({ getReviewCount: vi.fn().mockResolvedValue({ count: 0 }) }))
+vi.mock('./api/ingest', () => ({ listIngestFailures: vi.fn().mockResolvedValue([]) }))
+
 describe('App', () => {
   it('renders without crashing', () => {
     const { container } = render(<App />)
