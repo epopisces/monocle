@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M19 — Voice Capture & Review Queue UI
-**Last Completed:** M18 — Graph UI (2026-03-19)
+**Active Milestone:** M20 — Stats, Keyboard Shortcuts & Command Palette
+**Last Completed:** M19 — Voice Capture & Review Queue UI (2026-03-21)
 **Blocked By:** None
 **Session Notes (M17 — Document Browser, Search & Template Editor UI):**
 - **Status:** COMPLETE (2026-03-20)
@@ -122,7 +122,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M16 | Chat UI | COMPLETE |
 | M17 | Document Browser & Search UI | COMPLETE |
 | M18 | Graph UI | COMPLETE |
-| M19 | Voice Capture & Review Queue UI | NOT STARTED |
+| M19 | Voice Capture & Review Queue UI | COMPLETE |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | NOT STARTED |
 | M21 | Teams Integration | NOT STARTED |
 | M22 | Integration Testing & Obsidian Compatibility | NOT STARTED |
@@ -620,19 +620,9 @@ Force-directed graph screen with focus input (autocomplete), depth [1][2][3] tog
 
 ### M19: Voice Capture & Review Queue UI
 
-**Deliverables:**   
-- [ ] `frontend/src/components/VoiceModal/` — recording state machine; Web Speech API (primary); Whisper fallback (`POST /api/transcribe`; shows "Transcribing…" spinner); template selector; Save/Edit/Discard actions
-- [ ] `frontend/src/components/ReviewQueue/` — slide-over panel; sorted by confidence ascending; per-item Approve/Fix actions; Approve All button; badge count; empty state with auto-close
-- [ ] `frontend/src/components/FailedCaptures/` — warning button + slide-over panel; inspect/retry/dismiss actions wired to ingest-failure endpoints
-- [ ] Badge count: poll `GET /api/review/count` on page load + after every ingest API call
-
-**Acceptance Criteria:**
-- [ ] Voice modal shows real-time transcript during recording
-- [ ] Whisper fallback correctly fills transcript after `POST /api/transcribe` returns
-- [ ] Review queue sorts lowest-confidence first; approve removes card and decrements badge
-- [ ] Failed captures warning only appears when failures exist; Retry removes the item after successful re-ingest
-- [ ] Approve All button clears all cards and shows "All reviewed" state
-- [ ] `cd frontend && npm run test -- --run` passes
+**Status:** COMPLETE (2026-03-21)
+Added voice capture modal (Web Speech API primary, MediaRecorder + Whisper fallback), review-queue slide-over sorted by confidence ascending, and failed-captures warning panel. Badge counts poll `GET /api/review/count` and ingest-failure list every 30 s. 224 frontend tests passing.
+**Full details:** [docs/milestones.md#m19-voice-capture--review-queue-ui](milestones.md#m19-voice-capture--review-queue-ui)
 
 ---
 

@@ -557,3 +557,30 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - **`Search.test.tsx`** — 1 new test: approve button disappears after successful approval (verifies `approvedPaths` conditional render)
   - `npm run test -- --run` → **185 passed (9 files, 40 new tests), EXIT 0**
 
+
+## 2026-03-21
+### Claude Sonnet 4.6
+- Implemented M19: Voice Capture and Review Queue UI
+  - Created frontend/src/api/transcribe.ts
+  - Created frontend/src/components/VoiceModal/ (state machine + Web Speech API + MediaRecorder fallback + 8 templates)
+  - Created frontend/src/components/ReviewQueue/ (slide-over, sorted confidence ascending, Approve/Fix/Approve All)
+  - Created frontend/src/components/FailedCaptures/ (Retry/Dismiss wired to ingest-failure endpoints)
+  - Modified App.tsx, AppShell.tsx, Topbar.tsx, Topbar.css, Chat/ChatScreen.tsx
+  - Created frontend/src/VoiceCapture.test.tsx (38 tests)
+  - npm run test passes: 224 tests, EXIT 0
+- Marked M19 COMPLETE in docs/build-plan.md; archived to docs/milestones.md
+
+## 2026-03-21
+### Claude Sonnet 4.6
+- Implemented M19: Voice Capture and Review Queue UI (VoiceModal, ReviewQueue, FailedCaptures components + App.tsx/Topbar wiring)
+- Created VoiceCapture.test.tsx; 224 frontend tests passing
+- Marked M19 COMPLETE in build-plan.md; archived details to milestones.md
+
+
+## 2026-03-19
+### Claude Sonnet 4.6
+- M19 post-review fixes: 11 issues resolved across VoiceModal.tsx, App.tsx, App.test.tsx, VoiceCapture.test.tsx
+- Bug fixes: moved handleDiscard before ESC useEffect (TDZ crash), show accumulated speech finals in live transcript, TODO comment on over-fetching in refreshFailedCount
+- Security: replaced raw String(e) in transcription and save error dispatches with generic user-facing messages; added client-side 25 MB audio size guard before transcribeAudio call
+- Tests: 11 new tests (MediaRecorder fallback path, review-state UI, save/discard/error actions, size guard, ReviewQueue Fix action + error state, FailedCaptures error state, App API mocks); 235 passing
+

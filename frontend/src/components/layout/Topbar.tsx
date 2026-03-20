@@ -5,6 +5,11 @@ import './Topbar.css'
 interface TopbarProps {
   onMenuToggle: () => void
   onSettingsOpen?: () => void
+  onVoiceOpen?: () => void
+  onReviewOpen?: () => void
+  onFailedOpen?: () => void
+  reviewCount?: number
+  failedCount?: number
 }
 
 type HealthStatus = 'unknown' | 'ready' | 'degraded' | 'error'
@@ -25,7 +30,15 @@ function healthToStatus(h: HealthResponse): HealthStatus {
   return 'degraded'
 }
 
-export default function Topbar({ onMenuToggle, onSettingsOpen }: TopbarProps) {
+export default function Topbar({
+  onMenuToggle,
+  onSettingsOpen,
+  onVoiceOpen,
+  onReviewOpen,
+  onFailedOpen,
+  reviewCount = 0,
+  failedCount = 0,
+}: TopbarProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [status, setStatus] = useState<HealthStatus>('unknown')
 
@@ -82,6 +95,47 @@ export default function Topbar({ onMenuToggle, onSettingsOpen }: TopbarProps) {
       </div>
 
       <div className="topbar-right">
+        {/* Voice capture button */}
+        <button
+          className="topbar-menu-btn"
+          onClick={onVoiceOpen}
+          aria-label="Voice capture"
+          title="Voice capture"
+          data-testid="voice-capture-btn"
+        >
+          🎤
+        </button>
+
+        {/* Review queue badge button — always visible when count > 0 */}
+        {reviewCount > 0 && (
+          <button
+            className="topbar-menu-btn topbar-badge-btn"
+            onClick={onReviewOpen}
+            aria-label={`Review queue: ${reviewCount} pending`}
+            title={`${reviewCount} notes pending review`}
+            data-testid="review-queue-btn"
+          >
+            🔔
+            <span className="topbar-badge" data-testid="review-badge">{reviewCount}</span>
+          </button>
+        )}
+
+        {/* Failed captures warning button — only when failures exist */}
+        {failedCount > 0 && (
+          <button
+            className="topbar-menu-btn topbar-badge-btn topbar-badge-btn--warning"
+            onClick={onFailedOpen}
+            aria-label={`Failed captures: ${failedCount}`}
+            title={`${failedCount} failed capture(s)`}
+            data-testid="failed-captures-btn"
+          >
+            ⚠
+            <span className="topbar-badge topbar-badge--warning" data-testid="failed-badge">
+              {failedCount}
+            </span>
+          </button>
+        )}
+
         <button
           className="topbar-menu-btn"
           onClick={onSettingsOpen}
@@ -94,3 +148,4 @@ export default function Topbar({ onMenuToggle, onSettingsOpen }: TopbarProps) {
     </header>
   )
 }
+

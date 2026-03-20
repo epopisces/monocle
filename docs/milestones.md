@@ -552,3 +552,26 @@ client = chromadb.Client(ChromaSettings(
 - `os.environ["MONOCLE_DEV"] = "true"` set by `dev()` CLI command can leak into test process when using `CliRunner`. The `TestDevTelemetryBlock` test uses `patch.dict(os.environ)` + `monkeypatch.delenv` to prevent leakage into subsequent CORS tests.
 - `test_dev_mode.py` tests that start real subprocesses are excluded from the standard `pytest monocle/tests/` run if they fail to start in CI (they `pytest.skip` rather than fail).
 - `ReindexAgent` uses `embed_fn=None` when AI provider unavailable; safe with MemoryIndex which ignores embeddings.
+
+---
+
+### M19: Voice Capture & Review Queue UI
+
+**Goal:** Add voice capture (Web Speech API + Whisper fallback), a review-queue slide-over, and a failed-captures panel to the frontend.
+
+**Deliverables (all completed):**
+- rontend/src/api/transcribe.ts — 	ranscribeAudio(blob, mimeType) wrapper for POST /api/transcribe multipart upload
+- rontend/src/components/VoiceModal/VoiceModal.tsx — full recording state machine (idle ? recording ? transcribing ? review ? saving); Web Speech API primary path (real-time interim transcript via ecognition.onresult); ccumulatedRef avoids stale-closure in onresult; MediaRecorder + Whisper fallback when SpeechRecognition is unavailable; 8-template type selector; textarea for editing transcript; Save/Discard actions
+- rontend/src/components/VoiceModal/VoiceModal.css — pulse animation for recording indicator; spinner for transcribing; centered overlay at z-index: 200
+- rontend/src/components/ReviewQueue/ReviewQueue.tsx — right-side slide-over; fetches GET /api/review on open; sorts items by confidence ascending (lowest first); per-item Approve/Fix actions; Approve All; empty state; useReducer pattern; useNavigate to /docs?path=… for Fix action
+- rontend/src/components/ReviewQueue/ReviewQueue.css — position: fixed; right: 0; top: var(--topbar-height); semi-transparent backdrop; confidence color coding (green = 0.85, warning = 0.60, error < 0.60)
+- rontend/src/components/FailedCaptures/FailedCaptures.tsx — warning slide-over; Retry calls POST /api/ingest/failures/retry; Dismiss calls DELETE /api/ingest/failures/{id}; both remove the card and call onUpdate?.()
+- rontend/src/components/FailedCaptures/FailedCaptures.css — orange left border on failed cards; warning-themed header
+- rontend/src/App.tsx — useState for oiceOpen, eviewOpen, ailedOpen, eviewCount, ailedCount; useEffect polling (30 s) for both counts; VoiceModal, ReviewQueue, FailedCaptures rendered at root level; ChatScreen route receives onVoiceOpen prop
+- rontend/src/components/layout/AppShell.tsx — passes onVoiceOpen, onReviewOpen, onFailedOpen, eviewCount, ailedCount props to Topbar
+- rontend/src/components/layout/Topbar.tsx — voice ?? button always visible; review ?? badge button (only when eviewCount > 0); failed ? badge button (only when ailedCount > 0)
+- rontend/src/components/layout/Topbar.css — .topbar-badge-btn, .topbar-badge, .topbar-badge--warning styles
+- rontend/src/components/Chat/ChatScreen.tsx — onVoiceOpen? prop; voice starter calls onVoiceOpen?.(); ChatInput receives onVoiceClick={onVoiceOpen}
+- rontend/src/VoiceCapture.test.tsx — 38 tests covering VoiceModal (closed/idle/ESC/backdrop), ReviewQueue (loading/empty/sorted/approve/approve-all/ESC), FailedCaptures (loading/empty/retry/dismiss/ESC), and Topbar badge visibility
+
+**Test Results:** 224 frontend tests passing (38 new), EXIT 0.
