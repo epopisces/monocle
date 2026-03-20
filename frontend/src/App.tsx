@@ -11,7 +11,6 @@ import VoiceModal from './components/VoiceModal/VoiceModal'
 import ReviewQueue from './components/ReviewQueue/ReviewQueue'
 import FailedCaptures from './components/FailedCaptures/FailedCaptures'
 import { getReviewCount } from './api/review'
-import { listIngestFailures } from './api/ingest'
 
 /* Placeholder screen components — replaced in M20 */
 const StatsScreen = () => <div className="screen-placeholder">📊 Stats — coming in M20</div>
@@ -32,28 +31,12 @@ function App() {
     } catch { /* non-fatal */ }
   }, [])
 
-  const refreshFailedCount = useCallback(async () => {
-    try {
-      // TODO(M20+): replace with a dedicated /api/ingest/failures/count endpoint
-      // to avoid fetching full failure records (including content previews) just for the count.
-      const failures = await listIngestFailures()
-      setFailedCount(failures.length)
-    } catch { /* non-fatal */ }
-  }, [])
-
   // Poll review count on mount and every 30 s
   useEffect(() => {
     refreshReviewCount()
     const id = setInterval(refreshReviewCount, 30_000)
     return () => clearInterval(id)
   }, [refreshReviewCount])
-
-  // Poll failed count on mount and every 30 s
-  useEffect(() => {
-    refreshFailedCount()
-    const id = setInterval(refreshFailedCount, 30_000)
-    return () => clearInterval(id)
-  }, [refreshFailedCount])
 
   const handleVoiceSaved = useCallback(() => {
     refreshReviewCount()
@@ -92,7 +75,7 @@ function App() {
         <FailedCaptures
           open={failedOpen}
           onClose={() => setFailedOpen(false)}
-          onUpdate={refreshFailedCount}
+          onCountUpdate={setFailedCount}
         />
       </BrowserRouter>
     </ThemeContext.Provider>

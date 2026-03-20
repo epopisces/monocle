@@ -577,3 +577,6 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - Security: replaced raw String(e) in transcription and save error dispatches with generic user-facing messages; added client-side 25 MB audio size guard before transcribeAudio call
 - Tests: 11 new tests (MediaRecorder fallback path, review-state UI, save/discard/error actions, size guard, ReviewQueue Fix action + error state, FailedCaptures error state, App API mocks); 235 passing
 
+
+- Fixed ReviewQueue aria-label accessibility issue: approve/fix buttons now use file_path fallback when note title is empty, preventing 'undefined' announcements to screen readers (matching visible text fallback); added regression test
+

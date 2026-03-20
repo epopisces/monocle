@@ -5,6 +5,7 @@ import {
   deleteIngestFailure,
   type FailedIngestRecord,
 } from '../../api/ingest'
+import { mapErrorToUserMessage } from '../../utils/errorMessages'
 import './FailedCaptures.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -86,12 +87,13 @@ const INITIAL: State = {
 interface Props {
   open: boolean
   onClose: () => void
+  onCountUpdate?: (count: number) => void
   onUpdate?: () => void
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export default function FailedCaptures({ open, onClose, onUpdate }: Props) {
+export default function FailedCaptures({ open, onClose, onCountUpdate, onUpdate }: Props) {
   const [state, dispatch] = useReducer(reducer, INITIAL)
 
   // Load failures when panel opens
@@ -101,9 +103,12 @@ export default function FailedCaptures({ open, onClose, onUpdate }: Props) {
       return
     }
     listIngestFailures()
-      .then(items => dispatch({ type: 'LOADED', payload: items }))
-      .catch(e => dispatch({ type: 'LOAD_ERROR', payload: String(e) }))
-  }, [open])
+      .then(items => {
+        dispatch({ type: 'LOADED', payload: items })
+        onCountUpdate?.(items.length)
+      })
+      .catch(e => dispatch({ type: 'LOAD_ERROR', payload: mapErrorToUserMessage(e) }))
+  }, [open, onCountUpdate])
 
   // Escape key to close
   useEffect(() => {
@@ -113,6 +118,11 @@ export default function FailedCaptures({ open, onClose, onUpdate }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
+  // Update count when items change (retry/dismiss)
+  useEffect(() => {
+    onCountUpdate?.(state.items.length)
+  }, [state.items.length, onCountUpdate])
+
   const handleRetry = useCallback(async (id: string) => {
     dispatch({ type: 'RETRYING', id })
     try {
@@ -120,7 +130,7 @@ export default function FailedCaptures({ open, onClose, onUpdate }: Props) {
       dispatch({ type: 'RETRIED', id })
       onUpdate?.()
     } catch (e) {
-      dispatch({ type: 'RETRY_ERROR', id, message: String(e) })
+      dispatch({ type: 'RETRY_ERROR', id, message: mapErrorToUserMessage(e) })
     }
   }, [onUpdate])
 
@@ -131,7 +141,7 @@ export default function FailedCaptures({ open, onClose, onUpdate }: Props) {
       dispatch({ type: 'DISMISSED', id })
       onUpdate?.()
     } catch (e) {
-      dispatch({ type: 'DISMISS_ERROR', id, message: String(e) })
+      dispatch({ type: 'DISMISS_ERROR', id, message: mapErrorToUserMessage(e) })
     }
   }, [onUpdate])
 

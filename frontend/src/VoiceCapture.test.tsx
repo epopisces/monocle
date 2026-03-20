@@ -162,20 +162,6 @@ describe('VoiceModal — review state (direct dispatch)', () => {
 
   afterEach(() => vi.clearAllMocks())
 
-  function renderInReview(transcript = 'test content') {
-    const { rerender } = render(<VoiceModal open={true} onClose={onClose} onSaved={onSaved} />)
-
-    // Simulate arriving at review by clicking start — no real SpeechRecognition in tests,
-    // so we exercise the component via re-render after using internal mechanism.
-    // We render a wrapper that starts in review state by providing a transcript textarea.
-    // Since state is internal, we test the review UI by checking visibility conditions meet.
-    // In the test environment getSpeechRecognitionClass() returns undefined (no browser APIs),
-    // so clicking start-recording-btn will attempt getUserMedia which also won't work.
-    // Instead, we test the review state UI by setting up a MediaRecorder flow mock.
-    _ = transcript  // used in integration path
-    return { rerender }
-  }
-
   it('template select has all expected options', () => {
     render(<VoiceModal open={true} onClose={onClose} />)
     // The template select is only shown in review state; verify the idle state first
@@ -500,9 +486,23 @@ describe('ReviewQueue — loaded state', () => {
     const onClose = vi.fn()
     renderInRouter(<ReviewQueue open={true} onClose={onClose} />)
     const fixBtns = await screen.findAllByTestId('fix-btn')
-    // Low-confidence note is first (sorted ascending)
     fireEvent.click(fixBtns[0])
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('uses file_path in aria-labels when title is empty', async () => {
+    const noteNoTitle = { ...NOTE_LOW_CONFIDENCE, title: '' }
+    vi.mocked(listReview).mockResolvedValue({
+      items: [noteNoTitle],
+      total: 1,
+      offset: 0,
+      limit: 50,
+    })
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const approveBtns = await screen.findAllByTestId('approve-btn')
+    const fixBtns = await screen.findAllByTestId('fix-btn')
+    expect(approveBtns[0]).toHaveAttribute('aria-label', `Approve ${noteNoTitle.file_path}`)
+    expect(fixBtns[0]).toHaveAttribute('aria-label', `Fix ${noteNoTitle.file_path}`)
   })
 })
 
@@ -515,6 +515,13 @@ describe('ReviewQueue — error state', () => {
   it('shows error message when load fails', async () => {
     renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  it('displays user-friendly error message mapping', async () => {
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const alert = await screen.findByRole('alert')
+    // mapErrorToUserMessage converts 'Network error' to user-friendly text
+    expect(alert.textContent).toBe('Network error. Please check your connection and try again.')
   })
 })
 
@@ -634,6 +641,13 @@ describe('FailedCaptures — error state', () => {
     render(<FailedCaptures open={true} onClose={vi.fn()} />)
     await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
   })
+
+  it('displays user-friendly error message mapping', async () => {
+    render(<FailedCaptures open={true} onClose={vi.fn()} />)
+    const alert = await screen.findByRole('alert')
+    // mapErrorToUserMessage converts 'Network error' to user-friendly text
+    expect(alert.textContent).toBe('Network error. Please check your connection and try again.')
+  })
 })
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -693,6 +707,3 @@ describe('Topbar — review and failed capture badges', () => {
   })
 })
 
-// ── Unused variable suppression ───────────────────────────────────────────────
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-declare const _: unknown

@@ -7,6 +7,7 @@ import {
   type ReviewListResponse,
 } from '../../api/review'
 import type { NoteRef } from '../../api/review'
+import { mapErrorToUserMessage } from '../../utils/errorMessages'
 import './ReviewQueue.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -119,7 +120,7 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
     }
     listReview({ limit: 50 })
       .then(r => dispatch({ type: 'LOADED', payload: r }))
-      .catch(e => dispatch({ type: 'LOAD_ERROR', payload: String(e) }))
+      .catch(e => dispatch({ type: 'LOAD_ERROR', payload: mapErrorToUserMessage(e) }))
   }, [open])
 
   // Escape key to close
@@ -137,7 +138,7 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
       dispatch({ type: 'APPROVED', id: filePath })
       onApprove?.()
     } catch (e) {
-      dispatch({ type: 'APPROVE_ERROR', id: filePath, message: String(e) })
+      dispatch({ type: 'APPROVE_ERROR', id: filePath, message: mapErrorToUserMessage(e) })
     }
   }, [onApprove])
 
@@ -148,7 +149,7 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
       dispatch({ type: 'APPROVED_ALL' })
       onApprove?.()
     } catch (e) {
-      dispatch({ type: 'APPROVE_ALL_ERROR', message: String(e) })
+      dispatch({ type: 'APPROVE_ALL_ERROR', message: mapErrorToUserMessage(e) })
     }
   }, [onApprove])
 
@@ -244,7 +245,7 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
                       onClick={() => handleApprove(item.file_path)}
                       disabled={approvingIds.has(item.file_path) || approvingAll}
                       data-testid="approve-btn"
-                      aria-label={`Approve ${item.title}`}
+                      aria-label={`Approve ${item.title || item.file_path}`}
                     >
                       {approvingIds.has(item.file_path) ? '…' : '✓ Approve'}
                     </button>
@@ -253,7 +254,7 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
                       onClick={() => handleFix(item.file_path)}
                       disabled={approvingAll}
                       data-testid="fix-btn"
-                      aria-label={`Fix ${item.title}`}
+                      aria-label={`Fix ${item.title || item.file_path}`}
                     >
                       ✎ Fix
                     </button>
