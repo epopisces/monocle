@@ -157,6 +157,9 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
     accumulatedRef.current = ''
 
     const SpeechRec = voiceBackend === 'web_speech' ? getSpeechRecognitionClass() : null
+    // voiceBackend is intentionally in the deps array below — if the prop changes
+    // after mount (App.tsx fetches server settings), the next call to startRecording
+    // must use the updated value.
     if (SpeechRec) {
       // ── Web Speech API path ──────────────────────────────────────────────
       const recognition = new SpeechRec()
@@ -244,7 +247,7 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
         dispatch({ type: 'SAVE_ERROR', message: 'Microphone access denied.' })
       }
     }
-  }, [])
+  }, [voiceBackend])
 
   const stopRecording = useCallback(() => {
     if (recognitionRef.current) {

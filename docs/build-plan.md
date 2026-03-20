@@ -2,7 +2,7 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-19
+last-updated: 2026-03-20
 active-milestone: M13
 ---
 
@@ -128,6 +128,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M22 | Integration Testing & Obsidian Compatibility | NOT STARTED |
 | M23 | Process Manager & Dev Automation | NOT STARTED |
 | M24 | OneNote Import Plugin | NOT STARTED |
+| M25 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
 
 ---
 
@@ -168,6 +169,26 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 
 **Status: RESOLVED — 2026-03-17**
 **Resolution:** Observable crash on 2026-03-16 but re-test on 2026-03-17 passed all tests. Transient environment issue or silent wheel re-release. Rust backend now fully operational. If crash reappears, apply `SegmentAPI` fallback. See [full details](milestones.md#spike-4-chromedb-rust-backend-crash-on-python-314-windows).
+
+---
+
+### SPIKE-5: Web Speech API Cross-Browser Validation
+
+**Resolve by:** M25 (Voice Feature Hardening & Cross-Browser Compatibility)
+**Status:** PENDING — discovered during M19 code review (2026-03-20)
+**Context:** The `VoiceModal` component has two recording paths:
+  1. **Web Speech API** (primary when SpeechRecognition is available) — real-time interim transcript, no server call during recording
+  2. **MediaRecorder + Whisper** (fallback) — always works, uploads audio blob for transcription
+
+Currently the Web Speech API path has **zero test coverage**. The fallback always kicks in (particularly after the stale-closure bug fix), so untested code paths could hide production bugs for users with Web Speech enabled. Cross-browser support is also uncertain (Safari partial, Firefox spotty, mobile varies).
+
+**Validation tasks:**
+  - Write comprehensive tests for `recognition.onresult`, `recognition.onerror` (per error type), `recognition.onend`, and `errorHandled` flag
+  - Cross-browser testing: Chrome/Edge (full support), Safari (partial), Firefox, mobile (iOS/Android)
+  - Verify real-time interim transcript UX in supported browsers
+  - Document browser-specific quirks
+
+**Decision point:** Commit to full Web Speech API support with test coverage, or mark as "best-effort, primary path is MediaRecorder" with a UI warning?
 
 ---
 

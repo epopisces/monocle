@@ -594,3 +594,14 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 
 - Updated fix: Enhanced \_rebuild_tool_input_models()\ with:  1) \orce=True\ parameter for aggressive rebuild of MockCoreSchema; 2) Eager call to \	ool.parameters()\ to trigger schema generation at init time rather than lazily during agent.run_stream(). This resolves forward references and validators before observability code tries to serialize tools.
 
+
+## 2026-03-20
+### Claude Sonnet 4.6 (Code Review)
+- **M19 Post-release code review** — reviewed VoiceModal, ReviewQueue, FailedCaptures, Topbar, App.tsx, transcribe.ts, ingest_failures.py, failed_registry.py
+- **Bug fixed: stale closure on oiceBackend prop** (VoiceModal.tsx): startRecording useCallback had [] deps but used oiceBackend prop; users with web_speech backend configured would always fall through to MediaRecorder. Fixed by adding oiceBackend to deps array.
+- **Bug fixed: FailedCaptures badge erases after panel close** (FailedCaptures.tsx): useEffect watching state.items.length called onCountUpdate(0) on RESET (panel close), clearing the Topbar badge permanently. Fixed by guarding the effect with if (!open) return.
+- **Bug fixed: retry/dismiss errors silently swallowed** (FailedCaptures.tsx): RETRY_ERROR/DISMISS_ERROR reducer actions set state.error but the component only rendered the error alert when status === 'error' (load failures). Errors from retry/dismiss operations were never shown to users. Fixed: changed condition from status === 'error' to error !== null.
+- **Security note**: FailedIngestRegistry stores raw exception strings (str(exc)) as error_message and the FailedCaptures panel renders them. No XSS risk (React text escaping), but these can expose internal file paths and service URLs. Mitigated by existing 1000-char truncation; full fix deferred (requires backend change to categorize errors).
+- **Testing gaps addressed**: Added 6 tests — retry error display, dismiss error display (×2 each), badge count persistence after panel close, voiceBackend prop change picked up by startRecording
+- **Result**: 689 backend tests passing, 260 frontend tests passing (6 new), EXIT 0
+

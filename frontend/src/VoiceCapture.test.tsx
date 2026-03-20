@@ -707,3 +707,117 @@ describe('Topbar — review and failed capture badges', () => {
   })
 })
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  FailedCaptures — error state recovery
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('FailedCaptures — retry error state', () => {
+  beforeEach(() => {
+    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  it('shows error alert when retry fails', async () => {
+    vi.mocked(retryIngestFailure).mockRejectedValue(new Error('HTTP 422'))
+    render(<FailedCaptures open={true} onClose={vi.fn()} />)
+    const retryBtn = await screen.findByTestId('retry-btn')
+    await act(async () => { fireEvent.click(retryBtn) })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  it('keeps item in list when retry fails', async () => {
+    vi.mocked(retryIngestFailure).mockRejectedValue(new Error('HTTP 422'))
+    render(<FailedCaptures open={true} onClose={vi.fn()} />)
+    const retryBtn = await screen.findByTestId('retry-btn')
+    await act(async () => { fireEvent.click(retryBtn) })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    // Item must still be present
+    expect(screen.getAllByTestId('failed-item')).toHaveLength(1)
+  })
+})
+
+describe('FailedCaptures — dismiss error state', () => {
+  beforeEach(() => {
+    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  it('shows error alert when dismiss fails', async () => {
+    vi.mocked(deleteIngestFailure).mockRejectedValue(new Error('HTTP 404'))
+    render(<FailedCaptures open={true} onClose={vi.fn()} />)
+    const dismissBtn = await screen.findByTestId('dismiss-btn')
+    await act(async () => { fireEvent.click(dismissBtn) })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+  })
+
+  it('keeps item in list when dismiss fails', async () => {
+    vi.mocked(deleteIngestFailure).mockRejectedValue(new Error('HTTP 404'))
+    render(<FailedCaptures open={true} onClose={vi.fn()} />)
+    const dismissBtn = await screen.findByTestId('dismiss-btn')
+    await act(async () => { fireEvent.click(dismissBtn) })
+    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
+    expect(screen.getAllByTestId('failed-item')).toHaveLength(1)
+  })
+})
+
+describe('FailedCaptures — badge count persistence after panel close', () => {
+  afterEach(() => vi.clearAllMocks())
+
+  it('does NOT call onCountUpdate(0) when panel closes (badge must persist)', async () => {
+    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
+    const onCountUpdate = vi.fn()
+
+    const { rerender } = render(
+      <FailedCaptures open={true} onClose={vi.fn()} onCountUpdate={onCountUpdate} />
+    )
+    // Wait for the load to complete and count to be reported
+    await waitFor(() => expect(onCountUpdate).toHaveBeenCalledWith(1))
+    onCountUpdate.mockClear()
+
+    // Close the panel
+    rerender(<FailedCaptures open={false} onClose={vi.fn()} onCountUpdate={onCountUpdate} />)
+
+    // onCountUpdate must NOT be called with 0 on close
+    await waitFor(() => {}, { timeout: 100 })
+    expect(onCountUpdate).not.toHaveBeenCalled()
+  })
+})
+
+describe('VoiceModal — voiceBackend prop respected after prop change', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
+  })
+
+  it('uses web_speech when voiceBackend prop is updated to web_speech', async () => {
+    // Stub SpeechRecognition as available
+    const mockRecognitionInstance = {
+      continuous: false,
+      interimResults: false,
+      lang: '',
+      onresult: null as ((e: unknown) => void) | null,
+      onerror: null as ((e: unknown) => void) | null,
+      onend: null as (() => void) | null,
+      start: vi.fn(),
+      abort: vi.fn(),
+      stop: vi.fn(),
+    }
+    const MockSpeechRec = vi.fn(() => mockRecognitionInstance)
+    vi.stubGlobal('SpeechRecognition', MockSpeechRec)
+
+    const { rerender } = render(
+      <VoiceModal open={true} onClose={vi.fn()} voiceBackend="whisper" />
+    )
+    // Update the prop to web_speech (simulates App.tsx settings fetch completing)
+    rerender(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('start-recording-btn'))
+    })
+
+    // SpeechRecognition constructor must have been called (web_speech path)
+    expect(MockSpeechRec).toHaveBeenCalledOnce()
+    expect(mockRecognitionInstance.start).toHaveBeenCalledOnce()
+  })
+})
+

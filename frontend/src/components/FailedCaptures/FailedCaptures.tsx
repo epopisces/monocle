@@ -118,10 +118,12 @@ export default function FailedCaptures({ open, onClose, onCountUpdate, onUpdate 
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  // Update count when items change (retry/dismiss)
+  // Update count when items change due to retry/dismiss — but NOT when the panel
+  // closes (RESET zeroes out items, which would clear the badge in App.tsx).
   useEffect(() => {
+    if (!open) return
     onCountUpdate?.(state.items.length)
-  }, [state.items.length, onCountUpdate])
+  }, [open, state.items.length, onCountUpdate])
 
   const handleRetry = useCallback(async (id: string) => {
     dispatch({ type: 'RETRYING', id })
@@ -185,7 +187,8 @@ export default function FailedCaptures({ open, onClose, onCountUpdate, onUpdate 
             </div>
           )}
 
-          {status === 'error' && (
+          {/* Show error for initial load failures AND for inline retry/dismiss failures */}
+          {error !== null && (
             <p className="failed-panel__error" role="alert">{error}</p>
           )}
 
