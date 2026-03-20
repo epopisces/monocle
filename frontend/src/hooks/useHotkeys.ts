@@ -34,8 +34,31 @@ export interface HotkeyHandlers {
 
 /** Returns true when the event target is an editable element where the shortcut should NOT fire */
 function inEditableContext(e: KeyboardEvent): boolean {
-  const tag = (e.target as HTMLElement).tagName
-  return tag === 'INPUT' || tag === 'TEXTAREA'
+  const target = e.target
+  if (!target || !(target instanceof HTMLElement)) {
+    return false
+  }
+
+  const tag = target.tagName
+
+  // Native form inputs
+  if (tag === 'INPUT' || tag === 'TEXTAREA') {
+    return true
+  }
+
+  // CodeMirror and other contenteditable elements
+  // isContentEditable walks up the DOM tree, so it catches both
+  // the element itself and any contenteditable parent
+  if (target.isContentEditable) {
+    return true
+  }
+
+  // Accessible text inputs (e.g., role="textbox")
+  if (target.getAttribute('role') === 'textbox') {
+    return true
+  }
+
+  return false
 }
 
 export function useHotkeys(handlers: HotkeyHandlers): void {

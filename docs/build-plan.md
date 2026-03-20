@@ -26,7 +26,7 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M21 — Teams Integration
+**Active Milestone:** M21 — Integration Testing & Obsidian Compatibility
 **Last Completed:** M20 — Stats, Keyboard Shortcuts & Command Palette (2026-03-21)
 **Blocked By:** None
 **Session Notes (M17 — Document Browser, Search & Template Editor UI):**

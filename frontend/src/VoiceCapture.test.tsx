@@ -46,6 +46,14 @@ vi.mock('./api/health', () => ({
   }),
 }))
 
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual<typeof import('react-router-dom')>('react-router-dom')
+  return {
+    ...actual,
+    useNavigate: vi.fn(),
+  }
+})
+
 import {
   listReview,
   approveNote,
@@ -60,6 +68,8 @@ import {
 } from './api/ingest'
 
 import { transcribeAudio } from './api/transcribe'
+
+import { useNavigate } from 'react-router-dom'
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -423,6 +433,8 @@ describe('ReviewQueue — empty state', () => {
 })
 
 describe('ReviewQueue — loaded state', () => {
+  const mockNavigate = vi.fn()
+
   beforeEach(() => {
     vi.mocked(listReview).mockResolvedValue({
       items: [NOTE_HIGH_CONFIDENCE, NOTE_LOW_CONFIDENCE],
@@ -430,8 +442,12 @@ describe('ReviewQueue — loaded state', () => {
       offset: 0,
       limit: 50,
     })
+    vi.mocked(useNavigate).mockReturnValue(mockNavigate)
   })
-  afterEach(() => vi.clearAllMocks())
+  afterEach(() => {
+    vi.clearAllMocks()
+    mockNavigate.mockClear()
+  })
 
   it('renders review items after load', async () => {
     renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
@@ -532,11 +548,15 @@ describe('ReviewQueue — loaded state', () => {
     expect(fixBtns[0]).toHaveAttribute('aria-label', `Fix ${noteNoTitle.file_path}`)
   })
   it('navigates to /docs?path=<encoded> on Fix click', async () => {
-    // Verify that the Fix button correctly encodes the file path
-    const path = NOTE_LOW_CONFIDENCE.file_path
-    const encoded = encodeURIComponent(path)
-    // Expected encoding: "ideas/note-a.md" → "ideas%2Fnote-a.md"
-    expect(encoded).toBe('ideas%2Fnote-a.md')
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const fixBtns = await screen.findAllByTestId('fix-btn')
+    fireEvent.click(fixBtns[0])
+
+    const expectedPath = NOTE_LOW_CONFIDENCE.file_path
+    const expectedEncoded = encodeURIComponent(expectedPath)
+    const expectedUrl = `/docs?path=${expectedEncoded}`
+
+    expect(mockNavigate).toHaveBeenCalledWith(expectedUrl)
   })
 
   it('approve button keeps item in list when error occurs', async () => {

@@ -192,17 +192,3 @@ class TestWatcherAndSchedulerStartup:
         assert resp.status_code == 200
         assert resp.json()["status"] in ("ready", "degraded")
 
-
-class TestDevTelemetryBlock:
-    """Test the telemetry block printed by `python -m monocle dev`."""
-
-    @pytest.mark.skip(reason="Subprocess output capture is flaky in pytest environments; CLI is tested via integration tests")
-    def test_dev_command_prints_telemetry_block(self, tmp_path):
-        """The `dev` command prints a [TELEMETRY] block before handing off.
-        
-        NOTE: This test is skipped because subprocess output capture is unreliable
-        in pytest (especially when running as part of a full suite). The telemetry
-        block is simple string output — it's verified by manual testing and integration
-        tests. The core functionality (starting the server) is tested by test_dev_mode_startup.
-        """
-        pass

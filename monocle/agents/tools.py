@@ -178,7 +178,17 @@ class VaultTools:
                     query,
                 )
             else:
-                # No AI — fall back to substring search in MemoryIndex
+                # No AI provider available. ChromaIndex requires embeddings; only MemoryIndex
+                # supports substring matching via query_text parameter.
+                from monocle.index.memory import MemoryIndex
+
+                if not isinstance(self._index, MemoryIndex):
+                    raise ValueError(
+                        "Semantic search requires an AI provider. "
+                        "Configure ai.provider in config.yaml "
+                        "(e.g., ollama, foundry_local, azure_openai)."
+                    )
+
                 scored = await _to_thread(
                     self._index.search,
                     [],

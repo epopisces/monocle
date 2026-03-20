@@ -153,15 +153,24 @@ export default function CommandPalette({ open, onClose, extraActions = [] }: Com
       switch (e.key) {
         case 'ArrowDown':
           e.preventDefault()
-          setActiveIdx(i => Math.min(i + 1, filtered.length - 1))
+          // Guard against empty results — no navigation possible
+          if (filtered.length > 0) {
+            setActiveIdx(i => Math.min(i + 1, filtered.length - 1))
+          }
           break
         case 'ArrowUp':
           e.preventDefault()
-          setActiveIdx(i => Math.max(i - 1, 0))
+          // Guard against empty results — no navigation possible
+          if (filtered.length > 0) {
+            setActiveIdx(i => Math.max(i - 1, 0))
+          }
           break
         case 'Enter':
           e.preventDefault()
-          execute(activeIdx)
+          // Guard against empty results — no action to execute
+          if (filtered.length > 0) {
+            execute(activeIdx)
+          }
           break
         case 'Escape':
           e.preventDefault()
