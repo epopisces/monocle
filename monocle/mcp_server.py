@@ -30,10 +30,11 @@ import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated, Any
 from urllib.parse import parse_qs
 
 from mcp.server.fastmcp import FastMCP
+from pydantic import BeforeValidator
 
 if TYPE_CHECKING:
     from monocle.ai.base import AIProvider
@@ -118,6 +119,53 @@ mcp = FastMCP("monocle", stateless_http=True)
 _MAX_SEARCH_RESULTS = 10
 _MAX_LIST_RESULTS = 50
 _MAX_BODY_LENGTH = 50_000  # matches IngestRequest.content character limit
+
+
+# ---------------------------------------------------------------------------
+# Helper: normalise tags from various LLM-produced formats
+# ---------------------------------------------------------------------------
+
+
+def _normalize_tags(value: Any) -> list[str] | None:
+    """Normalise tags from any LLM-produced format to a flat list[str].
+
+    LLMs frequently send tags as:
+    - A proper JSON array: ["work", "python"]
+    - A JSON array string: '["work", "python"]'
+    - A Python literal dict: "{'category': ['work', 'python']}"
+    - A plain comma-separated string: "work, python"
+    - A dict object: {"category": ["work", "python"]}
+    """
+    if value is None or isinstance(value, list):
+        return value
+    if isinstance(value, dict):
+        result: list[str] = []
+        for v in value.values():
+            if isinstance(v, list):
+                result.extend(str(x) for x in v if x is not None)
+            elif v is not None:
+                result.append(str(v))
+        return result or None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        # Try JSON first (handles double-quoted strings)
+        try:
+            parsed = json.loads(s)
+            return _normalize_tags(parsed)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        # Try Python literal eval (handles single-quoted strings / Python dicts)
+        try:
+            import ast
+            parsed = ast.literal_eval(s)
+            return _normalize_tags(parsed)
+        except (ValueError, SyntaxError):
+            pass
+        # Final fallback: comma-separated plain text
+        return [t.strip() for t in s.split(",") if t.strip()] or None
+    return [str(value)]
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +362,7 @@ async def create_note(
     body: str,
     note_type: str = "other",
     domain: str = "personal",
-    tags: list[str] | None = None,
+    tags: Annotated[list[str] | None, BeforeValidator(_normalize_tags)] = None,
 ) -> str:
     """Create a new note in the vault from a template.
 

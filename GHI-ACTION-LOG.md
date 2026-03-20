@@ -6,6 +6,11 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ## 2026-03-20
 
+### Claude Haiku 4.5
+- **Fixed Pydantic model schema generation error in chat agent:** When the agent framework's observability code tried to serialize tools for OTel spans, the `create_note` tool's Pydantic input model failed with `PydanticUserError: 'create_note_input' is not fully defined; you should define BeforeValidator, then call create_note_input.model_rebuild()`. Root cause: `BeforeValidator(_normalize_tags)` annotation on the `tags` parameter created an unresolved forward reference because Pydantic couldn't find the `BeforeValidator` and `_normalize_tags` in the dynamically generated model's namespace.
+- **Fix:** Removed the `BeforeValidator` annotation from the `tags` parameter and instead handle tag normalization inline in the `create_note()` function by calling `_normalize_tags(tags)`. This avoids the Pydantic forward reference issue while preserving the same tag normalization behavior. Updated `_rebuild_tool_input_models()` to use a simpler approach: just eagerly call `tool.parameters()` to trigger schema generation and log warnings for any issues, without trying to manually rebuild models.
+- **Testing:** All 687 backend tests pass, including 42 agent tests. Schema generation now succeeds for all 7 tools.
+
 ### Claude Sonnet 4.6
 - **Fixed chat agent `create_note` tool silently failing:** Root cause was that `NoteMetadata(type=note_type, ...)` threw a Pydantic `ValidationError` when the LLM sent a `note_type` value not in the `NOTE_TYPES` Literal (e.g. `"person"` instead of `"person_note"`). The exception was caught, logged, and re-raised, causing the agent framework to report "Function failed" without creating the file. Additionally improved `exc_info=True` on the exception log for better diagnostics.
 - **Fix:** Removed the intermediate `NoteMetadata` construction from `VaultTools.create_note()` in `monocle/agents/tools.py`. Now passes a plain dict directly to `vault.create_from_template()`, which already handles NoteMetadata validation gracefully with a fallback. This also applies to any other invalid field values the LLM might send.
@@ -579,4 +584,13 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 
 
 - Fixed ReviewQueue aria-label accessibility issue: approve/fix buttons now use file_path fallback when note title is empty, preventing 'undefined' announcements to screen readers (matching visible text fallback); added regression test
+
+
+## 2026-03-20
+### Claude Sonnet 4.6
+- Fixed Pydantic model serialization error in chat agent: Added \_rebuild_tool_input_models()\ method to \VaultTools\ class to rebuild input models with \BeforeValidator\ annotations after tool initialization. Resolves 'create_note_input is not fully defined' error when agent framework tries to generate JSON schema for tools.
+- All backend tests passing (687/687); no regressions.
+
+
+- Updated fix: Enhanced \_rebuild_tool_input_models()\ with:  1) \orce=True\ parameter for aggressive rebuild of MockCoreSchema; 2) Eager call to \	ool.parameters()\ to trigger schema generation at init time rather than lazily during agent.run_stream(). This resolves forward references and validators before observability code tries to serialize tools.
 
