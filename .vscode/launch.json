@@ -74,6 +74,18 @@
         "group": "frontend",
         "order": 1
       }
+    },
+    {
+      "name": "E2E Tests (Playwright debug)",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["playwright", "test", "--headed", "--debug"],
+      "cwd": "${workspaceFolder}",
+      "presentation": {
+        "group": "monocle",
+        "order": 5
+      }
     }
   ],
   "compounds": [

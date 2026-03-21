@@ -70,7 +70,6 @@ export default function CommandPalette({ open, onClose, extraActions = [] }: Com
   const [query, setQuery] = useState('')
   const [activeIdx, setActiveIdx] = useState(0)
 
-  // ── Static navigation actions ─────────────────────────────────────────────
   const baseActions: PaletteAction[] = useMemo(() => [
     {
       id: 'nav-chat',
@@ -109,14 +108,18 @@ export default function CommandPalette({ open, onClose, extraActions = [] }: Com
     },
   ], [navigate, onClose])
 
-  const allActions = [...baseActions, ...extraActions]
+  const allActions = useMemo(() => [...baseActions, ...extraActions], [baseActions, extraActions])
 
   // ── Filter & sort ─────────────────────────────────────────────────────────
-  const filtered = allActions
-    .map(action => ({ action, score: scoreMatch(query, action) }))
-    .filter(({ score }) => score > 0)
-    .sort((a, b) => b.score - a.score)
-    .map(({ action }) => action)
+  const filtered = useMemo(
+    () =>
+      allActions
+        .map(action => ({ action, score: scoreMatch(query, action) }))
+        .filter(({ score }) => score > 0)
+        .sort((a, b) => b.score - a.score)
+        .map(({ action }) => action),
+    [allActions, query],
+  )
 
   // ── Reset state when opened ───────────────────────────────────────────────
   useEffect(() => {

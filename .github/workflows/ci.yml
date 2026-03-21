@@ -1,0 +1,153 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, master]
+  push:
+    branches: [main, master]
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv (with integrity verification)
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend dependencies
+        run: uv sync
+
+      - name: Run backend tests
+        run: uv run python -m pytest monocle/tests/ -x --tb=short -q
+
+  frontend:
+    name: Frontend tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: TypeScript type-check
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+      - name: Run frontend unit tests
+        run: npm run test -- --run
+        working-directory: frontend
+
+  e2e:
+    name: E2E tests (Playwright)
+    runs-on: ubuntu-latest
+    # E2E requires a live Ollama instance — run only when Ollama is available.
+    # To skip on PRs from forks (no secrets), gate on the repository owner.
+    # Remove the 'if' condition once a self-hosted runner with Ollama is configured.
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install uv (with integrity verification)
+        uses: astral-sh/setup-uv@v3
+
+      - name: Install backend dependencies
+        run: uv sync
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Create minimal config.yaml
+        run: |
+          cat > config.yaml << 'EOF'
+          vault:
+            path: ./test_vault
+            inbox_path: ./test_vault/inbox
+            watch: false
+          ai:
+            provider: ollama
+            model: llama3.2
+            embed_model: nomic-embed-text
+          index:
+            backend: chroma
+            chroma_persist_path: ./data/chroma_ci
+          review:
+            auto_approve_threshold_pct: 0
+            queue_threshold: 0.6
+          server:
+            host: "127.0.0.1"
+            port: 8000
+          EOF
+
+      - name: Create test vault directory
+        run: mkdir -p test_vault/inbox
+
+      - name: Start backend server
+        run: |
+          uv run uvicorn monocle.main:app --host 127.0.0.1 --port 8000 &
+          # Wait until the server responds
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:8000/api/health && break
+            sleep 2
+          done
+        env:
+          MONOCLE_CONFIG: ./config.yaml
+
+      - name: Build frontend and serve it
+        run: |
+          npm run build
+          npx serve -s dist -l 5173 &
+          # Wait for frontend server
+          for i in $(seq 1 15); do
+            curl -sf http://localhost:5173 && break
+            sleep 2
+          done
+        working-directory: frontend
+
+      - name: Install E2E test dependencies
+        run: npm install
+
+      - name: Run E2E tests
+        run: npx playwright test --reporter=github
+        env:
+          CI: "true"
+          MONOCLE_CONFIG: ./config.yaml
+
+      - name: Upload Playwright report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

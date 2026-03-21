@@ -51,6 +51,8 @@ env/
 .venv/
 
 # === Node / Frontend ===
+node_modules/
+package-lock.json
 frontend/node_modules/
 frontend/dist/
 frontend/.vite/
@@ -69,6 +71,10 @@ frontend/.DS_Store
 frontend/package-lock.json
 frontend/yarn.lock
 frontend/pnpm-lock.yaml
+
+# === Playwright E2E ===
+playwright-report/
+test-results/
 
 # === IDE & Editor ===
 # .vscode/ #? during development intend to store tasks.json and launch.json with the code

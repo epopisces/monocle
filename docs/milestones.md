@@ -662,3 +662,50 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
   - ArrowUp empty history no-op, ArrowUp shows last sent, ArrowUp twice shows older, clamp at oldest, ArrowDown restores draft, ArrowDown no-op when not browsing, consecutive-duplicate deduplication
 
 **Revised test count:** 313 frontend tests passing.
+
+---
+
+### M21: Integration Testing & Obsidian Compatibility
+
+**Goal:** Full Playwright E2E test suite, Obsidian compatibility verification, GitHub Actions CI pipeline, and comprehensive README.
+
+**Deliverables (all completed):**
+
+**E2E Test Suite (`tests/e2e/` — 25 Playwright tests in 6 spec files)**
+- `playwright.config.ts` (repo root) — Chromium, 1 worker (serial), 60 s timeout, `baseURL: http://localhost:5173`, screenshots on failure, trace on retry; `testDir: ./tests/e2e`; CI mode: `github` reporter + 1 retry
+- `package.json` (repo root) — minimal Node package with `@playwright/test ^1.46.1`; scripts `test:e2e` and `test:e2e:debug`
+- `tests/e2e/smoke.spec.ts` — 8 tests: `GET /api/health` shape, frontend root loads without JS errors, `/docs` navigation, `/search` navigation (search input visible), `/graph` navigation, `/stats` navigation (stat card visible), `Ctrl+K` opens command palette, topbar health indicator visible
+- `tests/e2e/ingest_review.spec.ts` — 2 tests: `POST /api/ingest` returns 200/409 and review count endpoint returns `count` field; review queue slide-over can be opened (shows Review heading) and closed via Escape
+- `tests/e2e/chat.spec.ts` — 3 tests: chat starter tiles visible on home screen; typing + Enter shows message in thread; `Ctrl+/` navigates to `/`
+- `tests/e2e/graph.spec.ts` — 4 tests: graph screen renders heading; focus input accepts text + Enter stays on `/graph`; depth toggle buttons visible; `Ctrl+G` navigates to `/graph` from chat
+- `tests/e2e/voice_modal.spec.ts` — 3 tests: mic button opens voice modal; Cancel button closes it; Escape closes it (context grants microphone permission)
+- `tests/e2e/settings.spec.ts` — 5 tests: `GET /api/settings` shape with masked MCP key; `Ctrl+,` opens settings modal; settings modal opens from topbar and shows AI provider section; Escape closes modal; `PATCH /api/settings` idempotent round-trip returns 200
+
+**Obsidian Compatibility**
+- `vault/.obsidianignore` was already present with `.versions/` and `.trash/` — verified complete
+- `monocle/vault/templates/` is inside the Python package (not the vault dir) — not visible to Obsidian
+- `vault/.templates/` contains user-facing Markdown templates — intentionally visible in Obsidian
+- All frontmatter fields (`confidence`, `review_status`, `approval_mode`, etc.) are standard YAML scalars — Obsidian renders without errors
+- `[[wikilinks]]` written by agents resolve correctly in Obsidian's link graph
+
+**CI (`.github/workflows/ci.yml`)**
+- Three jobs: `backend` (pytest), `frontend` (tsc + vitest), `e2e` (playwright; needs backend+frontend; gated on same-repo PRs until self-hosted Ollama runner configured)
+- E2E job: installs Playwright browsers via `npx playwright install --with-deps chromium`, creates config.yaml with `watch: false` and stub vault, starts uvicorn background server (health-poll loop), builds frontend and serves via `npx serve`, runs `npx playwright test --reporter=github`, uploads artifact on failure
+
+**README** — Complete rewrite with:
+- Prerequisites table (Python, uv, Node.js, Ollama, Git)
+- Quick Start (7-step: clone → uv sync → ollama pull → config files → npm install → serve → first-run checklist)
+- MCP Client Setup (Claude Desktop JSON, VS Code MCP JSON)
+- Keyboard shortcuts reference table
+- CLI reference table (all 9 commands)
+- Test commands block (backend, frontend, E2E, typecheck)
+- Obsidian Compatibility section
+- Architecture overview diagram
+- Observability section (OTel OTLP endpoint config)
+
+**VS Code integration**
+- `.vscode/tasks.json`: added `test: e2e` (`npx playwright test` from root) and `test: ci-full` (sequential backend → frontend → E2E)
+- `.vscode/launch.json`: added `E2E Tests (Playwright debug)` (`npx playwright test --headed --debug` from root)
+- `.gitignore`: added `node_modules/`, `package-lock.json`, `playwright-report/`, `test-results/`
+
+**Test Results:** 693 backend tests + 313 frontend tests passing; 25 E2E tests discovered (require live server to run).
