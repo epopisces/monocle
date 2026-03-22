@@ -145,14 +145,12 @@ Create `.vscode/mcp.json` in your workspace:
 
 | Shortcut | Action |
 |---|---|
-| `Ctrl+K` | Open command palette |
-| `Ctrl+/` | Navigate to Chat |
-| `Ctrl+D` | Navigate to Docs |
-| `Ctrl+F` | Navigate to Search |
-| `Ctrl+G` | Navigate to Graph |
+| `Ctrl+/` | Open command palette |
+| `Ctrl+K` | Focus semantic search |
+| `Ctrl+Shift+K` | Focus keyword search |
+| `Ctrl+N` | New note (navigate to Docs) |
 | `Ctrl+,` | Open Settings |
-| `Shift+V` | Open Voice capture modal |
-| `Shift+R` | Open Review queue |
+| `Ctrl+\` | Toggle sidebar |
 | `Escape` | Close the active modal/panel |
 
 ---

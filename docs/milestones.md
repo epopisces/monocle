@@ -674,10 +674,10 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 **E2E Test Suite (`tests/e2e/` — 25 Playwright tests in 6 spec files)**
 - `playwright.config.ts` (repo root) — Chromium, 1 worker (serial), 60 s timeout, `baseURL: http://localhost:5173`, screenshots on failure, trace on retry; `testDir: ./tests/e2e`; CI mode: `github` reporter + 1 retry
 - `package.json` (repo root) — minimal Node package with `@playwright/test ^1.46.1`; scripts `test:e2e` and `test:e2e:debug`
-- `tests/e2e/smoke.spec.ts` — 8 tests: `GET /api/health` shape, frontend root loads without JS errors, `/docs` navigation, `/search` navigation (search input visible), `/graph` navigation, `/stats` navigation (stat card visible), `Ctrl+K` opens command palette, topbar health indicator visible
+- `tests/e2e/smoke.spec.ts` — 8 tests: `GET /api/health` shape, frontend root loads without JS errors, `/docs` navigation, `/search` navigation (search input visible), `/graph` navigation, `/stats` navigation (stat card visible), `Ctrl+/` opens command palette, topbar health indicator visible
 - `tests/e2e/ingest_review.spec.ts` — 2 tests: `POST /api/ingest` returns 200/409 and review count endpoint returns `count` field; review queue slide-over can be opened (shows Review heading) and closed via Escape
-- `tests/e2e/chat.spec.ts` — 3 tests: chat starter tiles visible on home screen; typing + Enter shows message in thread; `Ctrl+/` navigates to `/`
-- `tests/e2e/graph.spec.ts` — 4 tests: graph screen renders heading; focus input accepts text + Enter stays on `/graph`; depth toggle buttons visible; `Ctrl+G` navigates to `/graph` from chat
+- `tests/e2e/chat.spec.ts` — 3 tests: chat starter tiles visible on home screen; typing + Enter shows message in thread; `Ctrl+/` opens command palette
+- `tests/e2e/graph.spec.ts` — 3 tests: graph screen renders heading; focus input accepts text + Enter stays on `/graph`; depth toggle buttons visible
 - `tests/e2e/voice_modal.spec.ts` — 3 tests: mic button opens voice modal; Cancel button closes it; Escape closes it (context grants microphone permission)
 - `tests/e2e/settings.spec.ts` — 5 tests: `GET /api/settings` shape with masked MCP key; `Ctrl+,` opens settings modal; settings modal opens from topbar and shows AI provider section; Escape closes modal; `PATCH /api/settings` idempotent round-trip returns 200
 

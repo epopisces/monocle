@@ -33,10 +33,16 @@ test.describe('Chat screen', () => {
     await expect(userMsg).toBeVisible({ timeout: 10_000 });
   });
 
-  test('keyboard shortcut Ctrl+/ opens chat (navigates to /)', async ({ page }) => {
+  test('keyboard shortcut Ctrl+/ opens command palette', async ({ page }) => {
+    // Command palette can be opened from any screen
     await page.goto('/stats');
     await page.waitForLoadState('networkidle');
+    
+    // Ctrl+/ opens the command palette (not navigation)
     await page.keyboard.press('Control+/');
-    await expect(page).toHaveURL('/', { timeout: 5_000 });
+    
+    // Palette should appear with search input or role=dialog
+    const palette = page.locator('[data-testid="command-palette"], [role="dialog"] input[type="text"]').first();
+    await expect(palette).toBeVisible({ timeout: 5_000 });
   });
 });

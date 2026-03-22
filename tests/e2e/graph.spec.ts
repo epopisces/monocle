@@ -34,12 +34,4 @@ test.describe('Graph screen', () => {
     const depthBtn = page.locator('button:has-text("1"), button:has-text("2"), button:has-text("3"), [data-testid="depth-1"]').first();
     await expect(depthBtn).toBeVisible({ timeout: 10_000 });
   });
-
-  test('keyboard shortcut Ctrl+G navigates to /graph from chat', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-    // The useHotkeys hook binds Ctrl+G for graph
-    await page.keyboard.press('Control+g');
-    await expect(page).toHaveURL(/\/graph/, { timeout: 5_000 });
-  });
 });
