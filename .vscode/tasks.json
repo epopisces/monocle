@@ -247,6 +247,26 @@
       "group": "build",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []
+    },
+    {
+      // Run Playwright E2E tests from the repo root.
+      // Requires: API server at http://localhost:8000 AND frontend dev server at http://localhost:5173
+      "label": "test: e2e",
+      "type": "shell",
+      "command": "npx playwright test",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      // Full CI pipeline: backend → frontend → E2E (mirrors .github/workflows/ci.yml).
+      // Requires: API server and frontend dev server already running for the E2E step.
+      "label": "test: ci-full",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm run test -- --run && cd .. && npx playwright test",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
     }
   ]
 }

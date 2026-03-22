@@ -24,6 +24,8 @@ export interface HotkeyHandlers {
   onNewNote?: () => void
   /** Ctrl+/ / Cmd+/ — open command palette */
   onCommandPalette?: () => void
+  /** Ctrl+, / Cmd+, — open settings */
+  onOpenSettings?: () => void
   /** Ctrl+\ / Cmd+\ — toggle sidebar */
   onToggleSidebar?: () => void
   /** Escape — close active modal or slide-over */
@@ -62,6 +64,18 @@ function inEditableContext(e: KeyboardEvent): boolean {
 }
 
 export function useHotkeys(handlers: HotkeyHandlers): void {
+  // Extract handler callbacks to stable references for deps array
+  const {
+    onSearch,
+    onKeywordSearch,
+    onNewNote,
+    onCommandPalette,
+    onOpenSettings,
+    onToggleSidebar,
+    onCloseModal,
+    onSaveNote,
+  } = handlers
+
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       const ctrl = e.ctrlKey || e.metaKey
@@ -69,13 +83,20 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
       // ── Ctrl+/ — command palette ─────────────────────────────────────────
       if (ctrl && !e.shiftKey && e.key === '/') {
         e.preventDefault()
-        handlers.onCommandPalette?.()
+        onCommandPalette?.()
         return
       }
 
       // ── Escape — close modal ─────────────────────────────────────────────
       if (e.key === 'Escape') {
-        handlers.onCloseModal?.()
+        onCloseModal?.()
+        return
+      }
+
+      // ── Ctrl+, — open settings ──────────────────────────────────────────
+      if (ctrl && !e.shiftKey && e.key === ',') {
+        e.preventDefault()
+        onOpenSettings?.()
         return
       }
 
@@ -83,7 +104,7 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
       if (ctrl && e.shiftKey && e.key.toLowerCase() === 'k') {
         if (!inEditableContext(e)) {
           e.preventDefault()
-          handlers.onKeywordSearch?.()
+          onKeywordSearch?.()
         }
         return
       }
@@ -91,9 +112,9 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
       // The remaining shortcuts should not fire when typing in an input/textarea
       // UNLESS they are Ctrl+S which is safe to intercept even in editors.
       if (ctrl && !e.shiftKey && e.key.toLowerCase() === 's') {
-        if (handlers.onSaveNote) {
+        if (onSaveNote) {
           e.preventDefault()
-          handlers.onSaveNote()
+          onSaveNote()
         }
         return
       }
@@ -105,21 +126,20 @@ export function useHotkeys(handlers: HotkeyHandlers): void {
         switch (e.key.toLowerCase()) {
           case 'k':
             e.preventDefault()
-            handlers.onSearch?.()
+            onSearch?.()
             return
           case 'n':
             e.preventDefault()
-            handlers.onNewNote?.()
+            onNewNote?.()
             return
           case '\\':
             e.preventDefault()
-            handlers.onToggleSidebar?.()
+            onToggleSidebar?.()
             return
         }
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [handlers],
+    [onSearch, onKeywordSearch, onNewNote, onCommandPalette, onOpenSettings, onToggleSidebar, onCloseModal, onSaveNote],
   )
 
   useEffect(() => {
