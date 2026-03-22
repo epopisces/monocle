@@ -238,10 +238,6 @@ telemetry:
 
 ---
 
-## What is Monocle?
-
-A Monocle is a single pane of glass (of course).  The Monocle application is personal agentic knowledge system, with multiple ways of capturing information and storing it as in an Obsidian-compatible markdown vault.  It provides a FastAPI backend with semantic search, multi-agent orchestration, and a React web frontend for chat, document browsing, and review as well as a node graph for viewing relationships. The app uses agents to ingest unstructured inputs, extract structured metadata, and maintain a confidence-based review queue.  It is designed to be plugin-extensible to allow for additional knowledge sources, model integration, and more.
-
 # Developing this Application
 
 I have created varous iterations of this app as a hobby project for some time.  After finishing an iteration that produced a working (but slow) application using Microsoft Agent Framework + Ollama, I encountered Nate B Jones [Open Brain concept](https://www.youtube.com/watch?v=2JiMmye2ez), which took the knowledge layer and placed it behind an MCP server for speed, modularity, and to avoid vendor lock-in.  This led me to start from scratch once more.
