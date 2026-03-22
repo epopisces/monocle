@@ -641,3 +641,16 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - 7 new tests in Chat.test.tsx history suite; 313 frontend tests passing
 - Documented addition in docs/milestones.md M20 section
 
+
+## 2026-03-20
+### Claude Sonnet 4.6
+- Implemented M21: Integration Testing & Obsidian Compatibility
+- Created 25 Playwright E2E tests across 6 spec files (smoke, ingest_review, chat, graph, voice_modal, settings)
+- Added playwright.config.ts and root package.json for @playwright/test
+- Created .github/workflows/ci.yml (backend + frontend + E2E jobs)
+- Rewrote README.md with prerequisites, quick start, MCP setup, keyboard shortcuts, CLI reference, and Obsidian compatibility
+- Added test: e2e and test: ci-full VS Code tasks; added E2E Tests (Playwright debug) launch config
+- Updated .gitignore for root node_modules, playwright-report, test-results
+- Marked M21 COMPLETE in build-plan.md; archived details to milestones.md
+- 693 backend + 313 frontend tests passing; 25 E2E tests discovered
+

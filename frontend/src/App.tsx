@@ -14,6 +14,7 @@ import FailedCaptures from './components/FailedCaptures/FailedCaptures'
 import CommandPalette, { type PaletteAction } from './components/CommandPalette/CommandPalette'
 import { useHotkeys } from './hooks/useHotkeys'
 import { getReviewCount } from './api/review'
+import { listIngestFailures } from './api/ingest'
 import { getSettings } from './api/settings'
 import { triggerWeeklySummary, triggerReindex } from './api/agents'
 
@@ -44,12 +45,23 @@ function AppContent() {
     } catch { /* non-fatal */ }
   }, [])
 
-  // Poll review count on mount and every 30 s
+  const refreshFailedCount = useCallback(async () => {
+    try {
+      const items = await listIngestFailures()
+      setFailedCount(items.length)
+    } catch { /* non-fatal */ }
+  }, [])
+
+  // Poll both counts on mount and every 30 s
   useEffect(() => {
     refreshReviewCount()
-    const id = setInterval(refreshReviewCount, 30_000)
+    refreshFailedCount()
+    const id = setInterval(() => {
+      refreshReviewCount()
+      refreshFailedCount()
+    }, 30_000)
     return () => clearInterval(id)
-  }, [refreshReviewCount])
+  }, [refreshReviewCount, refreshFailedCount])
 
   const handleVoiceSaved = useCallback(() => {
     refreshReviewCount()
@@ -69,6 +81,8 @@ function AppContent() {
     onKeywordSearch: () => navigate('/search'),
     onNewNote: () => navigate('/docs'),
     onCommandPalette: () => setCommandPaletteOpen(o => !o),
+    onOpenSettings: () => setSettingsOpen(true),
+    onToggleSidebar: () => { /* sidebar toggle not yet implemented */ },
     onCloseModal: closeAllModals,
   })
 

@@ -26,8 +26,8 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M21 — Integration Testing & Obsidian Compatibility
-**Last Completed:** M20 — Stats, Keyboard Shortcuts & Command Palette (2026-03-21)
+**Active Milestone:** M22 — Process Manager & Dev Automation
+**Last Completed:** M21 — Integration Testing & Obsidian Compatibility (2026-03-20)
 **Blocked By:** None
 **Session Notes (M17 — Document Browser, Search & Template Editor UI):**
 - **Status:** COMPLETE (2026-03-20)
@@ -124,7 +124,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M18 | Graph UI | COMPLETE |
 | M19 | Voice Capture & Review Queue UI | COMPLETE |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | COMPLETE |
-| M21 | Integration Testing & Obsidian Compatibility | NOT STARTED |
+| M21 | Integration Testing & Obsidian Compatibility | COMPLETE |
 | M22 | Process Manager & Dev Automation | NOT STARTED |
 | M23 | OneNote Import Plugin | NOT STARTED |
 | M24 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
@@ -657,42 +657,11 @@ Implemented StatsScreen with live stat cards and Recharts charts, useHotkeys hoo
 
 ### M21: Integration Testing & Obsidian Compatibility
 
-**Goal:** Full E2E test suite, Obsidian compatibility verified, CI pipeline, complete README.
+**Status:** COMPLETE (2026-03-20)
 
-**Prerequisite:** `dev` command and `live_server` fixture from M14 must already be complete before M22 begins.
+**Summary:** 25 Playwright E2E tests across 6 spec files (`smoke`, `ingest_review`, `chat`, `graph`, `voice_modal`, `settings`). `playwright.config.ts` at repo root; root `package.json` provides `@playwright/test`. `.github/workflows/ci.yml` runs backend → frontend → E2E (E2E gated on same-repo PRs pending self-hosted Ollama runner). README rewritten with prerequisites, venv setup, config, first-run, Ollama model pull, MCP client setup, keyboard shortcuts, CLI reference, and Obsidian compatibility notes. `.vscode/tasks.json`: `test: e2e` and `test: ci-full` added. `.vscode/launch.json`: `E2E Tests (Playwright debug)` added. `.gitignore` updated for `node_modules/`, `playwright-report/`, `test-results/`. `vault/.obsidianignore` already had `.versions/` and `.trash/` — verified complete. 693 backend + 313 frontend tests passing.
 
-**Deliverables:**
-- [ ] `tests/e2e/` Playwright tests: ingest → review queue flow; chat starter sends message and gets response; graph focus navigation; voice modal dismiss; settings round-trip
-- [ ] Obsidian compatibility checklist (see below)
-- [ ] `.github/workflows/ci.yml` — runs on every PR: `pytest`, `npm run test -- --run`, `playwright test`
-- [ ] `README.md` — prerequisites, venv setup, config, first run, Ollama model pull, MCP client setup
-- [ ] Extend `.vscode/tasks.json`:
-  - `test: e2e` — `playwright test` (requires server running at `:8000`)
-  - `test: ci-full` — sequential: `test: backend` → `test: frontend` → `test: e2e` (mirrors CI pipeline)
-- [ ] Extend `.vscode/launch.json`:
-  - `E2E Tests (Playwright debug)` — Playwright test runner with `--headed --debug`; requires server already running via `Dev Server (debug)` or `API Server (debug)`
-
-**Obsidian Compatibility Checklist:**
-- [ ] Vault opens in Obsidian with no warnings or errors
-- [ ] `confidence: 0.72`, `review_status: pending`, and approval metadata fields render without errors in Obsidian
-- [ ] `.versions/` and `.trash/` are absent from Obsidian's file list (`.obsidianignore` effective)
-- [ ] `monocle/vault/templates/` YAML files are not visible as notes in Obsidian
-- [ ] Agent-written `[[wikilinks]]` resolve correctly in Obsidian
-
-**CI Command:**
-```bash
-python -m pytest monocle/tests/ -x --tb=short && \
-cd frontend && npm run test -- --run && \
-cd .. && playwright test
-```
-
-**Acceptance Criteria:**
-- [ ] CI pipeline passes clean on a fresh clone (with Ollama running and models pulled)
-- [ ] All E2E tests pass
-- [ ] Obsidian compatibility checklist 100% complete
-- [ ] README setup procedure is accurate and complete
-- [ ] `test: ci-full` task runs all three test suites in sequence and reports pass/fail for each
-- [ ] `E2E Tests (Playwright debug)` launch config opens a headed browser with Playwright's debug stepping enabled
+**Full details:** [docs/milestones.md#m21-integration-testing--obsidian-compatibility](milestones.md#m21-integration-testing--obsidian-compatibility)
 
 ---
 

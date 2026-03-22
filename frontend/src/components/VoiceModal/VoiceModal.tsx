@@ -113,6 +113,7 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
   const recognitionRef = useRef<any>(null)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null)
   const audioChunksRef = useRef<Blob[]>([])
+  const streamRef = useRef<MediaStream | null>(null)
   // Accumulator ref avoids stale closures in recognition.onresult
   const accumulatedRef = useRef('')
 
@@ -149,6 +150,11 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
       try { mediaRecorderRef.current.stop() } catch { /* ignore */ }
+    }
+    // Always release the microphone stream
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop())
+      streamRef.current = null
     }
   }
 
@@ -214,6 +220,7 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
       // ── MediaRecorder (Whisper fallback) path ────────────────────────────
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+        streamRef.current = stream
         audioChunksRef.current = []
 
         const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
@@ -227,10 +234,15 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
         const MAX_AUDIO_BYTES = 25 * 1024 * 1024  // 25 MB — matches backend limit
 
         mr.onstop = async () => {
-          // Stop all tracks to release mic indicator
-          stream.getTracks().forEach(t => t.stop())
-
+          // Stop and cleanup: release stream + process audio
           const blob = new Blob(audioChunksRef.current, { type: mr.mimeType || 'audio/webm' })
+          
+          // Release stream tracks (guarantee release even if transcription fails)
+          if (streamRef.current) {
+            streamRef.current.getTracks().forEach(t => t.stop())
+            streamRef.current = null
+          }
+
           if (blob.size > MAX_AUDIO_BYTES) {
             dispatch({ type: 'IDLE_ERROR', message: 'Recording too large (max 25 MB). Please try a shorter note.' })
             return
@@ -246,6 +258,11 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
 
         mr.start()
       } catch {
+        // Release stream on error (getUserMedia failed or other exception)
+        if (streamRef.current) {
+          streamRef.current.getTracks().forEach(t => t.stop())
+          streamRef.current = null
+        }
         dispatch({ type: 'SAVE_ERROR', message: 'Microphone access denied.' })
       }
     }
