@@ -53,9 +53,17 @@ def _make_index(settings):
 def serve(
     host: str | None = typer.Option(None, help="Override server.host from config"),
     port: int | None = typer.Option(None, help="Override server.port from config"),
+    separate_processes: bool = typer.Option(
+        False,
+        "--separate-processes",
+        help="Run watcher and scheduler as separate OS processes (Phase 3+)",
+    ),
 ) -> None:
     """Start the unified Monocle server (API + MCP + watcher + scheduler)."""
     import uvicorn
+
+    if separate_processes:
+        os.environ["MONOCLE_SEPARATE_PROCESSES"] = "1"
 
     settings = _load_settings()
     uvicorn.run(
@@ -75,11 +83,18 @@ def serve(
 def dev(
     host: str | None = typer.Option(None, help="Override server.host from config"),
     port: int | None = typer.Option(None, help="Override server.port from config"),
+    separate_processes: bool = typer.Option(
+        False,
+        "--separate-processes",
+        help="Run watcher and scheduler as separate OS processes (Phase 3+)",
+    ),
 ) -> None:
     """Start Monocle in development mode (prefixed logging, auto-restart on crash)."""
     import uvicorn
 
     os.environ["MONOCLE_DEV"] = "true"
+    if separate_processes:
+        os.environ["MONOCLE_SEPARATE_PROCESSES"] = "1"
     settings = _load_settings()
 
     # Print telemetry status block before handing off to uvicorn
@@ -386,17 +401,209 @@ def versions_restore(
 
 
 # ---------------------------------------------------------------------------
-# Reserved stubs (future optional process separation)
+# watch — standalone inbox watcher (Phase 3+ separate-process entry point)
 # ---------------------------------------------------------------------------
 
 
 @app.command()
 def watch() -> None:
-    """[RESERVED] Start only the inbox watcher process (future use)."""
-    typer.echo("[INFO] 'watch' is reserved for future optional process separation.")
+    """Start only the inbox file watcher as a standalone process.
+
+    Used by ProcessManager when ``server.separate_processes: true``.
+    Can also be launched directly for debugging the ingest pipeline.
+    """
+    settings = _load_settings()
+
+    if not settings.vault.watch:
+        typer.echo("[WATCHER] vault.watch=false in config; nothing to do.")
+        raise typer.Exit()
+
+    from monocle.telemetry import configure_telemetry
+
+    configure_telemetry(settings)
+
+    async def _run() -> None:
+        from monocle.ingest import IngestPipeline
+        from monocle.ingest.failed_registry import FailedIngestRegistry
+        from monocle.ingest.plugin import IngestPluginRegistry
+        from monocle.ingest.plugins import register_default_plugins
+        from monocle.models import IngestRequest
+        from monocle.watcher import InboxWatcher
+
+        vault_ = _make_vault(settings)
+        index_ = _make_index(settings)
+
+        ai_ = None
+        try:
+            from monocle.ai import get_provider
+
+            ai_ = get_provider(settings)
+        except Exception as exc:
+            typer.echo(f"[WATCHER] AI provider init failed (non-fatal): {exc}", err=True)
+
+        registry_ = IngestPluginRegistry.get()
+        if not registry_.plugins:
+            register_default_plugins(registry_)
+
+        failed_registry_ = FailedIngestRegistry()
+        pipeline_ = IngestPipeline(
+            vault=vault_,
+            index=index_,
+            ai=ai_,
+            settings=settings,
+            registry=registry_,
+            failed_registry=failed_registry_,
+        )
+
+        async def _inbox_callback(file_path: str) -> None:
+            from pathlib import Path as _Path
+
+            try:
+                content = await asyncio.to_thread(
+                    _Path(file_path).read_text, encoding="utf-8"
+                )
+                req = IngestRequest(content=content, source="web")
+                await pipeline_.run(req)
+                logger.info("[WATCHER] Ingest complete: %s", file_path)
+            except Exception as exc:
+                logger.error(
+                    "[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True
+                )
+
+        watcher_ = InboxWatcher(
+            inbox_path=settings.vault.inbox_path,
+            ingest_callback=_inbox_callback,
+            debounce_s=settings.vault.debounce_ms / 1000,
+        )
+        await watcher_.start()
+        typer.echo(
+            f"[WATCHER] Watching {settings.vault.inbox_path} — press Ctrl+C to stop"
+        )
+        try:
+            await asyncio.Event().wait()  # block until cancelled
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await watcher_.stop()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        typer.echo("\n[WATCHER] Stopped.")
+
+
+# ---------------------------------------------------------------------------
+# scheduler — standalone APScheduler (Phase 3+ separate-process entry point)
+# ---------------------------------------------------------------------------
 
 
 @app.command()
-def capture() -> None:
-    """[RESERVED] Start only the capture server process (future use)."""
-    typer.echo("[INFO] 'capture' is reserved for future optional process separation.")
+def scheduler() -> None:
+    """Start only the APScheduler as a standalone process.
+
+    Used by ProcessManager when ``server.separate_processes: true``.
+    Can also be launched directly for debugging scheduled jobs.
+    """
+    settings = _load_settings()
+
+    from monocle.telemetry import configure_telemetry
+
+    configure_telemetry(settings)
+
+    async def _run() -> None:
+        from monocle.agents.reindex import ReindexAgent
+        from monocle.agents.scheduler import MonocleScheduler
+
+        vault_ = _make_vault(settings)
+        index_ = _make_index(settings)
+
+        ai_ = None
+        try:
+            from monocle.ai import get_provider
+
+            ai_ = get_provider(settings)
+        except Exception as exc:
+            typer.echo(f"[SCHEDULER] AI provider init failed (non-fatal): {exc}", err=True)
+
+        reindex_agent_ = ReindexAgent(
+            chunk_size=settings.index.chunk_size_tokens,
+            chunk_overlap=settings.index.chunk_overlap_tokens,
+            embed_fn=ai_.embed if ai_ is not None else None,
+        )
+
+        sched = MonocleScheduler(settings)
+        await sched.start()
+
+        if settings.agents.reindex.enabled:
+
+            async def _do_reindex() -> None:
+                logger.info("[SCHEDULER] Scheduled re-index starting")
+                await reindex_agent_.run(vault_, index_)
+                logger.info("[SCHEDULER] Scheduled re-index complete")
+
+            sched.add_cron_job("reindex", _do_reindex, settings.agents.reindex.cron)
+
+        if settings.agents.weekly_summary.enabled:
+            from monocle.agents.weekly_summary import WeeklySummaryAgent
+
+            _ws_agent = WeeklySummaryAgent()
+
+            async def _do_weekly() -> None:
+                if ai_ is None:
+                    logger.warning(
+                        "[SCHEDULER] Weekly summary skipped — AI not available"
+                    )
+                    return
+                try:
+                    fp = await _ws_agent.run(vault_, index_, ai_, settings)
+                    logger.info("[SCHEDULER] Weekly summary written: %s", fp)
+                except Exception as exc:
+                    logger.error("[SCHEDULER] Weekly summary failed: %s", exc)
+
+            sched.add_cron_job(
+                "weekly_summary", _do_weekly, settings.agents.weekly_summary.cron
+            )
+
+        typer.echo("[SCHEDULER] APScheduler running — press Ctrl+C to stop")
+        try:
+            await asyncio.Event().wait()  # block until cancelled
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await sched.stop()
+
+    try:
+        asyncio.run(_run())
+    except KeyboardInterrupt:
+        typer.echo("\n[SCHEDULER] Stopped.")
+
+
+# ---------------------------------------------------------------------------
+# capture — API-only server (Phase 3+ separate-process entry point)
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def capture(
+    host: str | None = typer.Option(None, help="Override server.host from config"),
+    port: int | None = typer.Option(None, help="Override server.port from config"),
+) -> None:
+    """Start only the capture API server (no watcher or scheduler).
+
+    Used by ProcessManager when ``server.separate_processes: true`` — the
+    watcher and scheduler run as sibling processes instead.
+    Can also be launched directly to run just the API for debugging.
+    """
+    import uvicorn
+
+    # Signal main.py lifespan to skip creating the inline watcher/scheduler
+    # because they are managed externally (by ProcessManager subprocesses).
+    os.environ["MONOCLE_COMPONENT"] = "capture"
+
+    settings = _load_settings()
+    uvicorn.run(
+        "monocle.main:app",
+        host=host or settings.server.host,
+        port=port or settings.server.port,
+        reload=False,
+    )

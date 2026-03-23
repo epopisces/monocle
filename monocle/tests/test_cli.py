@@ -404,15 +404,32 @@ class TestPullModels:
 
 
 class TestStubs:
-    def test_watch_stub(self):
-        result = runner.invoke(app, ["watch"])
-        assert result.exit_code == 0
-        assert "reserved" in result.output.lower()
+    def test_watch_exits_when_vault_watch_disabled(self, tmp_path: Path):
+        """watch command exits immediately when vault.watch=false."""
+        vault = _make_vault(tmp_path)
+        settings = _mock_settings(str(vault))
+        settings.vault.watch = False
 
-    def test_capture_stub(self):
-        result = runner.invoke(app, ["capture"])
+        with patch("monocle.cli._load_settings", return_value=settings):
+            result = runner.invoke(app, ["watch"])
+
         assert result.exit_code == 0
-        assert "reserved" in result.output.lower()
+        assert "vault.watch=false" in result.output.lower()
+
+    def test_capture_calls_uvicorn(self, tmp_path: Path, monkeypatch):
+        """capture command sets MONOCLE_COMPONENT and launches uvicorn."""
+        vault = _make_vault(tmp_path)
+        settings = _mock_settings(str(vault))
+        monkeypatch.delenv("MONOCLE_COMPONENT", raising=False)
+
+        with (
+            patch("monocle.cli._load_settings", return_value=settings),
+            patch("uvicorn.run") as mock_uvicorn,
+        ):
+            result = runner.invoke(app, ["capture"])
+
+        assert result.exit_code == 0
+        mock_uvicorn.assert_called_once()
 
 
 # ---------------------------------------------------------------------------

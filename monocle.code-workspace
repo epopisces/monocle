@@ -7,7 +7,11 @@
 	"settings": {
 		"chat.tools.terminal.autoApprove": {
 			"uv": true,
-			"npx tsc": true
+			"npx tsc": true,
+			"/^python run_specific_tests\\.py 2>&1 ; dir test_run_result\\.txt$/": {
+				"approve": true,
+				"matchCommandLine": true
+			}
 		}
 	}
 }

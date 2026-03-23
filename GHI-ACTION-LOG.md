@@ -6,6 +6,17 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ## 2026-03-21
 
+### Claude Sonnet 4.6
+- **Executed M22 — Process Manager & Dev Automation (COMPLETE)**
+  - `monocle/process_manager.py`: Implemented `SubprocessHandle` (start/stop/`_supervise` with exponential-backoff crash-restart: base=1 s, max=30 s; `is_running`, `pid`, `restart_count`) and `ProcessManager` (`start_all()` spawns `watch` + `scheduler` as subprocesses via `sys.executable -m monocle <cmd>` when `separate_processes=True`; `stop_all()`; `status() -> dict`)
+  - `monocle/cli.py`: Made `watch` (standalone `InboxWatcher`; exits if `vault.watch=False`), `scheduler` (standalone `APScheduler`), and `capture` (sets `MONOCLE_COMPONENT=capture` env var + calls `uvicorn.run()`) fully operational; added `--separate-processes` flag to `serve`/`dev` commands; `_load_settings()` helper extracted for testability
+  - `monocle/main.py`: Added `_separate` / `_capture_only` lifespan gating — `scheduler`/`watcher` disabled in capture-only mode; `ProcessManager` wired into lifespan (`start_all()` only when `_separate=True`); `app.state.process_manager` always set
+  - `monocle/tests/test_process_manager.py`: 22 new tests across 5 classes (`TestSubprocessHandle` (8), `TestProcessManagerUnifiedMode` (4), `TestProcessManagerSeparateMode` (5), `TestProcessManagerConfig` (3), `TestMainLifespanSeparateProcesses` (2))
+  - `monocle/tests/test_cli.py`: Updated `TestStubs` — replaced stub-output checks with `test_watch_exits_when_vault_watch_disabled` and `test_capture_calls_uvicorn` for now-operational commands
+  - `.vscode/tasks.json`: Added `test: process_manager` task
+  - **Key fixes this session:** `AsyncClient + ASGITransport` does NOT trigger ASGI lifespan (switched to `TestClient`); `MagicMock` telemetry caused Pydantic `HealthResponse` validation failure (fixed with `settings_mock.telemetry.enabled = False`)
+  - **715 tests passing (22 new), 6 deselected, EXIT 0**
+
 ### Claude Haiku 4.5
 - **Executed M20 — Stats, Keyboard Shortcuts & Command Palette (COMPLETE)**
   - Created `frontend/src/components/Stats/StatsScreen.tsx` with 4 stat cards, Recharts bar charts (notes_by_type, notes_by_domain), quality index section, latency table, loading/error states

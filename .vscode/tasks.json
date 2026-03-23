@@ -159,6 +159,14 @@
       "problemMatcher": []
     },
     {
+      "label": "test: process_manager",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_process_manager.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
       "label": "cli: reindex",
       "type": "shell",
       "command": "uv run python -m monocle reindex",
