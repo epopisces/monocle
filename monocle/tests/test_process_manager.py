@@ -389,145 +389,344 @@ class TestProcessManagerConfig:
 
 
 # ---------------------------------------------------------------------------
-# TestMainLifespanSeparateProcesses
+# TestMainLifespanCaptureOnlyGating
 # ---------------------------------------------------------------------------
 
 
-class TestMainLifespanSeparateProcesses:
-    """Verify that main.py lifespan sets watcher/scheduler to None in capture-only mode."""
+class TestMainLifespanCaptureOnlyGating:
+    """Verify ProcessManager behavior in capture-only and separate-process modes.
+    
+    Note: The real lifespan gating logic (checking _capture_only flag) is tested
+    by existing test_api.py tests. These tests focus on ProcessManager's role in
+    the orchestration.
+    """
 
-    def test_lifespan_capture_only_sets_watcher_none(self, tmp_path):
-        """MONOCLE_COMPONENT=capture must result in app.state.watcher=None."""
-        from fastapi.testclient import TestClient
-        import monocle.main as main_module
-        from monocle.vault import VaultLayer
-        from monocle.index.memory import MemoryIndex
-        from monocle.ingest.failed_registry import FailedIngestRegistry
-        from monocle.ingest import IngestPipeline
-        from monocle.ingest.plugin import IngestPluginRegistry
-        from monocle.ingest.plugins import register_default_plugins
-        from monocle.graph import GraphBuilder
-        from monocle.watcher import ReindexQueue
-        from monocle.agents.reindex import ReindexAgent
+    def test_process_manager_start_all_respects_env_var_separate_processes(self, monkeypatch):
+        """ProcessManager.start_all() should spawn subprocesses when env var is set regardless of config."""
         from monocle.process_manager import ProcessManager
-        from contextlib import asynccontextmanager
-        import asyncio
 
-        captured: dict = {}
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "1")
+        settings = _make_settings(separate=False)  # Config says False, env says True
+        pm = ProcessManager(settings)
 
-        @asynccontextmanager
-        async def _test_lifespan(app):
-            vault = VaultLayer(str(tmp_path))
-            index = MemoryIndex()
-            app.state.vault = vault
-            app.state.index = index
-            settings_mock = MagicMock()
-            settings_mock.telemetry.enabled = False
-            app.state.settings = settings_mock
-            app.state._review_pending_count = None
-            app.state.graph_builder = GraphBuilder(vault)
-            app.state.ai = None
-            rq = ReindexQueue()
-            await rq.start()
-            app.state.reindex_queue = rq
-            app.state.failed_registry = FailedIngestRegistry()
-            registry_ = IngestPluginRegistry.get()
-            if not registry_.plugins:
-                register_default_plugins(registry_)
-            pipeline = IngestPipeline(
-                vault=vault, index=index, ai=AsyncMock(),
-                settings=MagicMock(), registry=registry_,
-                failed_registry=FailedIngestRegistry(),
-            )
-            app.state.ingest_pipeline = pipeline
-            # Simulate capture-only mode: watcher and scheduler are None
-            app.state.scheduler = None
-            app.state.watcher = None
-            pm = ProcessManager(_make_settings(separate=False))
-            app.state.process_manager = pm
-            captured["watcher"] = app.state.watcher
-            captured["scheduler"] = app.state.scheduler
+        # Verify effective flag from env var
+        assert pm._is_separate_processes_enabled()
 
-            from monocle.mcp_server import init_mcp_state
-            init_mcp_state(vault, index, None, pipeline, app.state.graph_builder, reindex_queue=rq)
-
-            yield
-
-            await rq.stop()
-
-        with patch.object(main_module, "lifespan", _test_lifespan):
-            app = main_module.create_app()
-            with TestClient(app, raise_server_exceptions=False) as client:
-                resp = client.get("/api/health")
-                assert resp.status_code == 200
-
-        assert captured["watcher"] is None
-        assert captured["scheduler"] is None
-
-    def test_lifespan_separate_processes_starts_process_manager(self, tmp_path):
-        """When separate_processes=True, process_manager is available on app.state."""
-        from fastapi.testclient import TestClient
-        import monocle.main as main_module
-        from monocle.vault import VaultLayer
-        from monocle.index.memory import MemoryIndex
-        from monocle.ingest.failed_registry import FailedIngestRegistry
-        from monocle.ingest import IngestPipeline
-        from monocle.ingest.plugin import IngestPluginRegistry
-        from monocle.ingest.plugins import register_default_plugins
-        from monocle.graph import GraphBuilder
-        from monocle.watcher import ReindexQueue
+    def test_process_manager_effective_flag_honors_config(self, monkeypatch):
+        """ProcessManager effective flag should be True when config.separate_processes=True."""
         from monocle.process_manager import ProcessManager
-        from contextlib import asynccontextmanager
 
-        state_capture: dict = {}
+        monkeypatch.delenv("MONOCLE_SEPARATE_PROCESSES", raising=False)
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
 
-        @asynccontextmanager
-        async def _test_lifespan(app):
-            vault = VaultLayer(str(tmp_path))
-            index = MemoryIndex()
-            app.state.vault = vault
-            app.state.index = index
-            settings_mock = MagicMock()
-            settings_mock.telemetry.enabled = False
-            app.state.settings = settings_mock
-            app.state._review_pending_count = None
-            app.state.graph_builder = GraphBuilder(vault)
-            app.state.ai = None
-            rq = ReindexQueue()
-            await rq.start()
-            app.state.reindex_queue = rq
-            app.state.failed_registry = FailedIngestRegistry()
-            registry_ = IngestPluginRegistry.get()
-            if not registry_.plugins:
-                register_default_plugins(registry_)
-            pipeline = IngestPipeline(
-                vault=vault, index=index, ai=AsyncMock(),
-                settings=MagicMock(), registry=registry_,
-                failed_registry=FailedIngestRegistry(),
-            )
-            app.state.ingest_pipeline = pipeline
-            app.state.scheduler = None
-            app.state.watcher = None
+        assert pm._is_separate_processes_enabled()
 
-            pm = ProcessManager(_make_settings(separate=True))
-            app.state.process_manager = pm
-            state_capture["pm"] = pm
-            state_capture["separate"] = pm.status()["separate_processes"]
+    def test_process_manager_effective_flag_false_when_both_false(self, monkeypatch):
+        """ProcessManager effective flag should be False when both config and env are false/unset."""
+        from monocle.process_manager import ProcessManager
 
-            from monocle.mcp_server import init_mcp_state
-            init_mcp_state(vault, index, None, pipeline, app.state.graph_builder, reindex_queue=rq)
+        monkeypatch.delenv("MONOCLE_SEPARATE_PROCESSES", raising=False)
+        settings = _make_settings(separate=False)
+        pm = ProcessManager(settings)
 
-            yield
+        assert not pm._is_separate_processes_enabled()
 
-            await rq.stop()
 
-        with patch.object(main_module, "lifespan", _test_lifespan):
-            app = main_module.create_app()
-            with TestClient(app, raise_server_exceptions=False) as client:
-                resp = client.get("/api/health")
-                assert resp.status_code == 200
+# ---------------------------------------------------------------------------
+# TestProcessManagerEnvironmentVariable
+# ---------------------------------------------------------------------------
 
-        # Verify process_manager was created with separate_processes=True
-        assert state_capture["pm"] is not None
-        assert state_capture["separate"] is True
+
+class TestProcessManagerEnvironmentVariable:
+    """Tests verifying MONOCLE_SEPARATE_PROCESSES env var handling."""
+
+    def test_is_separate_processes_enabled_honors_env_var(self, monkeypatch):
+        """_is_separate_processes_enabled() returns True when env var is set."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "1")
+        settings = _make_settings(separate=False)  # Mismatch: config says False
+        pm = ProcessManager(settings)
+
+        # Effective flag should be True because env var overrides config
+        assert pm._is_separate_processes_enabled() is True
+
+    def test_is_separate_processes_enabled_config_true_env_unset(self, monkeypatch):
+        """_is_separate_processes_enabled() returns True when config is True."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.delenv("MONOCLE_SEPARATE_PROCESSES", raising=False)
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
+
+        assert pm._is_separate_processes_enabled() is True
+
+    def test_is_separate_processes_enabled_both_false(self, monkeypatch):
+        """_is_separate_processes_enabled() returns False when both config and env are false/unset."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.delenv("MONOCLE_SEPARATE_PROCESSES", raising=False)
+        settings = _make_settings(separate=False)
+        pm = ProcessManager(settings)
+
+        assert pm._is_separate_processes_enabled() is False
+
+    def test_is_separate_processes_enabled_env_var_wrong_value(self, monkeypatch):
+        """_is_separate_processes_enabled() ignores env var if not exactly '1'."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "0")  # or anything else
+        settings = _make_settings(separate=False)
+        pm = ProcessManager(settings)
+
+        # Should be False because only "1" enables the feature
+        assert pm._is_separate_processes_enabled() is False
+
+    @pytest.mark.asyncio
+    async def test_start_all_respects_env_var_over_config(self, monkeypatch):
+        """start_all() spawns subprocesses when env var is set, even if config is False."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "1")
+        settings = _make_settings(separate=False)  # Config says no, env says yes
+        pm = ProcessManager(settings)
+
+        spawned_commands: list[str] = []
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            spawned_commands.append(args[-1])
+            block = asyncio.Event()
+            return _make_mock_proc(block)
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+
+            # Should have spawned because env var overrides config
+            assert "watch" in spawned_commands
+            assert "scheduler" in spawned_commands
+
+            await pm.stop_all()
+
+    def test_status_reflects_effective_env_var(self, monkeypatch):
+        """status() reports separate_processes=True when env var is set."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "1")
+        settings = _make_settings(separate=False)
+        pm = ProcessManager(settings)
+
+        s = pm.status()
+        # status() should reflect the effective flag (True due to env var)
+        assert s["separate_processes"] is True
+
+    @pytest.mark.asyncio
+    async def test_start_all_noop_when_env_var_empty_string(self, monkeypatch):
+        """start_all() is a no-op when env var is an empty string."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "")
+        settings = _make_settings(separate=False)
+        pm = ProcessManager(settings)
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_exec:
+            await pm.start_all()
+
+        # Empty string is not the same as "1", so no-op
+        mock_exec.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_start_all_both_config_and_env_true(self, monkeypatch):
+        """start_all() spawns subprocesses when both config and env specify True."""
+        from monocle.process_manager import ProcessManager
+
+        monkeypatch.setenv("MONOCLE_SEPARATE_PROCESSES", "1")
+        settings = _make_settings(separate=True)  # Redundant but valid
+        pm = ProcessManager(settings)
+
+        spawned_commands: list[str] = []
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            spawned_commands.append(args[-1])
+            block = asyncio.Event()
+            return _make_mock_proc(block)
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+
+            assert len(spawned_commands) == 2
+            await pm.stop_all()
+
+
+# ---------------------------------------------------------------------------
+# TestProcessManagerIdempotency
+# ---------------------------------------------------------------------------
+
+
+class TestProcessManagerIdempotency:
+    """Tests verifying idempotency of start_all()."""
+
+    @pytest.mark.asyncio
+    async def test_start_all_idempotent_double_call_same_handles(self):
+        """Calling start_all() twice returns the same handle objects."""
+        from monocle.process_manager import ProcessManager
+
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            block = asyncio.Event()
+            return _make_mock_proc(block)
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            handles_first = dict(pm._processes)  # Snapshot first set
+
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            handles_second = dict(pm._processes)  # Snapshot second set
+
+            # Same handle object for "watch": idem potency
+            assert handles_first["watch"] is handles_second["watch"]
+            assert handles_first["scheduler"] is handles_second["scheduler"]
+
+            await pm.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_start_all_idempotent_spawns_once(self):
+        """Calling start_all() twice should spawn subprocesses only once."""
+        from monocle.process_manager import ProcessManager
+
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
+
+        spawn_count = 0
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            nonlocal spawn_count
+            spawn_count += 1
+            block = asyncio.Event()
+            return _make_mock_proc(block)
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            count_after_first = spawn_count
+
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            count_after_second = spawn_count
+
+            # Should only spawn 2 (watch + scheduler) on first call.
+            # Second call should not spawn any new processes.
+            assert count_after_first == 2
+            assert count_after_second == 2  # No new spawns
+
+            await pm.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_start_all_no_handle_leak_on_repeat_calls(self):
+        """Repeated start_all() calls don't accumulate handles in _processes."""
+        from monocle.process_manager import ProcessManager
+
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            block = asyncio.Event()
+            return _make_mock_proc(block)
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            for iteration in range(3):
+                await pm.start_all()
+                await asyncio.sleep(0.05)
+                # _processes should always have exactly 2 entries
+                assert len(pm._processes) == 2, f"Iteration {iteration}: expected 2, got {len(pm._processes)}"
+
+            await pm.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_start_all_restarts_crashed_process(self):
+        """start_all() will create a new handle if the old one crashed/exited."""
+        from monocle.process_manager import ProcessManager
+
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
+        spawn_count = 0
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            nonlocal spawn_count
+            spawn_count += 1
+            mock_proc = MagicMock()
+            mock_proc.pid = 100 + spawn_count
+            # Immediately exit
+            async def _exit():
+                return 1
+            mock_proc.wait = _exit
+            mock_proc.returncode = 1
+            mock_proc.terminate = MagicMock()
+            return mock_proc
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            await pm.start_all()
+            await asyncio.sleep(0.10)  # Allow process to exit
+            first_watch_handle = pm._processes["watch"]
+
+            # Call start_all() again — should restart the crashed "watch" process
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            second_watch_handle = pm._processes["watch"]
+
+            # Should have spawned more than 2 times (initial 2 + at least 1 restart)
+            assert spawn_count >= 3
+
+            await pm.stop_all()
+
+    @pytest.mark.asyncio
+    async def test_start_all_idempotent_in_unified_mode(self):
+        """start_all() is a no-op when called multiple times in unified mode."""
+        from monocle.process_manager import ProcessManager
+
+        settings = _make_settings(separate=False)
+        pm = ProcessManager(settings)
+
+        with patch("asyncio.create_subprocess_exec", new=AsyncMock()) as mock_exec:
+            await pm.start_all()
+            await pm.start_all()
+            await pm.start_all()
+
+        # Should never spawn in unified mode, regardless of call count
+        mock_exec.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_status_stable_after_repeated_start_all(self):
+        """status() returns consistent info after repeated start_all() calls."""
+        from monocle.process_manager import ProcessManager
+
+        settings = _make_settings(separate=True)
+        pm = ProcessManager(settings)
+
+        async def _fake_exec(*args, stdin=None, stdout=None, stderr=None):
+            block = asyncio.Event()
+            return _make_mock_proc(block)
+
+        with patch("asyncio.create_subprocess_exec", new=_fake_exec):
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            status_first = pm.status()
+
+            await pm.start_all()
+            await asyncio.sleep(0.05)
+            status_second = pm.status()
+
+            # status() should be identical after second call
+            assert status_first == status_second
+            assert len(status_first["processes"]) == 2
+            assert all(status_first["processes"][name]["running"] for name in ["watch", "scheduler"])
+
+            await pm.stop_all()
+
 

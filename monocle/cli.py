@@ -590,14 +590,17 @@ def capture(
 ) -> None:
     """Start only the capture API server (no watcher or scheduler).
 
-    Used by ProcessManager when ``server.separate_processes: true`` — the
-    watcher and scheduler run as sibling processes instead.
-    Can also be launched directly to run just the API for debugging.
+    Advanced/debug use case: run the API server without any background
+    components (inbox watcher, scheduler). The watcher and scheduler can be
+    run separately via ``monocle watch`` and ``monocle scheduler``.
+
+    Typical users should use ``monocle serve`` or ``monocle serve --separate-processes``
+    instead — those commands handle the full orchestration automatically.
     """
     import uvicorn
 
     # Signal main.py lifespan to skip creating the inline watcher/scheduler
-    # because they are managed externally (by ProcessManager subprocesses).
+    # because they are managed externally (by ProcessManager subprocesses or direct launch).
     os.environ["MONOCLE_COMPONENT"] = "capture"
 
     settings = _load_settings()

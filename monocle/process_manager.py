@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sys
 from typing import TYPE_CHECKING
 
@@ -148,20 +149,55 @@ class ProcessManager:
         """Build subprocess argv for a ``monocle <command>`` subcommand."""
         return [sys.executable, "-m", "monocle", command]
 
+    def _is_separate_processes_enabled(self) -> bool:
+        """Compute the effective separate-processes flag.
+
+        Returns True if EITHER:
+          - config.server.separate_processes is True, OR
+          - MONOCLE_SEPARATE_PROCESSES=1 env var is set
+        """
+        return self._settings.server.separate_processes or os.environ.get(
+            "MONOCLE_SEPARATE_PROCESSES"
+        ) == "1"
+
     async def start_all(self) -> None:
         """Spawn all separable component subprocesses.
 
-        No-op when ``server.separate_processes`` is ``False`` and the
-        ``MONOCLE_SEPARATE_PROCESSES`` env var is not set.
+        Idempotent: calling start_all() multiple times is safe. If a subprocess
+        handle already exists and is running, it will not be respawned.
+
+        No-op when the effective separate-processes flag is False (neither config
+        setting nor MONOCLE_SEPARATE_PROCESSES env var is set).
         """
-        if not self._settings.server.separate_processes:
+        if not self._is_separate_processes_enabled():
             logger.debug(
-                "[ProcessManager] separate_processes=false — unified mode, no subprocesses"
+                "[ProcessManager] separate_processes disabled — unified mode, no subprocesses"
             )
             return
 
         logger.info("[ProcessManager] Starting separated component processes")
         for name in ("watch", "scheduler"):
+            # Idempotency guard: skip if a handle already exists and is running.
+            # This prevents duplicate subprocess spawning on repeated start_all() calls.
+            if name in self._processes:
+                handle = self._processes[name]
+                if handle.is_running:
+                    logger.debug(
+                        "[ProcessManager] Subprocess %s already running (pid=%d), skipping",
+                        name,
+                        handle.pid,
+                    )
+                    continue
+                else:
+                    # Handle exists but is not running (crashed or stopped).
+                    # Clean it up and create a replacement.
+                    logger.debug(
+                        "[ProcessManager] Subprocess %s was running but exited (code=%s),"
+                        " restarting",
+                        name,
+                        handle._proc.returncode if handle._proc else None,
+                    )
+
             handle = SubprocessHandle(name, self._make_args(name))
             await handle.start()
             self._processes[name] = handle
@@ -175,9 +211,13 @@ class ProcessManager:
         self._processes.clear()
 
     def status(self) -> dict:
-        """Return a status dict suitable for embedding in the health endpoint."""
+        """Return a status dict suitable for embedding in the health endpoint.
+
+        The returned ``separate_processes`` field reflects the effective flag
+        (config + env var), not just the config value.
+        """
         return {
-            "separate_processes": self._settings.server.separate_processes,
+            "separate_processes": self._is_separate_processes_enabled(),
             "processes": {
                 name: {
                     "running": handle.is_running,

@@ -176,3 +176,97 @@ describe('apiDelete', () => {
     await expect(apiDelete('/api/ingest/failures/bad-id')).rejects.toBeInstanceOf(ApiError)
   })
 })
+
+// ---------------------------------------------------------------------------
+// Error path coverage
+// ---------------------------------------------------------------------------
+
+describe('ApiError — HTTP 429 rate limit', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('throws ApiError with status 429', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Rate limit exceeded' }), {
+        status: 429,
+        headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
+      }),
+    )
+    await expect(apiGet('/api/ingest')).rejects.toMatchObject({
+      status: 429,
+      message: 'Rate limit exceeded',
+    })
+  })
+
+  it('ApiError is an instance of Error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Too many requests' }), { status: 429 }),
+    )
+    const err = await apiPost('/api/ingest', {}).catch(e => e)
+    expect(err).toBeInstanceOf(Error)
+    expect(err.name).toBe('ApiError')
+  })
+})
+
+describe('ApiError — HTTP 500 / 502 server errors', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('uses fallback message when body has no detail field', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response('Internal Server Error', {
+        status: 500,
+        headers: { 'Content-Type': 'text/plain' },
+      }),
+    )
+    const err = await apiGet('/api/notes').catch(e => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(500)
+    expect(err.message).toBe('HTTP 500')
+  })
+
+  it('extracts detail message from 502 JSON body', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(JSON.stringify({ detail: 'Bad gateway' }), {
+        status: 502,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    const err = await apiGet('/api/health').catch(e => e)
+    expect(err.status).toBe(502)
+    expect(err.message).toBe('Bad gateway')
+  })
+})
+
+describe('ApiError — network failure', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('propagates TypeError from a failed fetch (not wrapped as ApiError)', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(
+      new TypeError('Failed to fetch'),
+    )
+    const err = await apiGet('/api/health').catch(e => e)
+    // Network errors are NOT ApiError — they bubble as TypeError
+    expect(err).toBeInstanceOf(TypeError)
+    expect(err).not.toBeInstanceOf(ApiError)
+  })
+
+  it('POST network failure also propagates raw error', async () => {
+    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(
+      new TypeError('Network request failed'),
+    )
+    const err = await apiPost('/api/ingest', {}).catch(e => e)
+    expect(err).not.toBeInstanceOf(ApiError)
+    expect(err.message).toBe('Network request failed')
+  })
+})
+
+describe('handleResponse — 204 No Content', () => {
+  afterEach(() => vi.restoreAllMocks())
+
+  it('returns undefined for a 204 response', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(null, { status: 204 }),
+    )
+    const result = await apiDelete('/api/notes/some-file.md')
+    expect(result).toBeUndefined()
+  })
+})

@@ -4,6 +4,34 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-03-26
+
+### GitHub Copilot (Haiku 4.5)
+- **Bug fix: ProcessManager env var handling and idempotency**
+  - **Issue 1:** `monocle serve --separate-processes` with `config.server.separate_processes=false` entered capture-only mode but `ProcessManager.start_all()` checked only config â†’ no subprocesses started
+    - Fix: Added `_is_separate_processes_enabled()` method to compute effective flag (config OR env var); updated `start_all()` and `status()` to use effective flag
+  - **Issue 2:** `ProcessManager.start_all()` not idempotent â€” calling twice spawned duplicate supervisor tasks and leaked handles/processes
+    - Fix: Added idempotency guard in `start_all()` to check if handle exists and is running before spawning; logs skipped subprocess at DEBUG level; auto-restarts crashed processes
+  - Testing: Added 14 new tests (8 env var scenarios + 6 idempotency cases): env overrides, repeated calls preserve handle objects, no process spawning on re-entry, handle leak prevention, crash recovery, unified mode safety, stable status()
+  - **729 tests passing (net +14 new tests), EXIT 0**
+
+- **Cleanup: Removed non-portable temporary developer scripts**
+  - Deleted `run_specific_tests.py` (hardcoded Windows paths, forced directory changes, redundant with VS Code tasks and standard `uv run python -m pytest` command)
+  - Deleted temporary test output files: `test_errors.txt`, `test_output.txt`, `test_tool_invocation.py`
+  - Updated `.gitignore` to prevent accidental commit of temporary test artifacts: `test_errors.txt`, `test_output.txt`, `test_run_result.txt`, `test_tool_invocation.py`, `run_specific_tests.py`
+
+- **Documentation: Clarified ProcessManager orchestration model in CLI**
+  - Updated `monocle/cli.py` `capture` command docstring to clarify it's an advanced/debug use case only
+  - Previous docstring incorrectly stated "Used by ProcessManager" but ProcessManager never invokes `monocle capture` (it only spawns `monocle watch` and `monocle scheduler`)
+  - New docstring explains: (1) typical users should use `monocle serve --separate-processes`, (2) `capture` is for advanced debugging only, (3) watcher/scheduler can be run separately if needed
+  - Confirmed `watch` and `scheduler` docstrings already correctly document their use by ProcessManager
+
+- **Test refactoring: Converted weak integration tests to focused unit tests**
+  - Replaced `TestMainLifespanSeparateProcesses` (2 integration tests that patched entire lifespan with mocks, bypassing actual gating logic) with simplified `TestMainLifespanCaptureOnlyGating` (3 focused unit tests on ProcessManager's `_is_separate_processes_enabled()` effective flag computation)
+  - Rationale: Full lifespan integration tests too complex due to infrastructure dependencies (config.server.mcp_access_key_env MagicMock, settings attributes); real lifespan gating already tested by existing `test_api.py` tests (health endpoint, API lifecycle)
+  - Added missing imports to new test methods to fix NameError
+  - **37 process_manager tests now passing, 730 total backend tests (net +1), EXIT 0**
+
 ## 2026-03-21
 
 ### Claude Sonnet 4.6
@@ -665,3 +693,15 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - Marked M21 COMPLETE in build-plan.md; archived details to milestones.md
 - 693 backend + 313 frontend tests passing; 25 E2E tests discovered
 
+
+## 2026-03-26
+
+### Claude Sonnet 4.6
+- **Test coverage gap analysis** — identified 6 high-priority coverage gaps via subagent analysis of all backend and frontend test files
+- **Created rontend/src/useChat.test.ts** — 30+ unit tests for the useChat hook (9 describe groups: initial state, send() SSE events [token/tool_call/tool_error/note_created/done/error/network], session persistence, selectSession, newSession, localStorage)
+- **Created rontend/src/useDebounce.test.ts** — 12 tests for useDebouncedCallback hook (timer behavior, cancel(), unmount cleanup, stable reference identity, latest-fn-closure)
+- **Expanded rontend/src/App.test.tsx** — added polling lifecycle (6 tests), settings propagation (2 tests), and route navigation (4 tests) describe groups; 8 ? 21 tests
+- **Created monocle/tests/test_rate_limit.py** — 9 unit tests for the rate limiter (limiter config, 429 enforcement via _make_limited_app() helper); integration tests marked @pytest.mark.integration
+- **Expanded rontend/src/api.test.ts** — added 8 error-path tests (HTTP 429, 500/502, network TypeError propagation, 204 No Content returns undefined)
+- **Expanded rontend/src/SettingsModal.test.tsx** — added patchSettings rejection (2 tests: error shown, clears on next success) and rotateMcpKey failure (2 tests: error shown, hint unchanged); added data-testid="settings-error" to SettingsModal component
+- All tests green: 737 backend passed (2 skipped), 378 frontend passed
