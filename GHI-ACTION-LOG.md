@@ -697,11 +697,11 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 ## 2026-03-26
 
 ### Claude Sonnet 4.6
-- **Test coverage gap analysis** — identified 6 high-priority coverage gaps via subagent analysis of all backend and frontend test files
-- **Created rontend/src/useChat.test.ts** — 30+ unit tests for the useChat hook (9 describe groups: initial state, send() SSE events [token/tool_call/tool_error/note_created/done/error/network], session persistence, selectSession, newSession, localStorage)
-- **Created rontend/src/useDebounce.test.ts** — 12 tests for useDebouncedCallback hook (timer behavior, cancel(), unmount cleanup, stable reference identity, latest-fn-closure)
-- **Expanded rontend/src/App.test.tsx** — added polling lifecycle (6 tests), settings propagation (2 tests), and route navigation (4 tests) describe groups; 8 ? 21 tests
-- **Created monocle/tests/test_rate_limit.py** — 9 unit tests for the rate limiter (limiter config, 429 enforcement via _make_limited_app() helper); integration tests marked @pytest.mark.integration
-- **Expanded rontend/src/api.test.ts** — added 8 error-path tests (HTTP 429, 500/502, network TypeError propagation, 204 No Content returns undefined)
-- **Expanded rontend/src/SettingsModal.test.tsx** — added patchSettings rejection (2 tests: error shown, clears on next success) and rotateMcpKey failure (2 tests: error shown, hint unchanged); added data-testid="settings-error" to SettingsModal component
+- **Test coverage gap analysis** ï¿½ identified 6 high-priority coverage gaps via subagent analysis of all backend and frontend test files
+- **Created rontend/src/useChat.test.ts** ï¿½ 30+ unit tests for the useChat hook (9 describe groups: initial state, send() SSE events [token/tool_call/tool_error/note_created/done/error/network], session persistence, selectSession, newSession, localStorage)
+- **Created rontend/src/useDebounce.test.ts** ï¿½ 12 tests for useDebouncedCallback hook (timer behavior, cancel(), unmount cleanup, stable reference identity, latest-fn-closure)
+- **Expanded rontend/src/App.test.tsx** ï¿½ added polling lifecycle (6 tests), settings propagation (2 tests), and route navigation (4 tests) describe groups; 8 ? 21 tests
+- **Created monocle/tests/test_rate_limit.py** ï¿½ 9 unit tests for the rate limiter (limiter config, 429 enforcement via _make_limited_app() helper); integration tests marked @pytest.mark.integration
+- **Expanded rontend/src/api.test.ts** ï¿½ added 8 error-path tests (HTTP 429, 500/502, network TypeError propagation, 204 No Content returns undefined)
+- **Expanded rontend/src/SettingsModal.test.tsx** ï¿½ added patchSettings rejection (2 tests: error shown, clears on next success) and rotateMcpKey failure (2 tests: error shown, hint unchanged); added data-testid="settings-error" to SettingsModal component
 - All tests green: 737 backend passed (2 skipped), 378 frontend passed
