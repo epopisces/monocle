@@ -46,8 +46,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Module-level OTel instruments (created once per process, not per instance)
+#region #*   Module-level OTel instruments (created once per process, not per instance)
 # ---------------------------------------------------------------------------
 _otel_instruments: dict[str, Any] | None = None
 
@@ -91,8 +93,10 @@ def _get_otel_instruments() -> dict[str, Any]:
 # Characters illegal in filenames on Windows (and generally unsafe)
 _UNSAFE_FILENAME_RE = re.compile(r'[\\/:*?"<>|\r\n\t]')
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Exceptions
+#region #*   Exceptions
 # ---------------------------------------------------------------------------
 
 
@@ -113,8 +117,10 @@ class DuplicateSuspected(Exception):
         )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# IngestPipeline
+#region #*   IngestPipeline
 # ---------------------------------------------------------------------------
 
 

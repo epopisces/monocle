@@ -17,8 +17,10 @@ from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Unit tests — limiter configuration
+#region #*   Unit tests — limiter configuration
 # ---------------------------------------------------------------------------
 
 
@@ -38,8 +40,10 @@ class TestLimiterConfiguration:
         assert hasattr(rl, "limiter")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Functional tests — limit enforcement via a minimal test app
+#region #*   Functional tests — limit enforcement via a minimal test app
 # ---------------------------------------------------------------------------
 #
 # We build a minimal FastAPI app with a very tight "2/minute" limit so each
@@ -128,8 +132,10 @@ class TestRateLimitRouteDecorators:
         assert rate_limit.limiter is not None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Integration-style — main app rate limits (marked integration; skipped by default)
+#region #*   Integration-style — main app rate limits (marked integration; skipped by default)
 # ---------------------------------------------------------------------------
 
 

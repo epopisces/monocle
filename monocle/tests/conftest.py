@@ -15,8 +15,10 @@ import pytest
 from monocle.models import Note, NoteMetadata
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Fixture: tmp_vault
+#region #*   Fixture: tmp_vault
 # ---------------------------------------------------------------------------
 
 _FIXTURE_NOTES: list[dict] = [
@@ -116,8 +118,10 @@ def tmp_vault(tmp_path: Path) -> Path:
     return tmp_path
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Fixture: memory_index
+#region #*   Fixture: memory_index
 # ---------------------------------------------------------------------------
 
 
@@ -136,8 +140,10 @@ def memory_index():
         return None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Fixture: mock_ai
+#region #*   Fixture: mock_ai
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -154,8 +160,10 @@ def mock_ai():
     return ai
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Fixture: api_client
+#region #*   Fixture: api_client
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
@@ -254,8 +262,10 @@ def api_client(tmp_path: Path, mock_ai):
             yield client
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Fixture: live_server  (session-scoped; used by integration tests + Playwright)
+#region #*   Fixture: live_server  (session-scoped; used by integration tests + Playwright)
 # ---------------------------------------------------------------------------
 
 
@@ -356,3 +366,5 @@ def live_server(tmp_path_factory):
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+
+#endregion

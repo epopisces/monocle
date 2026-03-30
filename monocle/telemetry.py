@@ -193,8 +193,10 @@ async def timed(histogram: Any, **attrs: Any) -> AsyncIterator[None]:
             pass
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# No-op stubs (used when OTel SDK is unavailable)
+#region #*   No-op stubs (used when OTel SDK is unavailable)
 # ---------------------------------------------------------------------------
 
 

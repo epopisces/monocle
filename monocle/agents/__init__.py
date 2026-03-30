@@ -71,8 +71,10 @@ def _configure_agent_otel(settings: "Settings") -> None:
         logger.debug("[AGENT] Agent framework OTel configuration skipped: %s", exc)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# BaseChatClient adapter
+#region #*   BaseChatClient adapter
 # ---------------------------------------------------------------------------
 
 
@@ -305,8 +307,10 @@ class _AIProviderChatClient(BaseChatClient):
                     yield ChatResponseUpdate(role="assistant", text=chunk)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper: extract tool calls from raw LLM text output
+#region #*   Helper: extract tool calls from raw LLM text output
 # ---------------------------------------------------------------------------
 
 
@@ -343,8 +347,10 @@ def _try_parse_tool_calls(raw: str) -> list[dict] | None:
     return None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Public factory
+#region #*   Public factory
 # ---------------------------------------------------------------------------
 
 

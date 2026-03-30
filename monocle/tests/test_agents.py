@@ -19,8 +19,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers to build fake AgentRunResponseUpdate objects
+#region #*   Helpers to build fake AgentRunResponseUpdate objects
 # ---------------------------------------------------------------------------
 
 def _fake_update(contents: list) -> Any:
@@ -53,8 +55,10 @@ def _fn_result_content(result: Any, call_id: str = "c1") -> Any:
     return c
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Async generator helpers
+#region #*   Async generator helpers
 # ---------------------------------------------------------------------------
 
 async def _updates_gen(*updates):
@@ -63,8 +67,10 @@ async def _updates_gen(*updates):
         yield u
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# parse_sse: extract events from raw SSE text
+#region #*   parse_sse: extract events from raw SSE text
 # ---------------------------------------------------------------------------
 
 def _parse_sse(raw_text: str) -> list[dict[str, Any]]:
@@ -84,8 +90,10 @@ def _parse_sse(raw_text: str) -> list[dict[str, Any]]:
     return events
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tests: POST /api/chat SSE event sequence
+#region #*   Tests: POST /api/chat SSE event sequence
 # ---------------------------------------------------------------------------
 
 class TestChatSSEStream:
@@ -273,8 +281,10 @@ class TestChatSSEStream:
         assert len(error_events) >= 1
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tests: VaultTools construction
+#region #*   Tests: VaultTools construction
 # ---------------------------------------------------------------------------
 
 class TestVaultTools:
@@ -307,8 +317,10 @@ class TestVaultTools:
         assert any("search_vault" in n or "search" in n for n in names)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tests: create_chat_agent factory
+#region #*   Tests: create_chat_agent factory
 # ---------------------------------------------------------------------------
 
 class TestCreateChatAgent:
@@ -336,8 +348,10 @@ class TestCreateChatAgent:
         assert hasattr(agent, "run_stream") and callable(agent.run_stream)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tests: VaultTools method execution
+#region #*   Tests: VaultTools method execution
 # ---------------------------------------------------------------------------
 
 
@@ -480,7 +494,7 @@ class TestVaultToolsExecution:
         assert "node_count" in parsed
 
     # -----------------------------------------------------------------------
-    # append_to_note tests
+    #region #*    append_to_note tests
     # -----------------------------------------------------------------------
 
     @pytest.mark.asyncio
@@ -546,9 +560,12 @@ class TestVaultToolsExecution:
         await vt.append_to_note("Alice", "New fact.")
         mock_rq.push.assert_called_once()
 
+    #endregion
+
+#endregion
 
 # ---------------------------------------------------------------------------
-# Tests: _to_dict_messages translation
+#region #*   Tests: _to_dict_messages translation
 # ---------------------------------------------------------------------------
 
 
@@ -636,8 +653,10 @@ class TestToDictMessages:
         assert result[0]["content"] == json_module.dumps(result_dict)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tests: _try_parse_tool_calls
+#region #*   Tests: _try_parse_tool_calls
 # ---------------------------------------------------------------------------
 
 
@@ -669,8 +688,10 @@ class TestTryParseToolCalls:
         assert _try_parse_tool_calls('[{"a": 1}]') is None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tests: SSE stream done/error contract
+#region #*   Tests: SSE stream done/error contract
 # ---------------------------------------------------------------------------
 
 

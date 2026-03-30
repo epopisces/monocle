@@ -19,8 +19,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -51,8 +53,10 @@ def _make_mock_proc(block: asyncio.Event | None = None):
     return mock_proc
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestSubprocessHandle
+#region #*   TestSubprocessHandle
 # ---------------------------------------------------------------------------
 
 
@@ -187,8 +191,10 @@ class TestSubprocessHandle:
         await handle.stop()  # must not raise
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestProcessManagerUnifiedMode
+#region #*   TestProcessManagerUnifiedMode
 # ---------------------------------------------------------------------------
 
 
@@ -242,8 +248,10 @@ class TestProcessManagerUnifiedMode:
         mock_exec.assert_not_called()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestProcessManagerSeparateMode
+#region #*   TestProcessManagerSeparateMode
 # ---------------------------------------------------------------------------
 
 
@@ -340,8 +348,10 @@ class TestProcessManagerSeparateMode:
         assert sys.executable in args[0]
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestProcessManagerConfig
+#region #*   TestProcessManagerConfig
 # ---------------------------------------------------------------------------
 
 
@@ -388,8 +398,10 @@ class TestProcessManagerConfig:
         assert status_after["processes"] == {}
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestMainLifespanCaptureOnlyGating
+#region #*   TestMainLifespanCaptureOnlyGating
 # ---------------------------------------------------------------------------
 
 
@@ -433,8 +445,10 @@ class TestMainLifespanCaptureOnlyGating:
         assert not pm._is_separate_processes_enabled()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestProcessManagerEnvironmentVariable
+#region #*   TestProcessManagerEnvironmentVariable
 # ---------------------------------------------------------------------------
 
 
@@ -560,8 +574,10 @@ class TestProcessManagerEnvironmentVariable:
             await pm.stop_all()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestProcessManagerIdempotency
+#region #*   TestProcessManagerIdempotency
 # ---------------------------------------------------------------------------
 
 

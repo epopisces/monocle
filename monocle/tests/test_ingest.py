@@ -32,8 +32,10 @@ from monocle.models import (
 )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -92,8 +94,10 @@ def _make_ai(
     return ai
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# IngestPlugin ABC tests
+#region #*   IngestPlugin ABC tests
 # ---------------------------------------------------------------------------
 
 
@@ -131,8 +135,10 @@ class TestIngestPlugin:
         assert TeamsPlugin.can_handle(req) is False
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Plugin extraction tests
+#region #*   Plugin extraction tests
 # ---------------------------------------------------------------------------
 
 
@@ -176,8 +182,10 @@ class TestPluginExtract:
             await plugin.extract(req, ai=None)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# IngestPluginRegistry tests
+#region #*   IngestPluginRegistry tests
 # ---------------------------------------------------------------------------
 
 
@@ -278,8 +286,10 @@ class TestIngestPluginRegistry:
         assert isinstance(plugin, TextPlugin)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# RoutingAgent tests
+#region #*   RoutingAgent tests
 # ---------------------------------------------------------------------------
 
 
@@ -408,8 +418,10 @@ class TestRoutingAgent:
         assert result.fast_path is True
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# IngestConfidence scoring tests
+#region #*   IngestConfidence scoring tests
 # ---------------------------------------------------------------------------
 
 
@@ -548,8 +560,10 @@ class TestScoreConfidence:
         assert result.score == pytest.approx(expected, abs=0.01)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# compute_approval_metadata tests
+#region #*   compute_approval_metadata tests
 # ---------------------------------------------------------------------------
 
 
@@ -579,8 +593,10 @@ class TestComputeApprovalMetadata:
         assert result["review_status"] == "approved"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# FailedIngestRegistry tests
+#region #*   FailedIngestRegistry tests
 # ---------------------------------------------------------------------------
 
 
@@ -641,8 +657,10 @@ class TestFailedIngestRegistry:
         assert len(record["content_preview"]) <= 200
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# IngestPipeline tests
+#region #*   IngestPipeline tests
 # ---------------------------------------------------------------------------
 
 
@@ -1020,8 +1038,10 @@ class TestIngestPipelineIndexing:
         assert stats.total_files >= 1
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Duplicate detection edge-case tests
+#region #*   Duplicate detection edge-case tests
 # ---------------------------------------------------------------------------
 
 
@@ -1172,8 +1192,10 @@ class TestDuplicateDetectionEdgeCases:
         assert len(sidecars) == 0
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Step-8 failure test
+#region #*   Step-8 failure test
 # ---------------------------------------------------------------------------
 
 
@@ -1219,8 +1241,10 @@ class TestIngestPipelineStep8Failure:
         assert len(sidecars) == 0
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Plugin registry idempotency
+#region #*   Plugin registry idempotency
 # ---------------------------------------------------------------------------
 
 
@@ -1248,8 +1272,10 @@ class TestRegisterDefaultPluginsIdempotency:
         assert "web" in ids
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# RoutingAgent — unknown template and greedy-regex tests
+#region #*   RoutingAgent — unknown template and greedy-regex tests
 # ---------------------------------------------------------------------------
 
 

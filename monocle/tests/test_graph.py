@@ -15,8 +15,10 @@ import pytest
 import yaml
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -50,8 +52,10 @@ def _edge_pairs(graph_data) -> set[tuple[str, str]]:
     return {(e.source, e.target) for e in graph_data.edges}
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Full-vault graph (no focus)
+#region #*   Full-vault graph (no focus)
 # ---------------------------------------------------------------------------
 
 
@@ -84,8 +88,10 @@ class TestGraphBuilderFullVault:
             assert node.degree is None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Co-mention edges
+#region #*   Co-mention edges
 # ---------------------------------------------------------------------------
 
 
@@ -124,8 +130,10 @@ class TestCoMentionEdges:
         assert bob_edges == []
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Wikilink edges
+#region #*   Wikilink edges
 # ---------------------------------------------------------------------------
 
 
@@ -180,8 +188,10 @@ class TestWikilinkEdges:
         assert edge.relation == "links-to"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Structured-link edges
+#region #*   Structured-link edges
 # ---------------------------------------------------------------------------
 
 
@@ -247,8 +257,10 @@ class TestStructuredLinkEdges:
         assert edge.metadata.get("since") == "2024-01"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Shared-tag edges
+#region #*   Shared-tag edges
 # ---------------------------------------------------------------------------
 
 
@@ -298,8 +310,10 @@ class TestSharedTagEdges:
             assert edge.source != edge.target
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# BFS degrees (focused graph)
+#region #*   BFS degrees (focused graph)
 # ---------------------------------------------------------------------------
 
 
@@ -345,8 +359,10 @@ class TestFocusedGraph:
         assert "people/alice-example.md" in ids
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Types filter
+#region #*   Types filter
 # ---------------------------------------------------------------------------
 
 
@@ -377,8 +393,10 @@ class TestTypesFilter:
         assert len(gd_all.nodes) == len(gd_unfiltered.nodes)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# In-memory cache
+#region #*   In-memory cache
 # ---------------------------------------------------------------------------
 
 
@@ -523,8 +541,10 @@ class TestGraphCache:
         assert len(gb._cache) == 1
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# API endpoint tests
+#region #*   API endpoint tests
 # ---------------------------------------------------------------------------
 
 
@@ -611,8 +631,10 @@ class TestGraphAPIEndpoint:
         assert edge.relation == "approved-by"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# New gap-coverage tests (code-review additions)
+#region #*   New gap-coverage tests (code-review additions)
 # ---------------------------------------------------------------------------
 
 
@@ -812,8 +834,10 @@ class TestFocusWithTypesFilter:
             assert node.type == "person_note"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Regression tests — edge-key identity bugs
+#region #*   Regression tests — edge-key identity bugs
 # ---------------------------------------------------------------------------
 
 

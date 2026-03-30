@@ -385,8 +385,10 @@ class ChromaIndex(IndexLayer):
         return self._client.create_collection(name=self._collection_name, metadata=meta)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Module-level helper
+#region #*   Module-level helper
 # ---------------------------------------------------------------------------
 
 

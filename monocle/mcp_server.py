@@ -48,8 +48,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Module-level state — set once during lifespan startup via init_mcp_state()
+#region #*   Module-level state — set once during lifespan startup via init_mcp_state()
 # ---------------------------------------------------------------------------
 
 
@@ -106,14 +108,18 @@ def init_mcp_state(
     logger.info("[MCP] State initialised")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# FastMCP server instance
+#region #*   FastMCP server instance
 # ---------------------------------------------------------------------------
 
 mcp = FastMCP("monocle", stateless_http=True)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Constants
+#region #*   Constants
 # ---------------------------------------------------------------------------
 
 _MAX_SEARCH_RESULTS = 10
@@ -121,8 +127,10 @@ _MAX_LIST_RESULTS = 50
 _MAX_BODY_LENGTH = 50_000  # matches IngestRequest.content character limit
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper: normalise tags from various LLM-produced formats
+#region #*   Helper: normalise tags from various LLM-produced formats
 # ---------------------------------------------------------------------------
 
 
@@ -168,8 +176,10 @@ def _normalize_tags(value: Any) -> list[str] | None:
     return [str(value)]
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper: run sync vault / index calls in a thread
+#region #*   Helper: run sync vault / index calls in a thread
 # ---------------------------------------------------------------------------
 
 
@@ -179,8 +189,10 @@ async def _to_thread(fn, *args):
     return await asyncio.to_thread(fn, *args)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: search_vault
+#region #*   Tool: search_vault
 # ---------------------------------------------------------------------------
 
 
@@ -237,8 +249,10 @@ async def search_vault(
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: read_note
+#region #*   Tool: read_note
 # ---------------------------------------------------------------------------
 
 
@@ -267,8 +281,10 @@ async def read_note(file_path: str) -> str:
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: browse_recent
+#region #*   Tool: browse_recent
 # ---------------------------------------------------------------------------
 
 
@@ -313,8 +329,10 @@ async def browse_recent(
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: capture_thought
+#region #*   Tool: capture_thought
 # ---------------------------------------------------------------------------
 
 
@@ -351,8 +369,10 @@ async def capture_thought(content: str, source: str = "mcp") -> str:
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: create_note
+#region #*   Tool: create_note
 # ---------------------------------------------------------------------------
 
 
@@ -402,8 +422,10 @@ async def create_note(
     return json.dumps({"file_path": note.file_path, "title": note.title, "status": "created"})
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: update_note
+#region #*   Tool: update_note
 # ---------------------------------------------------------------------------
 
 
@@ -431,8 +453,10 @@ async def update_note(file_path: str, body: str) -> str:
     return json.dumps({"file_path": file_path, "status": "updated"})
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: get_graph
+#region #*   Tool: get_graph
 # ---------------------------------------------------------------------------
 
 
@@ -464,8 +488,10 @@ async def get_graph(
     return graph_data.model_dump_json()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Tool: get_stats
+#region #*   Tool: get_stats
 # ---------------------------------------------------------------------------
 
 
@@ -532,8 +558,10 @@ async def get_stats() -> str:
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Auth middleware — wraps the MCP Starlette app
+#region #*   Auth middleware — wraps the MCP Starlette app
 # ---------------------------------------------------------------------------
 
 
@@ -594,8 +622,10 @@ class _MCPAuthMiddleware:
         await send({"type": "http.response.body", "body": self._UNAUTHORIZED_BODY})
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Factory — returns the auth-wrapped ASGI app for mounting at /mcp
+#region #*   Factory — returns the auth-wrapped ASGI app for mounting at /mcp
 # ---------------------------------------------------------------------------
 
 

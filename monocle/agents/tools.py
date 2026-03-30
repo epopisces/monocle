@@ -34,8 +34,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Maximum results caps to keep context windows manageable
+#region #*   Maximum results caps to keep context windows manageable
 # ---------------------------------------------------------------------------
 
 _MAX_SEARCH_RESULTS = 10
@@ -550,8 +552,10 @@ class VaultTools:
             raise
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper: asyncio.to_thread wrapper (avoids import boilerplate in tools)
+#region #*   Helper: asyncio.to_thread wrapper (avoids import boilerplate in tools)
 # ---------------------------------------------------------------------------
 
 

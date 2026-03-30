@@ -59,8 +59,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Extension-to-filename map for audio MIME types
+#region #*   Extension-to-filename map for audio MIME types
 # ---------------------------------------------------------------------------
 _EXT_MAP: dict[str, str] = {
     "audio/webm": ".webm",
@@ -81,8 +83,10 @@ _FILENAME_MAP: dict[str, str] = {
 }
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Abstract base
+#region #*   Abstract base
 # ---------------------------------------------------------------------------
 
 
@@ -111,8 +115,10 @@ class TranscriptionProvider(ABC):
         """
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# whisper.cpp HTTP server (primary default)
+#region #*   whisper.cpp HTTP server (primary default)
 # ---------------------------------------------------------------------------
 
 
@@ -191,8 +197,10 @@ class WhisperCppTranscriptionProvider(TranscriptionProvider):
             ) from exc
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# openai-whisper subprocess (fallback / dev mode)
+#region #*   openai-whisper subprocess (fallback / dev mode)
 # ---------------------------------------------------------------------------
 
 
@@ -278,8 +286,10 @@ def _run_whisper_api(audio_bytes: bytes, ext: str, model: str) -> str:
         _sh.rmtree(tmp_dir, ignore_errors=True)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Native OpenAI-compatible adapter (used by FoundryLocal + Azure providers)
+#region #*   Native OpenAI-compatible adapter (used by FoundryLocal + Azure providers)
 # ---------------------------------------------------------------------------
 
 
@@ -313,8 +323,10 @@ class NativeOpenAITranscriptionProvider(TranscriptionProvider):
         return response.text
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Factory
+#region #*   Factory
 # ---------------------------------------------------------------------------
 
 

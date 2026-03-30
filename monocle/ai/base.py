@@ -26,8 +26,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Synchronous span helper (safe inside async generator functions)
+#region #*   Synchronous span helper (safe inside async generator functions)
 # ---------------------------------------------------------------------------
 
 
@@ -75,8 +77,10 @@ class _AttrSpanContext:
         return self._ctx.__exit__(*args)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Default extract prompt fallback (used when prompts/extract.md is missing)
+#region #*   Default extract prompt fallback (used when prompts/extract.md is missing)
 # ---------------------------------------------------------------------------
 
 _DEFAULT_EXTRACT_PROMPT = """\
@@ -123,8 +127,10 @@ def _parse_json_response(raw: str) -> dict:
         raise
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# AIProvider ABC
+#region #*   AIProvider ABC
 # ---------------------------------------------------------------------------
 
 

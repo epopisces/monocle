@@ -38,8 +38,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Template schema cache (re-uses _load_template_schema from vault layer)
+#region #*   Template schema cache (re-uses _load_template_schema from vault layer)
 # ---------------------------------------------------------------------------
 
 
@@ -58,8 +60,10 @@ def _load_template_schema(template_name: str) -> dict[str, Any]:
         return {}
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Public API
+#region #*   Public API
 # ---------------------------------------------------------------------------
 
 

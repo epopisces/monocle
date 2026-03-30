@@ -20,8 +20,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Package-relative prompts directory (resolved once at import time)
+#region #*   Package-relative prompts directory (resolved once at import time)
 # ---------------------------------------------------------------------------
 
 _PROMPTS_DIR = Path(__file__).parent.parent / "prompts"

@@ -15,8 +15,10 @@ router = APIRouter(tags=["notes"])
 logger = logging.getLogger(__name__)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Request / response models
+#region #*   Request / response models
 # ---------------------------------------------------------------------------
 
 
@@ -46,8 +48,10 @@ class BacklinkRef(BaseModel):
     context: str = ""  # excerpt of linking text
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Routes
+#region #*   Routes
 # ---------------------------------------------------------------------------
 
 

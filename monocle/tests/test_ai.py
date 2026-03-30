@@ -22,8 +22,10 @@ from monocle.config import Settings
 from monocle.models import NoteMetadata
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -39,8 +41,10 @@ def _make_settings(**overrides) -> Settings:
             return Settings()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# _parse_json_response tests
+#region #*   _parse_json_response tests
 # ---------------------------------------------------------------------------
 
 
@@ -71,8 +75,10 @@ class TestParseJsonResponse:
             _parse_json_response("not json at all")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# _load_extract_prompt tests
+#region #*   _load_extract_prompt tests
 # ---------------------------------------------------------------------------
 
 
@@ -85,8 +91,10 @@ class TestLoadExtractPrompt:
         assert len(prompt) > 10
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# OllamaProvider tests
+#region #*   OllamaProvider tests
 # ---------------------------------------------------------------------------
 
 
@@ -243,8 +251,10 @@ class TestOllamaProvider:
         assert result.type == "other"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# FoundryLocalProvider tests
+#region #*   FoundryLocalProvider tests
 # ---------------------------------------------------------------------------
 
 
@@ -309,8 +319,10 @@ class TestFoundryLocalProvider:
         assert result == "Hi there!"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# AzureOpenAIProvider tests
+#region #*   AzureOpenAIProvider tests
 # ---------------------------------------------------------------------------
 
 
@@ -387,8 +399,10 @@ class TestAzureOpenAIProvider:
         assert result == []
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# get_provider factory tests
+#region #*   get_provider factory tests
 # ---------------------------------------------------------------------------
 
 
@@ -443,8 +457,10 @@ class TestGetProviderFactory:
             get_provider(settings)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# AIProvider ABC contract test
+#region #*   AIProvider ABC contract test
 # ---------------------------------------------------------------------------
 
 
@@ -454,8 +470,10 @@ class TestAIProviderIsAbstract:
             AIProvider()  # type: ignore[abstract]
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# AIProvider.chat() with tools — regression tests for Bug #1/#2
+#region #*   AIProvider.chat() with tools — regression tests for Bug #1/#2
 # ---------------------------------------------------------------------------
 
 
@@ -644,8 +662,10 @@ class TestAzureChatWithTools:
         assert parsed["tool_calls"][0]["function"]["name"] == "get_stats"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Integration tests (skipped by default)
+#region #*   Integration tests (skipped by default)
 # ---------------------------------------------------------------------------
 
 
@@ -685,8 +705,10 @@ class TestOllamaIntegration:
         assert all(isinstance(v, list) for v in results)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TranscriptionProvider tests
+#region #*   TranscriptionProvider tests
 # ---------------------------------------------------------------------------
 
 
@@ -900,8 +922,10 @@ class TestOllamaTranscription:
             await provider.transcribe(b"audio", "audio/wav")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Transcription integration tests (require live servers — skipped by default)
+#region #*   Transcription integration tests (require live servers — skipped by default)
 # ---------------------------------------------------------------------------
 
 

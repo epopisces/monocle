@@ -38,8 +38,10 @@ from monocle.routers import (
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Application state (shared across requests)
+#region #*   Application state (shared across requests)
 # ---------------------------------------------------------------------------
 
 _settings: Settings | None = None
@@ -52,8 +54,10 @@ def get_settings() -> Settings:
     return _settings
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Lifespan
+#region #*   Lifespan
 # ---------------------------------------------------------------------------
 
 
@@ -382,8 +386,10 @@ async def lifespan(app: FastAPI):
     logger.info("[API] Monocle shutdown complete")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Rate limiting (slowapi)
+#region #*   Rate limiting (slowapi)
 # ---------------------------------------------------------------------------
 
 from slowapi import _rate_limit_exceeded_handler  # noqa: E402
@@ -392,8 +398,10 @@ from slowapi.errors import RateLimitExceeded  # noqa: E402
 from monocle.rate_limit import limiter  # noqa: E402
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Factory — build the FastAPI app
+#region #*   Factory — build the FastAPI app
 # ---------------------------------------------------------------------------
 
 

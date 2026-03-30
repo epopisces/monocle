@@ -14,8 +14,10 @@ router = APIRouter(tags=["agents"])
 logger = logging.getLogger(__name__)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# POST /api/agents/weekly-summary  — SSE streaming response
+#region #*   POST /api/agents/weekly-summary  — SSE streaming response
 # ---------------------------------------------------------------------------
 
 
@@ -70,8 +72,10 @@ async def trigger_weekly_summary(request: Request) -> StreamingResponse:
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# POST /api/agents/reindex  — 202 Accepted, background task
+#region #*   POST /api/agents/reindex  — 202 Accepted, background task
 # ---------------------------------------------------------------------------
 
 
@@ -107,8 +111,10 @@ async def trigger_reindex(
     return JSONResponse(status_code=202, content={"status": "accepted"})
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 

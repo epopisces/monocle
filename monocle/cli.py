@@ -21,8 +21,10 @@ app.add_typer(versions_app, name="versions")
 logger = logging.getLogger(__name__)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -44,8 +46,10 @@ def _make_index(settings):
     return get_index(settings)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# serve
+#region #*   serve
 # ---------------------------------------------------------------------------
 
 
@@ -74,8 +78,10 @@ def serve(
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# dev
+#region #*   dev
 # ---------------------------------------------------------------------------
 
 
@@ -117,8 +123,10 @@ def dev(
     )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# reindex
+#region #*   reindex
 # ---------------------------------------------------------------------------
 
 
@@ -159,8 +167,10 @@ def reindex(
     typer.echo(f"Re-indexed {count} note(s).")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# pull-models
+#region #*   pull-models
 # ---------------------------------------------------------------------------
 
 
@@ -197,8 +207,10 @@ def pull_models() -> None:
         raise typer.Exit(code=1)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# stats
+#region #*   stats
 # ---------------------------------------------------------------------------
 
 
@@ -259,8 +271,10 @@ def stats() -> None:
             typer.echo(f"  {k:<20} {v}")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# search
+#region #*   search
 # ---------------------------------------------------------------------------
 
 
@@ -301,8 +315,10 @@ def search(
             typer.echo(f"   {snippet}")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# export
+#region #*   export
 # ---------------------------------------------------------------------------
 
 
@@ -354,8 +370,10 @@ def export(
     typer.echo(f"Exported {total} file(s) to {output_path}")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# versions subcommands
+#region #*   versions subcommands
 # ---------------------------------------------------------------------------
 
 
@@ -400,8 +418,10 @@ def versions_restore(
     typer.echo(f"Restored '{file_path}' from version {timestamp}.")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# watch — standalone inbox watcher (Phase 3+ separate-process entry point)
+#region #*   watch — standalone inbox watcher (Phase 3+ separate-process entry point)
 # ---------------------------------------------------------------------------
 
 
@@ -492,8 +512,10 @@ def watch() -> None:
         typer.echo("\n[WATCHER] Stopped.")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# scheduler — standalone APScheduler (Phase 3+ separate-process entry point)
+#region #*   scheduler — standalone APScheduler (Phase 3+ separate-process entry point)
 # ---------------------------------------------------------------------------
 
 
@@ -578,8 +600,10 @@ def scheduler() -> None:
         typer.echo("\n[SCHEDULER] Stopped.")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# capture — API-only server (Phase 3+ separate-process entry point)
+#region #*   capture — API-only server (Phase 3+ separate-process entry point)
 # ---------------------------------------------------------------------------
 
 

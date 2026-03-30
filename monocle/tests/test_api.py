@@ -13,8 +13,10 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Module-level client for stub 501 checks (uses main app with real lifespan
+#region #*   Module-level client for stub 501 checks (uses main app with real lifespan
 # suppressed via raise_server_exceptions=False)
 # ---------------------------------------------------------------------------
 
@@ -23,8 +25,10 @@ from monocle.main import app
 _stub_client = TestClient(app, raise_server_exceptions=False)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper
+#region #*   Helper
 # ---------------------------------------------------------------------------
 
 def _json(r) -> dict:

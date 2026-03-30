@@ -18,8 +18,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Request models
+#region #*   Request models
 # ---------------------------------------------------------------------------
 
 
@@ -48,8 +50,10 @@ class SettingsPatch(BaseModel):
     ui: UIPatch | None = None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -113,8 +117,10 @@ def _write_env_key(env_path: str, key: str, value: str) -> None:
         raise
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Endpoints
+#region #*   Endpoints
 # ---------------------------------------------------------------------------
 
 

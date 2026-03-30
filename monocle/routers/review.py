@@ -16,8 +16,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["review"])
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Request / response models
+#region #*   Request / response models
 # ---------------------------------------------------------------------------
 
 
@@ -37,8 +39,10 @@ class ApproveAllResponse(BaseModel):
     approved: int
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Endpoints
+#region #*   Endpoints
 # ---------------------------------------------------------------------------
 
 

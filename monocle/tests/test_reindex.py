@@ -22,8 +22,10 @@ from monocle.models import NoteChunk
 from monocle.vault import VaultLayer
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 _UTC = datetime.timezone.utc
@@ -46,8 +48,10 @@ def _t(delta_seconds: int = 0) -> str:
     return ts.isoformat().replace("+00:00", "Z")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# chunk_text tests
+#region #*   chunk_text tests
 # ---------------------------------------------------------------------------
 
 
@@ -84,8 +88,10 @@ class TestChunkText:
             chunk_text("some text", chunk_size=10, overlap=10)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexAgent — stale detection
+#region #*   ReindexAgent — stale detection
 # ---------------------------------------------------------------------------
 
 
@@ -277,8 +283,10 @@ class TestReindexAgentStaleDetection:
         )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexAgent — force=True clears first
+#region #*   ReindexAgent — force=True clears first
 # ---------------------------------------------------------------------------
 
 
@@ -311,8 +319,10 @@ class TestReindexAgentForce:
         assert results == [], "force=True should wipe old stale entries"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexAgent — startup_check
+#region #*   ReindexAgent — startup_check
 # ---------------------------------------------------------------------------
 
 
@@ -376,8 +386,10 @@ class TestReindexAgentStartupCheck:
         assert index.get_stats().total_chunks == 0
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# _collect_md_files helper
+#region #*   _collect_md_files helper
 # ---------------------------------------------------------------------------
 
 
@@ -479,8 +491,10 @@ class TestCollectMdFiles:
         )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# MemoryIndex.get_file_timestamps
+#region #*   MemoryIndex.get_file_timestamps
 # ---------------------------------------------------------------------------
 
 
@@ -538,8 +552,10 @@ class TestMemoryIndexGetFileTimestamps:
         assert index.get_file_timestamps() == {}
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Timestamp normalisation
+#region #*   Timestamp normalisation
 # ---------------------------------------------------------------------------
 
 
@@ -648,8 +664,10 @@ class TestTimestampNormalisation:
         )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexAgent — per-note error isolation
+#region #*   ReindexAgent — per-note error isolation
 # ---------------------------------------------------------------------------
 
 
@@ -722,8 +740,10 @@ class TestReindexAgentNoteIsolation:
         assert len(call_order) == 3, f"Expected all 3 notes attempted; got {call_order}"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexAgent — embed_fn=None guard (non-memory backend safety)
+#region #*   ReindexAgent — embed_fn=None guard (non-memory backend safety)
 # ---------------------------------------------------------------------------
 
 
