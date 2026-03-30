@@ -181,3 +181,68 @@ describe('SettingsModal — close behaviour', () => {
     expect(onClose).toHaveBeenCalled()
   })
 })
+
+describe('SettingsModal — patchSettings rejection', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ ...mockSettings })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('shows an inline error message when patchSettings rejects', async () => {
+    vi.mocked(patchSettings).mockRejectedValueOnce(new Error('Save failed'))
+    renderModal()
+    const select = await screen.findByTestId('ai-provider-select')
+    fireEvent.change(select, { target: { value: 'azure' } })
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-error')).toHaveTextContent(/save failed/i),
+    )
+  })
+
+  it('clears the error when a subsequent save succeeds', async () => {
+    vi.mocked(patchSettings)
+      .mockRejectedValueOnce(new Error('Save failed'))
+      .mockResolvedValueOnce({ ...mockSettings, ai: { ...mockSettings.ai, provider: 'foundry_local' } })
+    renderModal()
+    const select = await screen.findByTestId('ai-provider-select')
+
+    // First save — triggers error
+    fireEvent.change(select, { target: { value: 'azure' } })
+    await waitFor(() => expect(screen.getByTestId('settings-error')).toBeInTheDocument())
+
+    // Second save — should clear the error
+    fireEvent.change(select, { target: { value: 'foundry_local' } })
+    await waitFor(() => expect(screen.queryByTestId('settings-error')).toBeNull())
+  })
+})
+
+describe('SettingsModal — MCP key rotation failure', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ ...mockSettings })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('shows an error when rotateMcpKey rejects', async () => {
+    vi.mocked(rotateMcpKey).mockRejectedValueOnce(new Error('Key rotation failed'))
+    renderModal()
+    const btn = await screen.findByTestId('rotate-key-btn')
+    fireEvent.click(btn)
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-error')).toHaveTextContent(/key rotation failed/i),
+    )
+  })
+
+  it('does not update the key hint when rotation fails', async () => {
+    vi.mocked(rotateMcpKey).mockRejectedValueOnce(new Error('Rotation unavailable'))
+    renderModal()
+    await screen.findByTestId('rotate-key-btn')
+
+    const hintBefore = screen.getByTestId('mcp-key-hint').textContent
+
+    fireEvent.click(screen.getByTestId('rotate-key-btn'))
+    // Wait for the error to appear (meaning the rejection was handled)
+    await waitFor(() => screen.getByTestId('settings-error'))
+
+    // Hint must still show the original masked key
+    expect(screen.getByTestId('mcp-key-hint').textContent).toBe(hintBefore)
+  })
+})

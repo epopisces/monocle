@@ -8,6 +8,7 @@ export interface ChatMessage {
 export interface ChatRequest {
   messages: ChatMessage[]
   session_id?: string
+  tool_hint?: string
 }
 
 /** SSE event payloads */

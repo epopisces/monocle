@@ -308,7 +308,7 @@ describe('ChatScreen', () => {
     const actionItemsStarter = starters.find(el => el.textContent?.includes('Open action items'))
     expect(actionItemsStarter).toBeTruthy()
     act(() => { fireEvent.click(actionItemsStarter!) })
-    expect(mockSend).toHaveBeenCalledWith('Show me all open action items')
+    expect(mockSend).toHaveBeenCalledWith('Show me all open action items', 'search_vault')
   })
 
   it('session picker shows + New session as default option', () => {

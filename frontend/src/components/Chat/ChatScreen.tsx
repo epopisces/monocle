@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useChat } from '../../hooks/useChat'
 import ChatMessage from './ChatMessage'
 import ChatInput, { type ChatInputHandle } from './ChatInput'
@@ -10,15 +10,16 @@ interface Starter {
   prompt: string | null
   action?: string
   sendImmediately?: boolean  // true = send immediately, false/undefined = populate input
+  toolHint?: string          // optional tool the agent should invoke first
 }
 
 const CHAT_STARTERS: Starter[] = [
-  { icon: '👤', label: 'Notes on a person',  prompt: 'What are my notes on ', sendImmediately: false },
-  { icon: '📋', label: 'Open action items',  prompt: 'Show me all open action items', sendImmediately: true },
+  { icon: '👤', label: 'Notes on a person',  prompt: 'What are my notes on ', sendImmediately: false, toolHint: 'search_vault' },
+  { icon: '📋', label: 'Open action items',  prompt: 'Show me all open action items', sendImmediately: true, toolHint: 'search_vault' },
   { icon: '📅', label: 'Weekly review',       prompt: 'Run my weekly review', sendImmediately: true },
   { icon: '🎤', label: 'Capture voice note',  prompt: null, action: 'voice' },
-  { icon: '🔖', label: 'Recent decisions',    prompt: 'Show my recent decisions', sendImmediately: true },
-  { icon: '📁', label: 'Summarize project',   prompt: 'Summarize my notes about ', sendImmediately: false },
+  { icon: '🔖', label: 'Recent decisions',    prompt: 'Show my recent decisions', sendImmediately: true, toolHint: 'list_notes' },
+  { icon: '📁', label: 'Summarize project',   prompt: 'Summarize my notes about ', sendImmediately: false, toolHint: 'search_vault' },
 ]
 
 interface Props {
@@ -29,6 +30,9 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
   const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession } = useChat()
   const threadEndRef = useRef<HTMLDivElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
+
+  // Pending tool hint for populate-style starters (user edits before sending)
+  const [pendingHint, setPendingHint] = useState<{ prefix: string; tool: string } | null>(null)
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -41,15 +45,27 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
       return
     }
     if (starter.prompt) {
-      // If sendImmediately is true, send the prompt as-is
-      // Otherwise, populate the input field and let user add to it
       if (starter.sendImmediately) {
-        send(starter.prompt)
+        send(starter.prompt, starter.toolHint)
       } else {
+        // Store the hint so we can attach it when the user actually sends
+        if (starter.toolHint) {
+          setPendingHint({ prefix: starter.prompt, tool: starter.toolHint })
+        }
         chatInputRef.current?.populate(starter.prompt)
       }
     }
   }
+
+  // Wrap send to resolve pending tool hints for populate-style starters
+  const handleSend = useCallback((content: string) => {
+    let toolHint: string | undefined
+    if (pendingHint && content.startsWith(pendingHint.prefix)) {
+      toolHint = pendingHint.tool
+    }
+    setPendingHint(null)
+    send(content, toolHint)
+  }, [pendingHint, send])
 
   const showStarters = thread.length === 0
 
@@ -116,7 +132,7 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
 
       {/* Input area */}
       <div className="chat-screen__input-area">
-        <ChatInput ref={chatInputRef} onSend={send} disabled={isStreaming} onVoiceClick={onVoiceOpen} />
+        <ChatInput ref={chatInputRef} onSend={handleSend} disabled={isStreaming} onVoiceClick={onVoiceOpen} />
       </div>
     </div>
   )

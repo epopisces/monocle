@@ -36,8 +36,10 @@ from monocle.vault.wikilinks import (
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Template type → filename mapping
+#region #*   Template type → filename mapping
 # ---------------------------------------------------------------------------
 
 TEMPLATE_FILE_MAP: dict[str, str] = {
@@ -57,8 +59,10 @@ TEMPLATE_FILE_MAP: dict[str, str] = {
 }
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Custom exceptions
+#region #*   Custom exceptions
 # ---------------------------------------------------------------------------
 
 
@@ -69,8 +73,10 @@ class NoteNotFound(HTTPException):
         super().__init__(status_code=404, detail=f"Note not found: {file_path}")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -180,8 +186,10 @@ def _note_to_markdown(note: Note) -> str:
     return f"---\n{yaml.dump(fm, default_flow_style=False, allow_unicode=True)}---\n\n{body}\n"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# VaultLayer
+#region #*   VaultLayer
 # ---------------------------------------------------------------------------
 
 

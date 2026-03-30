@@ -18,8 +18,10 @@ from monocle.agents import create_chat_agent
 router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# OTel metrics — created lazily to avoid top-level SDK calls at import time
+#region #*   OTel metrics — created lazily to avoid top-level SDK calls at import time
 # ---------------------------------------------------------------------------
 
 _meter = None
@@ -44,8 +46,10 @@ def _get_metrics():
     return _ttft_hist, _duration_hist
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Request / response models
+#region #*   Request / response models
 # ---------------------------------------------------------------------------
 
 
@@ -57,10 +61,13 @@ class ChatMessageRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessageRequest]
     session_id: str | None = None
+    tool_hint: str | None = None
 
+
+#endregion
 
 # ---------------------------------------------------------------------------
-# SSE helpers
+#region #*   SSE helpers
 # ---------------------------------------------------------------------------
 
 
@@ -119,6 +126,7 @@ async def _stream_agent_response(
             settings=settings,
             graph_builder=graph_builder,
             reindex_queue=reindex_queue,
+            tool_hint=chat_request.tool_hint,
         )
 
         # Convert request messages to agent framework format
@@ -192,8 +200,10 @@ async def _stream_agent_response(
         yield _sse("done", done_data)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Route
+#region #*   Route
 # ---------------------------------------------------------------------------
 
 

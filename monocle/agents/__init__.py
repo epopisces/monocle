@@ -71,8 +71,10 @@ def _configure_agent_otel(settings: "Settings") -> None:
         logger.debug("[AGENT] Agent framework OTel configuration skipped: %s", exc)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# BaseChatClient adapter
+#region #*   BaseChatClient adapter
 # ---------------------------------------------------------------------------
 
 
@@ -305,8 +307,10 @@ class _AIProviderChatClient(BaseChatClient):
                     yield ChatResponseUpdate(role="assistant", text=chunk)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper: extract tool calls from raw LLM text output
+#region #*   Helper: extract tool calls from raw LLM text output
 # ---------------------------------------------------------------------------
 
 
@@ -343,9 +347,24 @@ def _try_parse_tool_calls(raw: str) -> list[dict] | None:
     return None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Public factory
+#region #*   Public factory
 # ---------------------------------------------------------------------------
+
+
+# Allowed tool_hint values — must match VaultTools method names
+_ALLOWED_TOOL_HINTS = frozenset({
+    "search_vault",
+    "read_note",
+    "write_note",
+    "append_to_note",
+    "create_note",
+    "get_stats",
+    "list_notes",
+    "get_person_graph",
+})
 
 
 def create_chat_agent(
@@ -355,6 +374,7 @@ def create_chat_agent(
     settings: "Settings",
     graph_builder: "GraphBuilder | None" = None,
     reindex_queue: "ReindexQueue | None" = None,
+    tool_hint: str | None = None,
 ):
     """Create a ``ChatAgent`` wired with all 8 vault tools.
 
@@ -378,20 +398,35 @@ def create_chat_agent(
     tool_registry = VaultTools(vault=vault, index=index, ai=ai, graph_builder=graph_builder, reindex_queue=reindex_queue)
     client = _AIProviderChatClient(ai=ai)
 
-    agent = ChatAgent(
-        chat_client=client,
-        instructions=(
+    base_instructions = (
             "You are Monocle, a personal knowledge assistant. "
             "You have access to the user's private vault of notes and can search, read, "
             "create, and update notes. Always cite the note file_path when referencing "
             "specific information. When creating notes, choose the most appropriate "
             "note type. Be concise and factual — do not invent details not found in the vault.\n\n"
-            "IMPORTANT — when a user asks to add information to or update an existing note "
-            "(e.g. 'add to my note on X', 'update my note about Y', 'I want to add to my note on Z'), "
-            "ALWAYS use the append_to_note tool with the person name or topic as the query. "
-            "Do NOT ask the user for a file path. Do NOT offer to create a new note unless "
-            "append_to_note returns an error saying no note was found."
-        ),
+            "TOOL SELECTION GUIDE:\n"
+            "- To RETRIEVE or LOOK UP notes (e.g. 'What are my notes on X?', "
+            "'What do I know about Y?', 'Tell me about Z'): use search_vault, "
+            "then read_note to get full details of the most relevant result.\n"
+            "- To ADD or APPEND new information to an existing note "
+            "(e.g. 'add to my note on X', 'update my note about Y with <new info>'): "
+            "use append_to_note — pass the query AND the new information as plain text "
+            "(never as JSON). The tool will intelligently merge the new content with the "
+            "existing note body.\n"
+            "- To CREATE a brand-new note: use create_note.\n"
+            "- For person relationship graphs: use get_person_graph."
+        )
+
+    # Inject tool hint directive when provided and valid
+    if tool_hint and tool_hint in _ALLOWED_TOOL_HINTS:
+        base_instructions += (
+            f"\n\nREQUIRED: The user selected a guided action. "
+            f"You MUST call the `{tool_hint}` tool first for this request."
+        )
+
+    agent = ChatAgent(
+        chat_client=client,
+        instructions=base_instructions,
         name="monocle",
         model_id=settings.ai.chat_model,
         tools=tool_registry.tools,

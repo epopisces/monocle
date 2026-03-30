@@ -17,8 +17,10 @@ from monocle.cli import app
 runner = CliRunner()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -59,8 +61,10 @@ def _make_vault(tmp_path: Path, notes: list[dict[str, Any]] | None = None) -> Pa
     return vault
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Settings mock helper
+#region #*   Settings mock helper
 # ---------------------------------------------------------------------------
 
 
@@ -85,8 +89,10 @@ def _mock_settings(vault_path: str):
     return s
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestHelp
+#region #*   TestHelp
 # ---------------------------------------------------------------------------
 
 
@@ -120,8 +126,10 @@ class TestHelp:
         assert "--output" in result.output
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestReindex
+#region #*   TestReindex
 # ---------------------------------------------------------------------------
 
 
@@ -194,8 +202,10 @@ class TestReindex:
         mock_ai.embed.assert_called()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestExport
+#region #*   TestExport
 # ---------------------------------------------------------------------------
 
 
@@ -249,8 +259,10 @@ class TestExport:
         assert "export.zip" in result.output
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestVersionsList
+#region #*   TestVersionsList
 # ---------------------------------------------------------------------------
 
 
@@ -293,8 +305,10 @@ class TestVersionsList:
         assert result.exit_code != 0
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestVersionsRestore
+#region #*   TestVersionsRestore
 # ---------------------------------------------------------------------------
 
 
@@ -341,8 +355,10 @@ class TestVersionsRestore:
         assert result.exit_code != 0
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestStats
+#region #*   TestStats
 # ---------------------------------------------------------------------------
 
 
@@ -366,8 +382,10 @@ class TestStats:
         assert "Index chunks" in result.output
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestPullModels
+#region #*   TestPullModels
 # ---------------------------------------------------------------------------
 
 
@@ -398,25 +416,46 @@ class TestPullModels:
         assert result.exit_code == 1
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestStubs
+#region #*   TestStubs
 # ---------------------------------------------------------------------------
 
 
 class TestStubs:
-    def test_watch_stub(self):
-        result = runner.invoke(app, ["watch"])
-        assert result.exit_code == 0
-        assert "reserved" in result.output.lower()
+    def test_watch_exits_when_vault_watch_disabled(self, tmp_path: Path):
+        """watch command exits immediately when vault.watch=false."""
+        vault = _make_vault(tmp_path)
+        settings = _mock_settings(str(vault))
+        settings.vault.watch = False
 
-    def test_capture_stub(self):
-        result = runner.invoke(app, ["capture"])
-        assert result.exit_code == 0
-        assert "reserved" in result.output.lower()
+        with patch("monocle.cli._load_settings", return_value=settings):
+            result = runner.invoke(app, ["watch"])
 
+        assert result.exit_code == 0
+        assert "vault.watch=false" in result.output.lower()
+
+    def test_capture_calls_uvicorn(self, tmp_path: Path, monkeypatch):
+        """capture command sets MONOCLE_COMPONENT and launches uvicorn."""
+        vault = _make_vault(tmp_path)
+        settings = _mock_settings(str(vault))
+        monkeypatch.delenv("MONOCLE_COMPONENT", raising=False)
+
+        with (
+            patch("monocle.cli._load_settings", return_value=settings),
+            patch("uvicorn.run") as mock_uvicorn,
+        ):
+            result = runner.invoke(app, ["capture"])
+
+        assert result.exit_code == 0
+        mock_uvicorn.assert_called_once()
+
+
+#endregion
 
 # ---------------------------------------------------------------------------
-# TestDevTelemetryBlock
+#region #*   TestDevTelemetryBlock
 # ---------------------------------------------------------------------------
 
 
@@ -443,8 +482,10 @@ class TestDevTelemetryBlock:
         assert "format" in result.output
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# TestSearch
+#region #*   TestSearch
 # ---------------------------------------------------------------------------
 
 

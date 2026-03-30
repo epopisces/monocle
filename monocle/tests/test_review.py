@@ -5,8 +5,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helper: create a pending note via the notes API
+#region #*   Helper: create a pending note via the notes API
 # ---------------------------------------------------------------------------
 
 

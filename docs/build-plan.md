@@ -26,14 +26,14 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M22 — Process Manager & Dev Automation
-**Last Completed:** M21 — Integration Testing & Obsidian Compatibility (2026-03-20)
+**Active Milestone:** M23 — OneNote Import Plugin
+**Last Completed:** M22 — Process Manager & Dev Automation (2026-03-21)
 **Blocked By:** None
-**Session Notes (M17 — Document Browser, Search & Template Editor UI):**
-- **Status:** COMPLETE (2026-03-20)
-- Implemented the Document Browser, Search, and Template Editor UIs plus supporting YAML/frontmatter utilities.
-- All 113 frontend tests passing (51 new); TypeScript clean.
-- **Full details:** [docs/milestones.md#M17-—-document-browser-search--template-editor-ui](milestones.md#m17--document-browser-search--template-editor-ui)
+**Session Notes (M22 — Process Manager & Dev Automation):**
+- **Status:** COMPLETE (2026-03-21), post-review hardened (2026-03-26)
+- Implemented `ProcessManager` + `SubprocessHandle` (exponential-backoff crash-restart); `watch`, `scheduler`, `capture` CLI commands operational; `--separate-processes` flag on `serve`/`dev`; lifespan gating in `main.py`.
+- Post-review additions: `_is_separate_processes_enabled()` method for env var override (config OR `MONOCLE_SEPARATE_PROCESSES=1`); idempotency guard preventing duplicate spawning on repeated `start_all()` calls; 15 additional tests (env override scenarios, process lifecycle, handle leak prevention, crash recovery); converted weak integration tests to focused unit tests on ProcessManager effective flag computation.
+- **730 backend tests passing (37 total process_manager tests), EXIT 0**
 **Session Notes (M13 — Settings & Review API):** M13 fully executed + post-review hardened. `monocle/config.py`: `save_config_patch(patch: dict)` function — deep-merges allowed sections (`ai`, `vault`, `index`, `agents`, `review`, `server`, `telemetry`, `ui`) into `config.yaml` atomically via mkstemp+os.replace; respects `MONOCLE_CONFIG` env var. `monocle/index/base.py`: `patch_file_metadata(file_path, updates)` abstract method added. `monocle/index/chroma.py`: `patch_file_metadata` implementation uses `collection.get(where=file_path_filter)` + `collection.update()` with scalar-only metadata merge. `monocle/index/memory.py`: `patch_file_metadata` implementation updates `chunk.metadata` dict in-place. `monocle/routers/settings.py`: `GET /api/settings` returns all settings sections + `mcp_key_last4` (masked); `PATCH /api/settings` accepts `{review: ..., ai: ...}` partial patch — `AIPatch.provider` and `AIPatch.transcribe_backend` typed as `Literal` (invalid values → 422); `ReviewPatch` fields have `ge`/`le` range guards (out-of-range → 422); writes to config.yaml via `save_config_patch`, hot-reloads `AIProvider` when `ai.provider` changes; rate-limited 30/min; `POST /api/settings/rotate-mcp-key` generates `secrets.token_hex(32)`, writes to `.env` atomically, updates `os.environ`, rate-limited 10/min; `_write_env_key` strips newlines from value. `monocle/routers/review.py`: `GET /api/review` warms `app.state._review_pending_count` cache as side-effect; `GET /api/review/count` returns O(1) from cache when warm, falls back to vault scan; `PATCH /api/review/{path}/approve` rate-limited 60/min, decrements count cache; `POST /api/review/approve-all` parallelized via `asyncio.gather` + `asyncio.Semaphore(10)`, rate-limited 30/min, sets cache to remainder. `app.state._review_pending_count` initialized `None` in lifespan and in `_reindex_file` callback; `notes.py` PUT/PATCH/DELETE and `ingest.py` POST/stream also invalate cache on vault write. `monocle/tests/test_settings.py`: 28 tests (was 19); added `TestInputValidation` (9 tests: Literal constraints, range validators), `TestAIProviderHotReload` (2 tests: hot-reload triggered, not triggered), `TestRotateMcpKey.test_rotate_replaces_old_key_in_os_environ`. `monocle/tests/test_review.py`: 34 tests (was 25); added `test_approve_all_sets_all_approval_fields`, `test_approve_all_partial_failure_count`, `TestPendingCountCache` (3 tests), `TestPaginationEdgeCases` (1 test). `monocle/tests/test_security.py`: added `test_approve_path_traversal_blocked`, `test_approve_absolute_path_blocked`. **644 tests passing (18 new post-review), 6 deselected, EXIT 0.**
 **Session Notes (M12 — MCP Server):** M12 fully executed. `monocle/mcp_server.py`: `FastMCP("monocle", stateless_http=True)` + 8 tools (`search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`); `_MCPState` singleton (instance attrs, `assert_ready()`, `reindex_queue` field) populated via `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue)`; `_MCPAuthMiddleware` ASGI wrapper validates `x-monocle-key` header or `?key=` query param using `hmac.compare_digest` (constant-time); logs WARNING when `?key=` path is taken; returns HTTP 401 JSON if missing or invalid; `create_mcp_app(mcp_key)` → `_MCPAuthMiddleware`; MCP key loaded from env at `create_app()` time. `capture_thought` forwards `source` param to `IngestPipeline`. `create_note`/`update_note` push to `reindex_queue` after write; `update_note` sets `metadata.updated = datetime.now(utc)`. `get_stats` paginates via `_fetch_all_refs()` (500-note batches). `monocle/main.py`: `init_mcp_state(...)` called in lifespan with `reindex_queue=reindex_queue`; `create_mcp_app(mcp_key)` mounted at `/mcp`. `monocle/tests/test_mcp.py`: 40 tests across 4 classes — `TestMCPAuth` (6), `TestMCPTools` (26), `TestMCPSecurityBoundaries` (5), `TestMCPServerConfig` (3). SPIKE-2 outcome recorded. **589 tests passing (40 MCP), 6 deselected, EXIT 0.**
 **Session Notes (M11 — Scheduled Agents):** M11 fully executed. `monocle/agents/weekly_summary.py`: `WeeklySummaryAgent.run(vault, index, ai, settings)` — collects notes updated within 7 days via `vault.list_notes(limit=500)`, fetches embeddings via new `index.get_embeddings_by_file()`, clusters with `AgglomerativeClustering(metric="cosine", linkage="average")` (scikit-learn) for batches ≥4; `_llm_group_notes` JSON-prompt fallback for small batches; `_summarise_cluster` per-cluster chat call using `prompts/weekly_review.md`; writes `summaries/YYYY-WW.md` via `vault.write_note(file_path, Note(...))`. `monocle/index/base.py`: new `get_embeddings_by_file(file_paths) -> dict[str, list[float]]` abstract method. `monocle/index/chroma.py`: pages `_GET_PAGE_SIZE` batches via `collection.get(where={"file_path": {"$in": batch}})`, returns `chunk_index=0` embedding per file. `monocle/index/memory.py`: returns `{}` (triggers LLM fallback in tests). `monocle/main.py`: weekly summary cron job wired — `_weekly_summary_agent` instance + `scheduler.add_cron_job("weekly_summary", ...)` + `app.state.weekly_summary_agent`. `monocle/routers/agents.py`: both endpoints implemented — `POST /api/agents/weekly-summary` StreamingResponse SSE (`start`/`done`/`error` events), `POST /api/agents/reindex` 202 via `BackgroundTasks`. `monocle/tests/test_scheduler.py`: 12 new tests — `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests). `tests/test_api.py`: agents routes removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: scheduler` task added. **542 tests passing (12 new), 6 deselected, EXIT 0.**
@@ -125,7 +125,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M19 | Voice Capture & Review Queue UI | COMPLETE |
 | M20 | Stats, Keyboard Shortcuts & Command Palette | COMPLETE |
 | M21 | Integration Testing & Obsidian Compatibility | COMPLETE |
-| M22 | Process Manager & Dev Automation | NOT STARTED |
+| M22 | Process Manager & Dev Automation | COMPLETE |
 | M23 | OneNote Import Plugin | NOT STARTED |
 | M24 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
 | M25 | Teams Integration | NOT STARTED |
@@ -667,19 +667,9 @@ Implemented StatsScreen with live stat cards and Recharts charts, useHotkeys hoo
 
 ### M22: Dev Automation & Optional Process Separation
 
-**Goal:** Optional process separation and additional developer ergonomics beyond the already-operational unified dev flow delivered in M14.
-
-**Deliverables:**
-
-**Phase 3+ (Optional—Deferred for Performance):**
-- [ ] Conditional process separation (if vault exceeds ~10k notes):
-  - `ProcessManager` class: orchestrates separate `InboxWatcher`, `APScheduler`, and main API as optional subprocesses
-  - `watch` / `capture` / `scheduler` CLI commands become operational entry points for standalone processes
-  - Only activated by explicit `--separate-processes` flag or `server.separate_processes: true` in `config.yaml`
-  - Fallback: Phase 1 unified mode is always available as the default and recommended configuration
-
-**Acceptance Criteria:**
-- [ ] Future separate-process implementation does not require code changes to M1–M22 (ProcessManager is opt-in)
+**Status:** COMPLETE (2026-03-21)
+Implemented optional process separation: `ProcessManager` + `SubprocessHandle` with exponential-backoff crash-restart; `watch`, `scheduler`, `capture` CLI commands operational as standalone process entry points; `--separate-processes` flag on `serve`/`dev`; lifespan gating in `main.py`. 715 tests passing (22 new in `test_process_manager.py`).
+**Full details:** [docs/milestones.md#m22--dev-automation--optional-process-separation](milestones.md#m22--dev-automation--optional-process-separation)
 
 ---
 

@@ -37,8 +37,10 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexQueue
+#region #*   ReindexQueue
 # ---------------------------------------------------------------------------
 
 
@@ -140,8 +142,10 @@ class ReindexQueue:
             )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# InboxWatcher
+#region #*   InboxWatcher
 # ---------------------------------------------------------------------------
 
 
@@ -283,8 +287,10 @@ class InboxWatcher:
             _write_error_sidecar(file_path, exc)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# watchdog event handler
+#region #*   watchdog event handler
 # ---------------------------------------------------------------------------
 
 
@@ -409,8 +415,10 @@ class _InboxEventHandler:
         future.add_done_callback(_log_future_exception)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 

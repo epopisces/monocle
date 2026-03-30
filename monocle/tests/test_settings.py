@@ -9,8 +9,10 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Module-scoped autouse fixture: redirect config writes to a temp file
+#region #*   Module-scoped autouse fixture: redirect config writes to a temp file
 # so tests never mutate the real config.yaml.
 # ---------------------------------------------------------------------------
 

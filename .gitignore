@@ -44,6 +44,14 @@ coverage.xml
 .dmypy.json
 dmypy.json
 .pyre/
+
+# === Test temporary files ===
+test_errors.txt
+test_output.txt
+test_run_result.txt
+test_tool_invocation.py
+run_specific_tests.py
+
 venv/
 ENV/
 env/

@@ -38,8 +38,10 @@ from monocle.routers import (
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Application state (shared across requests)
+#region #*   Application state (shared across requests)
 # ---------------------------------------------------------------------------
 
 _settings: Settings | None = None
@@ -52,8 +54,10 @@ def get_settings() -> Settings:
     return _settings
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Lifespan
+#region #*   Lifespan
 # ---------------------------------------------------------------------------
 
 
@@ -63,6 +67,25 @@ async def lifespan(app: FastAPI):
     cfg = get_settings()
     configure_telemetry(cfg)
     logger.info("[API] Monocle starting — provider=%s port=%d", cfg.ai.provider, cfg.server.port)
+
+    # Determine if this process is a capture-only (API-only) server.
+    # When True the inline watcher and APScheduler are skipped — they
+    # are managed externally (either by ProcessManager subprocesses or by a
+    # user running `monocle watch` / `monocle scheduler` directly).
+    #
+    # Activated by (any of):
+    #  - config:  server.separate_processes: true
+    #  - env var: MONOCLE_SEPARATE_PROCESSES=1   (set by `serve/dev --separate-processes`)
+    #  - env var: MONOCLE_COMPONENT=capture       (set by `monocle capture`)
+    _separate = (
+        cfg.server.separate_processes
+        or os.environ.get("MONOCLE_SEPARATE_PROCESSES") == "1"
+    )
+    _capture_only = _separate or os.environ.get("MONOCLE_COMPONENT") == "capture"
+    if _capture_only:
+        logger.info(
+            "[API] Capture-only mode — watcher and scheduler managed externally"
+        )
 
     # ------------------------------------------------------------------
     # Core layers
@@ -238,53 +261,60 @@ async def lifespan(app: FastAPI):
     )
     app.state.reindex_agent = reindex_agent
 
-    scheduler = MonocleScheduler(cfg)
-    await scheduler.start()
-    app.state.scheduler = scheduler
+    scheduler = None
+    if not _capture_only:
+        scheduler = MonocleScheduler(cfg)
+        await scheduler.start()
+        app.state.scheduler = scheduler
 
-    # Register scheduled re-index job (incremental)
-    if cfg.agents.reindex.enabled:
+        # Register scheduled re-index job (incremental)
+        if cfg.agents.reindex.enabled:
 
-        async def _scheduled_reindex() -> None:
-            logger.info("[SCHEDULER] Scheduled re-index starting")
-            await reindex_agent.run(vault, index)
-            logger.info("[SCHEDULER] Scheduled re-index complete")
+            async def _scheduled_reindex() -> None:
+                logger.info("[SCHEDULER] Scheduled re-index starting")
+                await reindex_agent.run(vault, index)
+                logger.info("[SCHEDULER] Scheduled re-index complete")
 
-        scheduler.add_cron_job(
-            "reindex",
-            _scheduled_reindex,
-            cfg.agents.reindex.cron,
-        )
+            scheduler.add_cron_job(
+                "reindex",
+                _scheduled_reindex,
+                cfg.agents.reindex.cron,
+            )
 
-    # Weekly summary job — implemented in M11
-    if cfg.agents.weekly_summary.enabled:
-        from monocle.agents.weekly_summary import WeeklySummaryAgent
+        # Weekly summary job — implemented in M11
+        if cfg.agents.weekly_summary.enabled:
+            from monocle.agents.weekly_summary import WeeklySummaryAgent
 
-        _weekly_summary_agent = WeeklySummaryAgent()
+            _weekly_summary_agent = WeeklySummaryAgent()
 
-        async def _scheduled_weekly_summary() -> None:
-            logger.info("[SCHEDULER] Weekly summary starting")
-            if ai is None:
-                logger.warning("[SCHEDULER] Weekly summary skipped — AI provider not available")
-                return
-            try:
-                file_path = await _weekly_summary_agent.run(vault, index, ai, cfg)
-                logger.info("[SCHEDULER] Weekly summary written: %s", file_path)
-            except Exception as exc:
-                logger.error("[SCHEDULER] Weekly summary failed: %s", exc, exc_info=True)
+            async def _scheduled_weekly_summary() -> None:
+                logger.info("[SCHEDULER] Weekly summary starting")
+                if ai is None:
+                    logger.warning("[SCHEDULER] Weekly summary skipped — AI provider not available")
+                    return
+                try:
+                    file_path = await _weekly_summary_agent.run(vault, index, ai, cfg)
+                    logger.info("[SCHEDULER] Weekly summary written: %s", file_path)
+                except Exception as exc:
+                    logger.error("[SCHEDULER] Weekly summary failed: %s", exc, exc_info=True)
 
-        scheduler.add_cron_job(
-            "weekly_summary",
-            _scheduled_weekly_summary,
-            cfg.agents.weekly_summary.cron,
-        )
-        app.state.weekly_summary_agent = _weekly_summary_agent
+            scheduler.add_cron_job(
+                "weekly_summary",
+                _scheduled_weekly_summary,
+                cfg.agents.weekly_summary.cron,
+            )
+            app.state.weekly_summary_agent = _weekly_summary_agent
+    else:
+        logger.info("[SCHEDULER] Capture-only mode — APScheduler managed externally")
+        app.state.scheduler = None
 
     # ------------------------------------------------------------------
     # Inbox watcher (async task — Phase 1 integration)
     # ------------------------------------------------------------------
     watcher: "InboxWatcher | None" = None
-    if cfg.vault.watch:
+    if _capture_only:
+        logger.info("[WATCHER] Capture-only mode — inbox watcher managed externally")
+    elif cfg.vault.watch:
         from monocle.watcher import InboxWatcher
 
         watcher = InboxWatcher(
@@ -315,6 +345,19 @@ async def lifespan(app: FastAPI):
     app.state.watcher = watcher
 
     # ------------------------------------------------------------------
+    # Process Manager (separate-processes mode only)
+    # Spawns `monocle watch` and `monocle scheduler` as subprocesses so that
+    # the inbox watcher and APScheduler run in dedicated OS processes.
+    # In the default unified mode this is a no-op.
+    # ------------------------------------------------------------------
+    from monocle.process_manager import ProcessManager
+
+    process_manager = ProcessManager(cfg)
+    if _separate:
+        await process_manager.start_all()
+    app.state.process_manager = process_manager
+
+    # ------------------------------------------------------------------
     # MCP server state — inject shared layers so tool functions can access them
     # ------------------------------------------------------------------
     from monocle.mcp_server import init_mcp_state
@@ -336,12 +379,17 @@ async def lifespan(app: FastAPI):
     if watcher is not None:
         await watcher.stop()
     await reindex_queue.stop()
-    await scheduler.stop()
+    if scheduler is not None:
+        await scheduler.stop()
+    if _separate:
+        await process_manager.stop_all()
     logger.info("[API] Monocle shutdown complete")
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Rate limiting (slowapi)
+#region #*   Rate limiting (slowapi)
 # ---------------------------------------------------------------------------
 
 from slowapi import _rate_limit_exceeded_handler  # noqa: E402
@@ -350,8 +398,10 @@ from slowapi.errors import RateLimitExceeded  # noqa: E402
 from monocle.rate_limit import limiter  # noqa: E402
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Factory — build the FastAPI app
+#region #*   Factory — build the FastAPI app
 # ---------------------------------------------------------------------------
 
 

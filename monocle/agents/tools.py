@@ -34,8 +34,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Maximum results caps to keep context windows manageable
+#region #*   Maximum results caps to keep context windows manageable
 # ---------------------------------------------------------------------------
 
 _MAX_SEARCH_RESULTS = 10
@@ -86,6 +88,26 @@ def _normalize_tags(value: Any) -> list[str] | None:
         # Final fallback: comma-separated plain text
         return [t.strip() for t in s.split(",") if t.strip()] or None
     return [str(value)]
+
+
+def _try_unwrap_json_body(content: str) -> str:
+    """Extract plain text if the LLM accidentally serialized content as a JSON object.
+
+    Handles patterns like ``{"body": "text"}``, ``{"content": "text"}``, etc.
+    Returns *content* unchanged when it is already plain text.
+    """
+    stripped = content.strip()
+    if not stripped.startswith("{"):
+        return content
+    try:
+        parsed = json.loads(stripped)
+        if isinstance(parsed, dict):
+            for key in ("body", "content", "text", "note"):
+                if key in parsed and isinstance(parsed[key], str):
+                    return parsed[key]
+    except (json.JSONDecodeError, ValueError):
+        pass
+    return content
 
 
 class VaultTools:
@@ -458,24 +480,26 @@ class VaultTools:
     @ai_function
     async def append_to_note(
         self,
-        query: Annotated[str, "Person name, title, or topic to search for the note (e.g. 'Lucas Gallagher')"],
-        content: Annotated[str, "New content to append to the existing note body"],
+        query: Annotated[str, "Person name, title, or topic to find the target note (e.g. 'Lucas Gallagher')"],
+        content: Annotated[str, "New content to append to the existing note body (required — must not be empty)"],
     ) -> str:
-        """Find an existing note by searching the vault and append new content to it.
+        """Append new content to an existing note (WRITE operation — both query and content are required).
 
-        Use this whenever a user wants to ADD information to an existing note
-        without providing a file path — e.g. 'add to my note on Alice' or
-        'update Lucas Gallagher\'s note with ...'.
+        Use ONLY when the user explicitly wants to ADD or APPEND new text to a note,
+        e.g. 'add to my note on Alice' or 'update Lucas's note with <new info>'.
 
-        The tool uses three strategies in order:
-          1. Wikilink resolution — exact stem / slug match on filename (no index needed)
-          2. Title scan — iterates vault notes, exact then prefix title match
-          3. Semantic search — embedding similarity (requires indexed notes)
+        Do NOT use this for reading, retrieving, or looking up notes — use search_vault
+        or read_note instead.
 
         Returns JSON with file_path, title, and status.
         """
         if len(content) > _MAX_BODY_LENGTH:
             raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
+
+        # Unwrap JSON-encoded content that the LLM occasionally produces,
+        # e.g. {"body": "actual text"} instead of the plain text string.
+        content = _try_unwrap_json_body(content)
+
         try:
             # Step 1: Prefer exact wikilink resolution (works even when index is empty)
             file_path: str | None = await _to_thread(self._vault.resolve_wikilink, query)
@@ -530,14 +554,17 @@ class VaultTools:
                     {"error": f"No note found matching {query!r}. Use create_note to start one."}
                 )
 
-            # Step 2: read the full note
+            # Read the full note
             note = await _to_thread(self._vault.read_note, file_path)
 
-            # Step 3: append content as a new paragraph
-            separator = "\n\n" if note.body.strip() else ""
-            note.body = note.body.rstrip() + separator + content.strip()
+            existing_body = note.body or ""
 
-            # Step 4: persist and re-index
+            # Merge: use AI to integrate new content when the note already has a body,
+            # so facts are synthesised rather than raw-appended. Falls back to simple
+            # append if AI is unavailable or returns an unusable result.
+            note.body = await self._merge_body(existing_body, content)
+
+            # Persist and re-index
             await _to_thread(self._vault.write_note, file_path, note)
             if self._reindex_queue is not None:
                 self._reindex_queue.push(file_path)
@@ -549,11 +576,65 @@ class VaultTools:
             logger.warning("append_to_note tool error for %r: %s", query, exc)
             raise
 
+    async def _merge_body(self, existing: str, new_content: str) -> str:
+        """Merge new_content into existing note body.
+
+        When an AI provider is available and the existing body is non-empty,
+        asks the LLM to produce a single coherent Markdown body that integrates
+        both texts (avoiding duplication). Falls back to a simple append on any
+        failure or when no AI is configured.
+        """
+        if not existing.strip():
+            return new_content.strip()
+
+        if self._ai is None:
+            sep = "\n\n"
+            return existing.rstrip() + sep + new_content.strip()
+
+        try:
+            messages = [
+                {
+                    "role": "user",
+                    "content": (
+                        "Merge the new information into the existing note body. "
+                        "Produce a single coherent Markdown body that integrates "
+                        "all facts, avoids duplication, and reads naturally. "
+                        "Return ONLY the merged body — no YAML frontmatter, no JSON, "
+                        "no commentary.\n\n"
+                        f"EXISTING:\n{existing}\n\n"
+                        f"NEW INFORMATION:\n{new_content}"
+                    ),
+                }
+            ]
+            result = await self._ai.chat(messages, stream=False)
+            merged: str = ""
+            if isinstance(result, str):
+                merged = result.strip()
+            elif hasattr(result, "__aiter__"):
+                parts: list[str] = []
+                async for chunk in result:
+                    parts.append(chunk)
+                merged = "".join(parts).strip()
+
+            # Sanity-check: the merged result must contain at least part of
+            # the new content; if not, fall back to append (prevents a metadata
+            # JSON leak from the AI contaminating the note body).
+            if merged and new_content.split()[0].lower() in merged.lower():
+                return merged
+        except Exception as exc:
+            logger.debug("AI merge failed, falling back to append: %s", exc)
+
+        # Fallback: simple paragraph append
+        return existing.rstrip() + "\n\n" + new_content.strip()
+
+
+#endregion
 
 # ---------------------------------------------------------------------------
-# Helper: asyncio.to_thread wrapper (avoids import boilerplate in tools)
+#region #*   Helper: asyncio.to_thread wrapper (avoids import boilerplate in tools)
 # ---------------------------------------------------------------------------
 
 
 async def _to_thread(fn, *args, **kwargs):
     return await asyncio.to_thread(fn, *args, **kwargs)
+

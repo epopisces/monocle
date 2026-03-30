@@ -47,8 +47,10 @@ _DEFAULT_N_CLUSTERS: int = 5
 _MAX_CLUSTERS: int = 8
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Internal helpers
+#region #*   Internal helpers
 # ---------------------------------------------------------------------------
 
 
@@ -147,8 +149,10 @@ async def _summarise_cluster(
         return f"*Summary generation failed for cluster '{cluster_label}' — see server logs*"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# WeeklySummaryAgent
+#region #*   WeeklySummaryAgent
 # ---------------------------------------------------------------------------
 
 

@@ -22,8 +22,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 
@@ -32,8 +34,10 @@ def _make_settings() -> MagicMock:
     return MagicMock()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Lifecycle tests
+#region #*   Lifecycle tests
 # ---------------------------------------------------------------------------
 
 
@@ -84,8 +88,10 @@ class TestMonocleSchedulerLifecycle:
         await sched.stop()  # second call should be a no-op
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# add_cron_job tests
+#region #*   add_cron_job tests
 # ---------------------------------------------------------------------------
 
 
@@ -195,8 +201,10 @@ class TestMonocleSchedulerAddCronJob:
         await sched.stop()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Backward-compat alias
+#region #*   Backward-compat alias
 # ---------------------------------------------------------------------------
 
 
@@ -211,8 +219,10 @@ class TestMoocleSchedulerAlias:
         )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# WeeklySummaryAgent tests (M11)
+#region #*   WeeklySummaryAgent tests (M11)
 # ---------------------------------------------------------------------------
 
 
@@ -689,8 +699,10 @@ class TestWeeklySummaryAgent:
         assert fm.get("domain") == "mixed", f"Expected domain='mixed', got {fm.get('domain')!r}"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Agent API endpoint tests (M11)
+#region #*   Agent API endpoint tests (M11)
 # ---------------------------------------------------------------------------
 
 

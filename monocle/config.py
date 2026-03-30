@@ -17,8 +17,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 logger = logging.getLogger(__name__)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Nested config sections
+#region #*   Nested config sections
 # ---------------------------------------------------------------------------
 
 
@@ -152,8 +154,10 @@ class UIConfig(BaseModel):
     voice_input_backend: Literal["whisper", "web_speech"] = "whisper"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Root Settings
+#region #*   Root Settings
 # ---------------------------------------------------------------------------
 
 

@@ -28,8 +28,10 @@ AudioBytesField = Annotated[bytes | None, BeforeValidator(_coerce_audio_bytes)]
 
 T = TypeVar("T")
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Primitives
+#region #*   Primitives
 # ---------------------------------------------------------------------------
 
 NoteSource = Literal["web", "voice", "teams", "mcp", "import", "agent"]
@@ -50,8 +52,10 @@ NOTE_TYPES = Literal[
 ]
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Link / graph types
+#region #*   Link / graph types
 # ---------------------------------------------------------------------------
 
 
@@ -86,8 +90,10 @@ class GraphData(BaseModel):
     edges: list[GraphEdge] = Field(default_factory=list)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Note models
+#region #*   Note models
 # ---------------------------------------------------------------------------
 
 
@@ -151,8 +157,10 @@ class NoteChunk(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Pagination
+#region #*   Pagination
 # ---------------------------------------------------------------------------
 
 
@@ -163,8 +171,10 @@ class Page(BaseModel, Generic[T]):
     limit: int = 50
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Ingest models
+#region #*   Ingest models
 # ---------------------------------------------------------------------------
 
 
@@ -196,8 +206,10 @@ class IngestConfidence(BaseModel):
     similar_note_path: str | None = None
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Index models
+#region #*   Index models
 # ---------------------------------------------------------------------------
 
 
@@ -216,8 +228,10 @@ class IndexStats(BaseModel):
     backend: str = "chroma"
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Stats
+#region #*   Stats
 # ---------------------------------------------------------------------------
 
 
@@ -235,8 +249,10 @@ class BrainStats(BaseModel):
     latency_p95_ms: dict[str, float] = Field(default_factory=dict)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Ingest response
+#region #*   Ingest response
 # ---------------------------------------------------------------------------
 
 
@@ -247,8 +263,10 @@ class IngestResponse(BaseModel):
     confidence: IngestConfidence
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Agent / routing models
+#region #*   Agent / routing models
 # ---------------------------------------------------------------------------
 
 

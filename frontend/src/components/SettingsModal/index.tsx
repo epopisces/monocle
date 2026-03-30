@@ -162,10 +162,10 @@ export default function SettingsModal({ open, onClose }: Props) {
         {status === 'loading' ? (
           <div className="settings-modal__body settings-modal__loading">Loading settings…</div>
         ) : !settings ? (
-          <div className="settings-modal__body settings-modal__error">{error ?? 'Failed to load settings'}</div>
+          <div data-testid="settings-error" className="settings-modal__body settings-modal__error">{error ?? 'Failed to load settings'}</div>
         ) : (
           <div className="settings-modal__body">
-            {error && <div className="settings-modal__error">{error}</div>}
+            {error && <div data-testid="settings-error" className="settings-modal__error">{error}</div>}
 
             {/* AI Provider */}
             <section className="settings-section">

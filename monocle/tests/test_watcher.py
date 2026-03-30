@@ -31,8 +31,10 @@ from monocle.watcher import (
 )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ReindexQueue tests
+#region #*   ReindexQueue tests
 # ---------------------------------------------------------------------------
 
 
@@ -199,8 +201,10 @@ class TestReindexQueue:
         await q.stop()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# InboxWatcher — _on_stable_file logic
+#region #*   InboxWatcher — _on_stable_file logic
 # ---------------------------------------------------------------------------
 
 
@@ -255,8 +259,10 @@ class TestInboxWatcherOnStableFile:
         assert "Routing pipeline failure" in content
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# InboxWatcher — _InboxEventHandler dispatch + debounce
+#region #*   InboxWatcher — _InboxEventHandler dispatch + debounce
 # ---------------------------------------------------------------------------
 
 
@@ -448,8 +454,10 @@ class TestInboxEventHandlerDispatch:
         )
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# _fire() shutdown-race and Future-observation tests
+#region #*   _fire() shutdown-race and Future-observation tests
 # ---------------------------------------------------------------------------
 
 
@@ -564,8 +572,10 @@ class TestFireShutdownRaceAndFutureObservation:
             mock_logger.error.assert_not_called()
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# _write_error_sidecar helper
+#region #*   _write_error_sidecar helper
 # ---------------------------------------------------------------------------
 
 
@@ -595,8 +605,10 @@ class TestWriteErrorSidecar:
         assert "type: ingest_error" in content
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# InboxWatcher integration (start/stop lifecycle)
+#region #*   InboxWatcher integration (start/stop lifecycle)
 # ---------------------------------------------------------------------------
 
 

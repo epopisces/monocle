@@ -19,8 +19,10 @@ from monocle.index.base import DimensionMismatch
 from monocle.index.memory import MemoryIndex
 from monocle.models import IndexStats, NoteChunk
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Pure-Python ChromaDB fake — replaces PersistentClient in tests
+#region #*   Pure-Python ChromaDB fake — replaces PersistentClient in tests
 # ---------------------------------------------------------------------------
 
 
@@ -147,8 +149,10 @@ class _FakeChromaClient:
     def delete_collection(self, name: str) -> None:
         self._collections.pop(name, None)
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Helpers
+#region #*   Helpers
 # ---------------------------------------------------------------------------
 
 # Three-dimensional unit vectors used as embeddings throughout (low overhead).
@@ -198,8 +202,10 @@ def _make_fake_chroma_index(
     return ChromaIndex(settings)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Parametrized fixture — both backends
+#region #*   Parametrized fixture — both backends
 # ---------------------------------------------------------------------------
 
 
@@ -211,8 +217,10 @@ def index(request, tmp_path, monkeypatch):
     return _make_fake_chroma_index(monkeypatch)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Common tests (run against both backends)
+#region #*   Common tests (run against both backends)
 # ---------------------------------------------------------------------------
 
 
@@ -405,8 +413,10 @@ class TestDeleteAll:
         assert len(results) == 1
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ChromaIndex-only tests
+#region #*   ChromaIndex-only tests
 # ---------------------------------------------------------------------------
 
 
@@ -468,8 +478,10 @@ class TestChromaDimensionMismatch:
             index.search([], n_results=5)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# Factory tests
+#region #*   Factory tests
 # ---------------------------------------------------------------------------
 
 
@@ -500,8 +512,10 @@ def test_get_index_raises_for_unknown_backend(monkeypatch):
         get_index(settings)
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# MemoryIndex-specific behaviour
+#region #*   MemoryIndex-specific behaviour
 # ---------------------------------------------------------------------------
 
 
@@ -517,8 +531,10 @@ def test_memory_index_query_text_is_case_insensitive():
     assert len(results) == 1
 
 
+#endregion
+
 # ---------------------------------------------------------------------------
-# ChromaIndex.get_file_timestamps() pagination
+#region #*   ChromaIndex.get_file_timestamps() pagination
 # ---------------------------------------------------------------------------
 
 

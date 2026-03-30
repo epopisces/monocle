@@ -1,6 +1,9 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import App from './App'
+import { getReviewCount } from './api/review'
+import { listIngestFailures } from './api/ingest'
+import { getSettings } from './api/settings'
 
 // react-force-graph pulls in aframe-extras which requires a global AFRAME.
 // Mock the whole module so App.test.tsx doesn't trigger that side effect.
@@ -94,6 +97,147 @@ describe('App — polling and server settings', () => {
     render(<App />)
     // Verify app mounts successfully and Topbar is present
     expect(screen.getByTestId('topbar')).toBeInTheDocument()
+  })
+})
+
+// ── Polling lifecycle ────────────────────────────────────────────────────────
+
+describe('App — polling lifecycle', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
+    vi.mocked(listIngestFailures).mockResolvedValue([])
+    vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
+    vi.useFakeTimers({ shouldAdvanceTime: false })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.clearAllMocks()
+  })
+
+  it('calls getReviewCount once on mount', async () => {
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    expect(vi.mocked(getReviewCount)).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls listIngestFailures once on mount', async () => {
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    expect(vi.mocked(listIngestFailures)).toHaveBeenCalledTimes(1)
+  })
+
+  it('polls getReviewCount again after 30 seconds', async () => {
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    const callsBefore = vi.mocked(getReviewCount).mock.calls.length
+
+    await act(async () => { vi.advanceTimersByTime(30_000) })
+    const callsAfter = vi.mocked(getReviewCount).mock.calls.length
+    expect(callsAfter).toBeGreaterThan(callsBefore)
+  })
+
+  it('polls listIngestFailures again after 30 seconds', async () => {
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    const callsBefore = vi.mocked(listIngestFailures).mock.calls.length
+
+    await act(async () => { vi.advanceTimersByTime(30_000) })
+    const callsAfter = vi.mocked(listIngestFailures).mock.calls.length
+    expect(callsAfter).toBeGreaterThan(callsBefore)
+  })
+
+  it('does not crash when getReviewCount rejects', async () => {
+    vi.mocked(getReviewCount).mockRejectedValue(new Error('Server error'))
+    // Should render without throwing
+    expect(() => render(<App />)).not.toThrow()
+    await act(async () => { await Promise.resolve() })
+  })
+
+  it('does not crash when listIngestFailures rejects', async () => {
+    vi.mocked(listIngestFailures).mockRejectedValue(new Error('Server error'))
+    expect(() => render(<App />)).not.toThrow()
+    await act(async () => { await Promise.resolve() })
+  })
+})
+
+// ── Settings propagation ─────────────────────────────────────────────────────
+
+describe('App — settings propagation', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
+    vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
+    vi.mocked(listIngestFailures).mockResolvedValue([])
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  it('fetches settings on mount', async () => {
+    vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    expect(vi.mocked(getSettings)).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not crash when getSettings rejects — keeps default voice backend', async () => {
+    vi.mocked(getSettings).mockRejectedValue(new Error('Network error'))
+    expect(() => render(<App />)).not.toThrow()
+    await act(async () => { await Promise.resolve() })
+    // App should still render normally
+    expect(screen.getByTestId('topbar')).toBeInTheDocument()
+  })
+})
+
+// ── Route navigation ─────────────────────────────────────────────────────────
+
+describe('App — route navigation', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
+    vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
+    vi.mocked(listIngestFailures).mockResolvedValue([])
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  it('navigates to /search when the Search nav link is clicked', async () => {
+    render(<App />)
+    const nav = screen.getByTestId('left-nav')
+    const searchLink = nav.querySelector('a[href="/search"]')
+    expect(searchLink).toBeTruthy()
+    fireEvent.click(searchLink as Element)
+    await act(async () => { await Promise.resolve() })
+    // Link remains in the nav after navigation
+    expect(nav.querySelector('a[href="/search"]')).toBeTruthy()
+  })
+
+  it('navigates to /graph when the Graph nav link is clicked', async () => {
+    render(<App />)
+    const nav = screen.getByTestId('left-nav')
+    const graphLink = nav.querySelector('a[href="/graph"]')
+    expect(graphLink).toBeTruthy()
+    fireEvent.click(graphLink as Element)
+    await act(async () => { await Promise.resolve() })
+    expect(nav.querySelector('a[href="/graph"]')).toBeTruthy()
+  })
+
+  it('navigates to /stats when the Stats nav link is clicked', async () => {
+    render(<App />)
+    const nav = screen.getByTestId('left-nav')
+    const statsLink = nav.querySelector('a[href="/stats"]')
+    expect(statsLink).toBeTruthy()
+    fireEvent.click(statsLink as Element)
+    await act(async () => { await Promise.resolve() })
+    expect(nav.querySelector('a[href="/stats"]')).toBeTruthy()
+  })
+
+  it('navigates back to / (chat) when the Chat nav link is clicked after switching', async () => {
+    render(<App />)
+    const nav = screen.getByTestId('left-nav')
+    // Navigate away first
+    fireEvent.click(nav.querySelector('a[href="/stats"]') as Element)
+    await act(async () => { await Promise.resolve() })
+    // Navigate back to chat
+    fireEvent.click(nav.querySelector('a[href="/"]') as Element)
+    await act(async () => { await Promise.resolve() })
+    expect(nav.querySelector('a[href="/"]')).toBeTruthy()
   })
 })
 
