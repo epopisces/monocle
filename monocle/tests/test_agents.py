@@ -560,6 +560,24 @@ class TestVaultToolsExecution:
         await vt.append_to_note("Alice", "New fact.")
         mock_rq.push.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_append_to_note_unwraps_json_body(self, vault_tools, tmp_vault):
+        """append_to_note must unwrap {"body": "..."} JSON the LLM sometimes produces."""
+        await vault_tools.append_to_note("Alice", '{"body": "She won a hackathon."}')
+        content = (tmp_vault / "people" / "alice-example.md").read_text()
+        assert "She won a hackathon." in content
+        assert '{"body"' not in content
+
+    @pytest.mark.asyncio
+    async def test_append_to_note_ai_merge_integrates_content(self, vault_tools, tmp_vault):
+        """When AI is available, append_to_note merges rather than raw-appends."""
+        result = await vault_tools.append_to_note("Alice", "She now leads the infra guild.")
+        parsed = json.loads(result)
+        assert parsed["status"] == "updated"
+        content = (tmp_vault / "people" / "alice-example.md").read_text()
+        # Both old and new content should appear in the merged body
+        assert "She now leads the infra guild." in content
+
     #endregion
 
 #endregion

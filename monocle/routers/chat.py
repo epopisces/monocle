@@ -61,6 +61,7 @@ class ChatMessageRequest(BaseModel):
 class ChatRequest(BaseModel):
     messages: list[ChatMessageRequest]
     session_id: str | None = None
+    tool_hint: str | None = None
 
 
 #endregion
@@ -125,6 +126,7 @@ async def _stream_agent_response(
             settings=settings,
             graph_builder=graph_builder,
             reindex_queue=reindex_queue,
+            tool_hint=chat_request.tool_hint,
         )
 
         # Convert request messages to agent framework format

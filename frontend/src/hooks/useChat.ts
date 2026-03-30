@@ -68,7 +68,7 @@ export function useChat() {
   sessionIdRef.current = currentSessionId
 
   // send is stable (empty deps) — reads latest values via refs
-  const send = useCallback(async (content: string) => {
+  const send = useCallback(async (content: string, toolHint?: string) => {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -90,7 +90,7 @@ export function useChat() {
     setIsStreaming(true)
 
     try {
-      for await (const evt of streamChat({ messages: messagesForApi, session_id: sessionId }, controller.signal)) {
+      for await (const evt of streamChat({ messages: messagesForApi, session_id: sessionId, tool_hint: toolHint }, controller.signal)) {
         if (controller.signal.aborted) break
 
         switch (evt.event) {

@@ -151,11 +151,21 @@ def mock_ai():
     """AsyncMock AIProvider with sensible default return values for unit tests."""
     from monocle.models import NoteMetadata
 
+    async def _chat_side_effect(messages, **kwargs):
+        """Return merge-compatible content for merge calls; JSON for all others."""
+        content = messages[-1].get("content", "") if messages else ""
+        if "EXISTING:" in content and "NEW INFORMATION:" in content:
+            # Simulate a coherent merge: concatenate both sections
+            _, rest = content.split("EXISTING:", 1)
+            existing_part, new_part = rest.split("NEW INFORMATION:", 1)
+            return f"{existing_part.strip()}\n\n{new_part.strip()}"
+        return '{"type": "other", "domain": "personal", "tags": []}'
+
     ai = AsyncMock()
     ai.embed = AsyncMock(return_value=[0.1] * 1536)
     ai.embed_batch = AsyncMock(return_value=[[0.1] * 1536])
     ai.transcribe = AsyncMock(return_value="transcribed audio content")
-    ai.chat = AsyncMock(return_value='{"type": "other", "domain": "personal", "tags": []}')
+    ai.chat = AsyncMock(side_effect=_chat_side_effect)
     ai.extract_note_metadata = AsyncMock(return_value=NoteMetadata())
     return ai
 
