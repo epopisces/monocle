@@ -121,6 +121,20 @@ export default function DocumentBrowserScreen() {
     )
   }, [])
 
+  const handleDeleted = useCallback((path: string) => {
+    setNotes(prev => prev.filter(n => n.file_path !== path))
+    if (selectedPath === path) {
+      setSelectedPath(null)
+      setOpenNote(null)
+      setSearchParams({}, { replace: true })
+    }
+  }, [selectedPath, setSearchParams])
+
+  const handleRenamed = useCallback((path: string, newTitle: string) => {
+    setNotes(prev => prev.map(n => n.file_path === path ? { ...n, title: newTitle } : n))
+    setOpenNote(prev => prev?.file_path === path ? { ...prev, title: newTitle } : prev)
+  }, [])
+
   return (
     <div className="doc-browser" data-testid="doc-browser">
       {wikiToast && (
@@ -157,6 +171,8 @@ export default function DocumentBrowserScreen() {
             notes={notes}
             selectedPath={selectedPath}
             onSelect={handleSelectNote}
+            onDeleted={handleDeleted}
+            onRenamed={handleRenamed}
           />
         )}
       </aside>

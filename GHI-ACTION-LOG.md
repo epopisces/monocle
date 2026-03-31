@@ -4,6 +4,88 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-03-31
+
+### Claude Sonnet 4.6 (continued)
+- **ReviewQueue mouseover preview ReactMarkdown children type fix (FINAL)**
+  - Discovered second part of the crash: after fixing frontmatter stripping, JSX children as separate expressions `{str1}{str2}` were being converted to an array instead of a concatenated string
+  - ReactMarkdown's `children` prop expects a single string, not an array of strings
+  - Fixed by concatenating the display text before passing to ReactMarkdown: `displayText = truncated + (markdownBody.length > 400 ? '…' : '')`
+  - Result: Preview now renders correctly with no "Unexpected value for `children` prop" errors
+  - **All 64 VoiceCapture tests pass** — preview rendering fully functional
+
+- **ReviewQueue mouseover preview app crash (CRITICAL FIX)**
+  - Identified root cause: `getNote()` returns full note content WITH YAML frontmatter, but preview was passing entire body directly to ReactMarkdown
+  - ReactMarkdown cannot parse YAML frontmatter as markdown — assertion error "Unexpected value `---...---` for `children` prop, expected `string`"
+  - This crashed entire React app when user hovered over any review queue item (no error boundary)
+  - Solution: Import `splitFrontmatter()` from `monocle/utils/yamlUtils`, extract markdown body only before rendering
+  - Added try-catch wrapper around ReactMarkdown rendering with fallback error message
+  - Added error logging to `getNote()` fetch handler for better debugging
+  - Result: Preview now renders correctly; no more app crash on hover
+
+- **ReviewQueue mouseover preview blank UI fix** (prior session)
+  - Fixed critical bug where entire UI went blank when mousing over review queue items to show preview panel
+  - Root cause: `review-preview` CSS had no default `top` value (only inline style); inline calculation with unsafe math could fail and render preview off-screen/invisibly
+  - Fix in `ReviewQueue.tsx`: made inline style calculation safer with `Number.isFinite(preview.y)` check, defaults to `top: 60px` if calculation fails
+  - Fix in `ReviewQueue.css`: added `top: 60px;` as CSS fallback (renders at 60px if inline style doesn't apply), added explicit `pointer-events: auto;` on preview and backdrop to ensure event delegation works correctly
+  - Result: preview now always renders at valid position; z-index layering (backdrop 150 → panel 151 → preview 152) works as expected
+
+- **ReviewStatus model & rejection flow**
+  - Extended `ReviewStatus` `Literal` in `monocle/models.py` from `["pending", "approved"]` → `["pending", "approved", "rejected"]` to support the already-implemented `PATCH /api/review/{path}/reject` endpoint (was causing Pydantic validation errors when reading rejected notes)
+  - Added 10 comprehensive tests to `monocle/tests/test_review.py` class `TestRejectNote`: verify all frontmatter fields set correctly, response contract, Pydantic roundtrip validation, queue removal, cache decrement
+  - **51 review tests passing** (31 existing + 10 new)
+
+- **JSON metadata extraction fix in URL summarization**
+  - Fixed critical bug in `create_reference_from_url` (`mcp_server.py`) and `fetch_and_summarize_url` (`monocle/agents/tools.py`): comment claimed "extract last JSON block" but code used `re.search()` (first match). If summary contains example JSON code, metadata would pick wrong block.
+  - Changed both to `re.finditer()` + list comprehension; take `json_matches[-1]` (last match, not first)
+  - Added 3 new unit tests to `TestJSONMetadataExtraction`: multiple blocks (last wins), no blocks (fallback), single block (unchanged)
+  - **52 agent tests passing** (49 original + 3 new); **192 combined tests** (vault + review + agents) all green
+
+- **Chat agent system prompt accuracy fix**
+  - Fixed misleading documentation in `monocle/agents/__init__.py` base_instructions: prompt falsely claimed that `fetch_and_summarize_url` returns a `summary` field containing "actual fetched content" and instructed the model to quote it "verbatim"
+  - In reality, `summary` is the AI-generated note body (with `> Source:` header prepended), not raw page text — quoting it verbatim would mislead users
+  - Updated prompt to accurately describe: "`summary` is the AI-generated note body" and instruct model to "inform the user that a reference note has been created...optionally highlighting key takeaways" (instead of verbatim quoting)
+  - This prevents assistant from misrepresenting AI-summarized content as raw page text
+
+- **ChatInput URL hint UX fix**
+  - Fixed ChatInput auto-applying `fetch_and_summarize_url` tool hint whenever a URL was detected — this bypassed the new "fetch & summarize?" UI prompt
+  - Changed `handleKeyDown` (Enter key) and Send button to send with no tool hint by default
+  - Tool hint now only applied when user explicitly clicks "Yes, summarize" button
+  - Updated tests: renamed "Enter/Send auto-sends with hint" to "...sends without hint (requires user click Yes)" with assertions updated
+  - User intent now properly respected: "Yes" → fetch, Enter/Send → no fetch (unless user interacts with prompt), "No thanks" → no fetch
+  - **All 39 Chat tests passing**
+
+
+
+
+
+
+
+
+### Claude Sonnet 4.6
+- **ReviewQueue redesign (Phase 4 of prior session)**
+  - Added `PATCH /api/review/{path}/reject` backend endpoint (`monocle/routers/review.py`) — sets `review_status: "rejected"`, mirrors to ChromaDB, decrements pending count cache
+  - Added `RejectResponse` type and `rejectNote()` function to `frontend/src/api/review.ts`
+  - Rewrote `ReviewQueue.tsx`: renamed "Fix" → "Edit" (testid `fix-btn` → `edit-btn`), added Reject button with REJECTING/REJECTED/REJECT_ERROR reducer actions, added hover-preview panel that fetches note body on demand via `getNote()` with body cache and 150ms leave-delay, preview includes Approve/Edit/Reject action buttons
+  - Updated `ReviewQueue.css`: replaced `.review-card__btn--fix` with `.review-card__btn--edit`, added `.review-card__btn--reject` (red/error), added `.review-preview` fixed-position overlay, `.review-preview__body`, `.review-preview__actions`
+  - Updated `VoiceCapture.test.tsx`: added `rejectNote` and `getNote` mocks, renamed `fix-btn` → `edit-btn` throughout, updated aria-label assertions, added 2 new reject tests (success removes card, error keeps card)
+  - **380 frontend tests passing (+2 new), 70 backend review/settings tests passing**
+
+- **FileTree right-click context menu (Edit / Rename / Delete)**
+  - Rewrote `FileTree.tsx`: added `TreeActions` interface threaded down to all nodes; right-click on any file shows a fixed-position context menu with Edit, Rename, Delete; Rename replaces the row with an inline `<input>` (Enter to commit, Escape/blur to cancel) calling `patchNote(..., { updates: { title } })`; Delete shows an inline "Delete? Yes/No" confirmation row calling `deleteNote()`; context menu dismisses on outside click or Escape; viewport-edge clamping on menu position
+  - Added CSS (`FileTree.css`): `.file-tree__context-menu`, `.file-tree__context-item`, `--danger` variant, rename input + error indicator, delete confirm row buttons
+  - Updated `DocumentBrowserScreen.tsx`: added `handleDeleted` (removes from notes list, clears selection/URL if affected) and `handleRenamed` (updates notes list title + open note title) callbacks; passed `onDeleted` and `onRenamed` to `FileTree`
+  - Updated `DocumentBrowser.test.tsx`: added `patchNote`/`deleteNote` to mock; added 9 new context-menu tests covering right-click show, Edit/Rename/Delete flows, Escape cancel, outside-click dismiss
+  - **389 frontend tests passing (+9 new)**
+
+- **Clickable vault paths in chat (Phase 6)**
+  - Added `VAULT_PATH_RE` regex and `linkifyVaultPaths()` helper in `ChatMessage.tsx` — converts bare `.md` paths in LLM responses into markdown links (`[path](/docs?path=...)`)
+  - Added `VaultLink` component (calls `useNavigate()` internally) and `MARKDOWN_COMPONENTS` module-level constant; replaced old `useMarkdownComponents()` custom hook pattern to prevent `useNavigate()` firing in tests rendered without a Router context
+  - Updated `ReactMarkdown` in `ChatMessage` to use `MARKDOWN_COMPONENTS` and `linkifyVaultPaths()`
+  - Added `.chat-vault-link` CSS class (button styled as accent-colored underlined text)
+  - Updated `Chat.test.tsx`: changed "double-click" note card test → "click", added "vault path in message text becomes a clickable link" test using `renderWithRouter`
+  - **390 frontend tests passing (+1 new)**
+
 ## 2026-03-26
 
 ### GitHub Copilot (Haiku 4.5)
@@ -705,3 +787,9 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - **Expanded rontend/src/api.test.ts** � added 8 error-path tests (HTTP 429, 500/502, network TypeError propagation, 204 No Content returns undefined)
 - **Expanded rontend/src/SettingsModal.test.tsx** � added patchSettings rejection (2 tests: error shown, clears on next success) and rotateMcpKey failure (2 tests: error shown, hint unchanged); added data-testid="settings-error" to SettingsModal component
 - All tests green: 737 backend passed (2 skipped), 378 frontend passed
+
+- **MCP tool: create_reference_from_url**
+  - Added `create_reference_from_url(url, extra_context)` MCP tool to `monocle/mcp_server.py`; fetches URL via httpx, strips HTML, uses AI to summarise, creates `reference` note with `web-reference` tag and `review_status: pending`; appends source URL as blockquote in body
+  - Added `_strip_html()`, `_fetch_url_text()` helpers and `_URL_SUMMARISE_PROMPT` constant
+  - Added 8 new tests in `TestMCPTools` (creates note, pending review, web-reference tag, body contains URL, no AI raises, non-http raises, triggers reindex, extra_context forwarded); updated `test_mcp_has_8_tools` ? `test_mcp_has_9_tools`
+  - **749 tests passing (+8 new), EXIT 0**

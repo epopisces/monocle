@@ -208,3 +208,41 @@ async def approve_all(
     request.app.state._review_pending_count = len(pending) - approved
 
     return ApproveAllResponse(approved=approved)
+
+
+@router.patch("/review/{path:path}/reject")
+@limiter.limit("60/minute")
+async def reject_note(
+    path: str,
+    request: Request,
+) -> ApprovalResult:
+    """Reject a pending note: sets review_status=rejected and removes it from the queue."""
+    vault = request.app.state.vault
+    index = request.app.state.index
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    updates = {
+        "review_status": "rejected",
+        "approval_mode": "manual",
+        "approved_by": "user",
+        "approved_at": now_iso,
+    }
+
+    note = await asyncio.to_thread(vault.patch_frontmatter, path, updates)
+
+    try:
+        await asyncio.to_thread(index.patch_file_metadata, path, {"review_status": "rejected"})
+    except Exception as exc:
+        logger.warning("[API] ChromaDB metadata patch failed for %s: %s", path, exc)
+
+    cached = getattr(request.app.state, "_review_pending_count", None)
+    if cached is not None:
+        request.app.state._review_pending_count = max(0, cached - 1)
+
+    return ApprovalResult(
+        file_path=note.file_path,
+        review_status="rejected",
+        approval_mode="manual",
+        approved_by="user",
+        approved_at=now_iso,
+    )

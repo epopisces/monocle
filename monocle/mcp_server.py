@@ -425,6 +425,184 @@ async def create_note(
 #endregion
 
 # ---------------------------------------------------------------------------
+#region #*   Helper: fetch and strip HTML from a URL
+# ---------------------------------------------------------------------------
+
+_MAX_FETCH_BYTES = 500_000  # 500 KB — cap before HTML stripping
+_MAX_TEXT_CHARS = 20_000    # chars fed to the LLM summariser
+
+_URL_SUMMARISE_PROMPT = """\
+You are a knowledge assistant. Summarise the following web page content into a concise Markdown reference note.
+
+Instructions:
+- Write 3–6 paragraphs covering the key ideas, arguments, and takeaways.
+- Use a short `## Summary` section at the top, then `## Key Points` as a bullet list.
+- Preserve any code examples, commands, or structured data verbatim in fenced code blocks.
+- Do NOT reproduce boilerplate navigation text, cookie banners, or unrelated sidebar content.
+- After the body, output a JSON block fenced with ```json containing:
+  {{"title": "<short descriptive title>", "tags": ["tag1", "tag2"], "domain": "<work|personal|technology|...>"}}
+
+Web page URL: {url}
+
+Content:
+{content}
+"""
+
+
+def _strip_html(raw: str) -> str:
+    """Remove HTML tags and decode entities, returning plain text."""
+    import html
+    import re
+
+    # Remove script/style blocks
+    raw = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
+    # Remove all remaining tags
+    raw = re.sub(r"<[^>]+>", " ", raw)
+    # Decode HTML entities
+    raw = html.unescape(raw)
+    # Collapse whitespace
+    raw = re.sub(r"\s+", " ", raw).strip()
+    return raw
+
+
+async def _fetch_url_text(url: str) -> str:
+    """Fetch *url* via httpx and return stripped plain text.
+
+    Raises ``ValueError`` for disallowed schemes and ``RuntimeError`` for
+    network / HTTP errors so callers can return a user-friendly message.
+    """
+    import asyncio
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError(f"Only http/https URLs are supported, got: {parsed.scheme!r}")
+
+    try:
+        import httpx
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+            resp = await client.get(
+                url,
+                headers={"User-Agent": "Monocle-Reference-Bot/1.0"},
+            )
+            resp.raise_for_status()
+            raw = resp.content[:_MAX_FETCH_BYTES].decode("utf-8", errors="replace")
+    except httpx.HTTPStatusError as exc:
+        raise RuntimeError(f"HTTP {exc.response.status_code} fetching {url}") from exc
+    except httpx.RequestError as exc:
+        raise RuntimeError(f"Network error fetching {url}: {exc}") from exc
+
+    return _strip_html(raw)[:_MAX_TEXT_CHARS]
+
+
+#endregion
+
+# ---------------------------------------------------------------------------
+#region #*   Tool: create_reference_from_url
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool()
+async def create_reference_from_url(
+    url: str,
+    extra_context: str | None = None,
+) -> str:
+    """Fetch a web page, summarise it with AI, and create a reference note in the vault.
+
+    The tool fetches the URL, strips HTML, asks the configured AI provider to
+    produce a structured Markdown summary, then creates a ``reference`` note
+    tagged with ``source: web`` and placed in the review queue.
+
+    Args:
+        url: The https:// URL to fetch and summarise.
+        extra_context: Optional additional context or instructions for the
+                       summariser (e.g. "focus on the security implications").
+
+    Returns:
+        JSON object with file_path, title, url, and status.
+    """
+    _state.assert_ready()
+
+    if _state.ai is None:
+        raise RuntimeError(
+            "create_reference_from_url requires an AI provider, "
+            "but the server was started without one. "
+            "Configure an AI provider in config.yaml."
+        )
+
+    # 1. Fetch and strip the page
+    page_text = await _fetch_url_text(url)
+
+    # 2. Build summarisation prompt
+    prompt_content = _URL_SUMMARISE_PROMPT.format(url=url, content=page_text)
+    if extra_context:
+        prompt_content += f"\n\nAdditional instructions: {extra_context}"
+
+    # 3. Ask AI to summarise
+    raw_response = await _state.ai.chat(
+        [{"role": "user", "content": prompt_content}],
+        stream=False,
+    )
+    assert isinstance(raw_response, str)
+
+    # 4. Extract the embedded JSON metadata block (last ```json ... ``` fence)
+    # ----------
+    # Use finditer to get all matches, then take the LAST one to avoid picking
+    # up example JSON code that may appear earlier in the response.
+    import re as _re
+
+    json_matches = list(_re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL))
+    if json_matches:
+        json_match = json_matches[-1]  # Take the last match
+        try:
+            meta = json.loads(json_match.group(1))
+        except json.JSONDecodeError:
+            meta = {}
+        # Strip the JSON fence from the body text
+        body = raw_response[: json_match.start()].strip()
+    else:
+        meta = {}
+        body = raw_response.strip()
+
+    title = meta.get("title") or url
+    tags = _normalize_tags(meta.get("tags")) or []
+    domain = meta.get("domain") or "personal"
+
+    # Prepend source URL to body
+    body = f"> Source: {url}\n\n{body}"
+
+    if len(body) > _MAX_BODY_LENGTH:
+        body = body[:_MAX_BODY_LENGTH]
+
+    # 5. Create the note
+    from monocle.models import NoteMetadata
+
+    metadata = NoteMetadata(
+        type="reference",
+        domain=domain,
+        tags=["web-reference"] + tags,
+        review_status="pending",
+        source="web",
+    )
+    note = await _to_thread(
+        _state.vault.create_from_template,
+        "reference",
+        {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
+        body,
+    )
+    await _to_thread(_state.vault.write_note, note.file_path, note)
+    if _state.reindex_queue is not None:
+        _state.reindex_queue.push(note.file_path)
+
+    return json.dumps(
+        {"file_path": note.file_path, "title": note.title, "url": url, "status": "created"}
+    )
+
+
+#endregion
+
+# ---------------------------------------------------------------------------
 #region #*   Tool: update_note
 # ---------------------------------------------------------------------------
 

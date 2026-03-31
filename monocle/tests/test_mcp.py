@@ -723,6 +723,171 @@ class TestMCPTools:
             if note.metadata.updated.tzinfo is None else note.metadata.updated
         assert updated_aware >= before
 
+    # ------------------------------------------------------------------
+    # create_reference_from_url tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_creates_note(self, mcp_state, mock_vault):
+        """create_reference_from_url fetches URL, summarises, and creates a note."""
+        from unittest.mock import AsyncMock, patch
+
+        from monocle.mcp_server import mcp, _state
+
+        _state.ai.chat = AsyncMock(
+            return_value=(
+                "## Summary\nA guide to AI project setup.\n"
+                "## Key Points\n- Use virtual environments\n"
+                "```json\n{\"title\": \"AI Dev Setup\", \"tags\": [\"ai\", \"dev\"], "
+                "\"domain\": \"technology\"}\n```"
+            )
+        )
+
+        fake_html = "<html><body><p>AI project setup prompts</p></body></html>"
+        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="AI project setup prompts")):
+            result = await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "https://example.com/ai-setup"},
+            )
+
+        data = json.loads(_extract_text(result))
+        assert data["status"] == "created"
+        assert "file_path" in data
+        assert data["url"] == "https://example.com/ai-setup"
+        assert isinstance(data["title"], str)
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_note_is_pending(self, mcp_state, mock_vault):
+        """Notes created from URL must land in review queue (review_status: pending)."""
+        from unittest.mock import AsyncMock, patch
+
+        from monocle.mcp_server import mcp, _state
+
+        _state.ai.chat = AsyncMock(
+            return_value="## Summary\nContent.\n```json\n{\"title\": \"Test Page\"}\n```"
+        )
+
+        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Some page content")):
+            result = await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "https://example.com/page"},
+            )
+
+        data = json.loads(_extract_text(result))
+        note = mock_vault.read_note(data["file_path"])
+        assert note.metadata.review_status == "pending"
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_has_web_reference_tag(self, mcp_state, mock_vault):
+        """Notes from URL must include the 'web-reference' tag."""
+        from unittest.mock import AsyncMock, patch
+
+        from monocle.mcp_server import mcp, _state
+
+        _state.ai.chat = AsyncMock(
+            return_value="## Summary\nContent.\n```json\n{\"title\": \"Tagged Page\", \"tags\": [\"python\"]}\n```"
+        )
+
+        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Python tips")):
+            result = await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "https://example.com/python"},
+            )
+
+        data = json.loads(_extract_text(result))
+        note = mock_vault.read_note(data["file_path"])
+        assert "web-reference" in (note.metadata.tags or [])
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_body_contains_source_url(self, mcp_state, mock_vault):
+        """The note body must include the original URL as a blockquote reference."""
+        from unittest.mock import AsyncMock, patch
+
+        from monocle.mcp_server import mcp, _state
+
+        target_url = "https://example.com/reference-page"
+        _state.ai.chat = AsyncMock(
+            return_value="## Summary\nKey info.\n```json\n{\"title\": \"Ref Page\"}\n```"
+        )
+
+        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Key info")):
+            result = await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": target_url},
+            )
+
+        data = json.loads(_extract_text(result))
+        note = mock_vault.read_note(data["file_path"])
+        assert target_url in note.body
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_without_ai_raises(self, mcp_state):
+        """Tool must raise RuntimeError if no AI provider is configured."""
+        from monocle.mcp_server import mcp, _state
+
+        _state.ai = None
+        with pytest.raises(Exception, match="AI provider"):
+            await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "https://example.com"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_non_http_scheme_raises(self, mcp_state):
+        """Tool must raise ValueError for non-http/https URLs."""
+        from monocle.mcp_server import mcp
+
+        with pytest.raises(Exception):
+            await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "ftp://example.com/file"},
+            )
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_triggers_reindex(self, mcp_state):
+        """create_reference_from_url must push the new note onto reindex_queue."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from monocle.mcp_server import mcp, _state
+
+        mock_rq = MagicMock()
+        _state.reindex_queue = mock_rq
+        _state.ai.chat = AsyncMock(
+            return_value="## Summary\nContent.\n```json\n{\"title\": \"RQ Test\"}\n```"
+        )
+
+        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Content")):
+            await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "https://example.com/rq"},
+            )
+
+        mock_rq.push.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_extra_context_forwarded(self, mcp_state):
+        """extra_context is appended to the AI prompt (no crash, note still created)."""
+        from unittest.mock import AsyncMock, patch
+
+        from monocle.mcp_server import mcp, _state
+
+        _state.ai.chat = AsyncMock(
+            return_value="## Summary\nFocused content.\n```json\n{\"title\": \"Ctx Test\"}\n```"
+        )
+
+        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Page text")):
+            result = await mcp.call_tool(
+                "create_reference_from_url",
+                {"url": "https://example.com/ctx", "extra_context": "Focus on security."},
+            )
+
+        data = json.loads(_extract_text(result))
+        assert data["status"] == "created"
+        # Verify extra_context was included in the prompt sent to AI
+        call_args = _state.ai.chat.call_args
+        prompt_text = call_args[0][0][0]["content"]
+        assert "Focus on security." in prompt_text
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TestMCPSecurityBoundaries
@@ -808,7 +973,7 @@ class TestMCPServerConfig:
         app = create_mcp_app("some-key")
         assert isinstance(app, _MCPAuthMiddleware)
 
-    def test_mcp_has_8_tools(self):
+    def test_mcp_has_9_tools(self):
         from monocle.mcp_server import mcp
 
         tool_names = {t.name for t in mcp._tool_manager._tools.values()}
@@ -818,6 +983,7 @@ class TestMCPServerConfig:
             "browse_recent",
             "capture_thought",
             "create_note",
+            "create_reference_from_url",
             "update_note",
             "get_graph",
             "get_stats",

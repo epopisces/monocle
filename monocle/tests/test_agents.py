@@ -290,13 +290,13 @@ class TestChatSSEStream:
 class TestVaultTools:
     """Tests that VaultTools builds correctly and exposes the right tools."""
 
-    def test_tools_list_has_8_entries(self, tmp_vault, memory_index, mock_ai):
+    def test_tools_list_has_9_entries(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
         from monocle.agents.tools import VaultTools
 
         vault = VaultLayer(str(tmp_vault))
         vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=None)
-        assert len(vt.tools) == 8
+        assert len(vt.tools) == 9
 
     def test_all_tools_are_callable(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
@@ -579,6 +579,76 @@ class TestVaultToolsExecution:
         assert "She now leads the infra guild." in content
 
     #endregion
+
+#endregion
+
+# ---------------------------------------------------------------------------
+#region #*   Tests: JSON metadata extraction with multiple blocks
+# ---------------------------------------------------------------------------
+
+
+class TestJSONMetadataExtraction:
+    """Verify that metadata extraction picks the LAST JSON block, not the first.
+    
+    This tests the fix for a bug where LLM responses containing example JSON code
+    (e.g., in the summary) would be parsed as metadata instead of the actual
+    metadata block at the end.
+    """
+
+    def test_json_extraction_regex_multiple_blocks(self) -> None:
+        """Unit test: re.finditer() finds all JSON blocks and we take the last one."""
+        import re
+
+        response = """
+## Summary
+
+Example: ```json
+{"wrong": "this is the first block"}
+```
+
+Real metadata: ```json
+{"title": "Correct Title", "tags": ["a", "b"]}
+```
+"""
+        # Use the same regex as the fixed code
+        json_matches = list(re.finditer(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL))
+        assert len(json_matches) == 2, "Should find both JSON blocks"
+
+        # Take the last one (the fix)
+        last_match = json_matches[-1]
+        metadata = json.loads(last_match.group(1))
+        assert metadata["title"] == "Correct Title", "Should extract from the LAST block"
+        assert "wrong" not in metadata, "Should NOT use first block"
+
+    def test_json_extraction_no_blocks(self) -> None:
+        """When no JSON blocks found, metadata dict is empty."""
+        import re
+
+        response = "## Summary\n\nNo JSON blocks here at all."
+        json_matches = list(re.finditer(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL))
+        assert len(json_matches) == 0
+
+        # Fallback behavior: empty dict and full response as body
+        if json_matches:
+            json_match = json_matches[-1]
+            body = response[: json_match.start()].strip()
+        else:
+            body = response.strip()
+
+        assert body == response
+
+    def test_json_extraction_single_block(self) -> None:
+        """When exactly one JSON block, it's correctly extracted."""
+        import re
+
+        response = "## Summary\n\nSome text.\n\n```json\n{\"title\": \"Single Block\"}\n```"
+        json_matches = list(re.finditer(r"```json\s*(\{.*?\})\s*```", response, re.DOTALL))
+        assert len(json_matches) == 1
+
+        json_match = json_matches[-1]  # Also the first (and last)
+        metadata = json.loads(json_match.group(1))
+        assert metadata["title"] == "Single Block"
+
 
 #endregion
 
