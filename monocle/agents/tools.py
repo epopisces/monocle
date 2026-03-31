@@ -666,8 +666,11 @@ class VaultTools:
             raise RuntimeError(f"AI summarisation failed: {exc}") from exc
 
         # 4. Extract trailing JSON metadata block
-        json_match = _re.search(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL)
-        if json_match:
+        # Use finditer to get all matches, then take the LAST one to avoid picking
+        # up example JSON code that may appear earlier in the response.
+        json_matches = list(_re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL))
+        if json_matches:
+            json_match = json_matches[-1]  # Take the last match
             try:
                 meta = json.loads(json_match.group(1))
             except json.JSONDecodeError:

@@ -4,6 +4,7 @@
   inset: 0;
   background-color: rgba(0, 0, 0, 0.35);
   z-index: 150;
+  pointer-events: auto;
 }
 
 /* ── Slide-over panel ────────────────────────────────────────────────────── */
@@ -255,6 +256,7 @@
 /* ── Note preview tooltip ─────────────────────────────────────────────────── */
 .review-preview {
   position: fixed;
+  top: 60px;
   right: 408px;
   width: 340px;
   max-height: 70vh;
@@ -268,6 +270,7 @@
   padding: var(--space-4);
   z-index: 152;
   overflow: hidden;
+  pointer-events: auto;
 }
 
 .review-preview__title {

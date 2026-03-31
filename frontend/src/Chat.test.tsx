@@ -129,20 +129,22 @@ describe('ChatInput', () => {
     expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined)
   })
 
-  it('Enter key with URL auto-sends with fetch_and_summarize_url hint', () => {
+  it('Enter key with URL sends without tool hint (requires user to click "Yes")', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'Add a note for https://example.com' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    expect(mockSend).toHaveBeenCalledWith('Add a note for https://example.com', 'fetch_and_summarize_url')
+    // Should send with NO hint — hint only applied if user clicks "Yes, summarize" button
+    expect(mockSend).toHaveBeenCalledWith('Add a note for https://example.com', undefined)
   })
 
-  it('Send button with URL auto-sends with fetch_and_summarize_url hint', () => {
+  it('Send button with URL sends without tool hint (requires user to click "Yes")', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'https://example.com/page' } })
     fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith('https://example.com/page', 'fetch_and_summarize_url')
+    // Should send with NO hint — hint only applied if user clicks "Yes, summarize" button
+    expect(mockSend).toHaveBeenCalledWith('https://example.com/page', undefined)
   })
 })
 

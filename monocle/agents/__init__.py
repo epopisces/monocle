@@ -419,9 +419,10 @@ def create_chat_agent(
             "- To CREATE A REFERENCE NOTE FROM A URL: use fetch_and_summarize_url. "
             "When a user asks to capture, save, or create a reference note for a URL, "
             "ALWAYS use fetch_and_summarize_url — never use create_note with made-up content. "
-            "The tool fetches the actual page content, summarises it with AI, and creates the note. "
-            "The tool returns a JSON object with a 'summary' field containing the actual fetched content. "
-            "ALWAYS use that 'summary' field verbatim in your response — do NOT paraphrase or invent content."
+            "The tool fetches the page, generates an AI summary, and creates a reference note. "
+            "The tool returns file_path, title, and summary (the AI-generated note body). "
+            "Inform the user that a reference note has been created and saved to that file path, "
+            "optionally highlighting key takeaways from the summary."
         )
 
     # Inject tool hint directive when provided and valid

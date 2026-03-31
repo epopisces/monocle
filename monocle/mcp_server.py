@@ -547,10 +547,14 @@ async def create_reference_from_url(
     assert isinstance(raw_response, str)
 
     # 4. Extract the embedded JSON metadata block (last ```json ... ``` fence)
+    # ----------
+    # Use finditer to get all matches, then take the LAST one to avoid picking
+    # up example JSON code that may appear earlier in the response.
     import re as _re
 
-    json_match = _re.search(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL)
-    if json_match:
+    json_matches = list(_re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL))
+    if json_matches:
+        json_match = json_matches[-1]  # Take the last match
         try:
             meta = json.loads(json_match.group(1))
         except json.JSONDecodeError:

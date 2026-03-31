@@ -168,6 +168,80 @@ class TestApproveNote:
 
 
 # ===========================================================================
+# PATCH /api/review/{path}/reject
+# ===========================================================================
+
+
+class TestRejectNote:
+    def test_reject_returns_200(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-me.md")
+        r = api_client.patch(f"/api/review/{path}/reject")
+        assert r.status_code == 200
+
+    def test_reject_sets_review_status_rejected(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-status.md")
+        api_client.patch(f"/api/review/{path}/reject")
+        note = api_client.get(f"/api/notes/{path}").json()
+        assert note["metadata"]["review_status"] == "rejected"
+
+    def test_reject_sets_approval_mode_manual(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-mode.md")
+        api_client.patch(f"/api/review/{path}/reject")
+        note = api_client.get(f"/api/notes/{path}").json()
+        assert note["metadata"]["approval_mode"] == "manual"
+
+    def test_reject_sets_approved_by_as_user(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-by.md")
+        api_client.patch(f"/api/review/{path}/reject")
+        note = api_client.get(f"/api/notes/{path}").json()
+        assert note["metadata"]["approved_by"] == "user"
+
+    def test_reject_sets_approved_at_timestamp(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-at.md")
+        api_client.patch(f"/api/review/{path}/reject")
+        note = api_client.get(f"/api/notes/{path}").json()
+        assert note["metadata"]["approved_at"] is not None
+
+    def test_reject_response_has_all_fields(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-resp.md")
+        body = api_client.patch(f"/api/review/{path}/reject").json()
+        assert body["review_status"] == "rejected"
+        assert body["approval_mode"] == "manual"
+        assert body["approved_by"] == "user"
+        assert "approved_at" in body
+        assert body["file_path"] == path
+
+    def test_reject_404_for_missing_note(self, api_client: TestClient) -> None:
+        r = api_client.patch("/api/review/nonexistent/note.md/reject")
+        assert r.status_code == 404
+
+    def test_reject_removes_from_review_queue(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-queue.md")
+        api_client.patch(f"/api/review/{path}/reject")
+        items = api_client.get("/api/review").json()["items"]
+        assert not any(item["file_path"] == path for item in items)
+
+    def test_reject_note_not_valid_pydantic_on_read(self, api_client: TestClient) -> None:
+        """Verify that rejecting and reading back a note passes Pydantic validation."""
+        path = _add_pending_note(api_client, "inbox/reject-pydantic.md")
+        api_client.patch(f"/api/review/{path}/reject")
+        # This GET should NOT raise a Pydantic validation error
+        r = api_client.get(f"/api/notes/{path}")
+        assert r.status_code == 200, f"Failed to read rejected note: {r.text}"
+        note = r.json()
+        assert note["metadata"]["review_status"] == "rejected"
+
+    def test_reject_decrements_pending_count_cache(self, api_client: TestClient) -> None:
+        path = _add_pending_note(api_client, "inbox/reject-cache.md")
+        # Warm the cache
+        api_client.get("/api/review/count")
+        before = api_client.app.state._review_pending_count
+        api_client.patch(f"/api/review/{path}/reject")
+        after = api_client.app.state._review_pending_count
+        assert after == max(0, before - 1)
+
+
+# ===========================================================================
 # POST /api/review/approve-all
 # ===========================================================================
 

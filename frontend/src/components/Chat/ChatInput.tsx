@@ -78,8 +78,8 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      // Auto-use fetch_and_summarize_url when a URL is present in the message
-      doSend(detectedUrl ? 'fetch_and_summarize_url' : undefined)
+      // Send without tool hint; if a URL is detected, the UI prompt gives user choice
+      doSend()
       return
     }
 
@@ -190,7 +190,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
           )}
           <button
             className="chat-input__btn chat-input__btn--send"
-            onClick={() => doSend(detectedUrl ? 'fetch_and_summarize_url' : undefined)}
+            onClick={() => doSend()}
             disabled={disabled || !value.trim()}
             aria-label="Send message"
             title="Send"

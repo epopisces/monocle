@@ -12,6 +12,7 @@ import {
 import type { NoteRef } from '../../api/review'
 import { getNote } from '../../api/notes'
 import { mapErrorToUserMessage } from '../../utils/errorMessages'
+import { splitFrontmatter } from '../../utils/yamlUtils'
 import './ReviewQueue.css'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -252,13 +253,15 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
       setPreview({ item, body: null, loading: true, y: rect.top })
       getNote(item.file_path)
         .then(note => {
-          bodyCacheRef.current.set(item.file_path, note.body ?? '')
+          const noteBody = note.body ?? ''
+          bodyCacheRef.current.set(item.file_path, noteBody)
           setPreview(p => p?.item.file_path === item.file_path
-            ? { ...p, body: note.body ?? '', loading: false }
+            ? { ...p, body: noteBody, loading: false }
             : p
           )
         })
-        .catch(() => {
+        .catch(e => {
+          console.error('[ReviewQueue] Failed to fetch note preview:', e)
           setPreview(p => p?.item.file_path === item.file_path
             ? { ...p, loading: false }
             : p
@@ -407,7 +410,11 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
       {preview && (
         <div
           className="review-preview"
-          style={{ top: Math.max(60, Math.min(preview.y, window.innerHeight - 300)) }}
+          style={{
+            top: Number.isFinite(preview.y)
+              ? Math.max(60, Math.min(preview.y, (typeof window !== 'undefined' ? window.innerHeight : 800) - 300))
+              : 60
+          }}
           data-testid="review-preview"
           onMouseEnter={handlePreviewMouseEnter}
           onMouseLeave={handleMouseLeave}
@@ -416,9 +423,20 @@ export default function ReviewQueue({ open, onClose, onApprove }: Props) {
           <div className="review-preview__body">
             {preview.loading && <span className="review-preview__loading">Loading…</span>}
             {!preview.loading && preview.body
-              ? <ReactMarkdown components={PREVIEW_MARKDOWN_COMPONENTS}>
-                  {preview.body.slice(0, 400)}{preview.body.length > 400 ? '…' : ''}
-                </ReactMarkdown>
+              ? (() => {
+                  try {
+                    const { body: markdownBody } = splitFrontmatter(preview.body)
+                    const truncated = markdownBody.slice(0, 400)
+                    const displayText = truncated + (markdownBody.length > 400 ? '…' : '')
+                    return (
+                      <ReactMarkdown components={PREVIEW_MARKDOWN_COMPONENTS}>
+                        {displayText}
+                      </ReactMarkdown>
+                    )
+                  } catch {
+                    return <span className="review-preview__empty">Error rendering preview</span>
+                  }
+                })()
               : !preview.loading && <span className="review-preview__empty">No preview available</span>
             }
           </div>

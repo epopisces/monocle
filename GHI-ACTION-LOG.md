@@ -6,16 +6,59 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ## 2026-03-31
 
-### Claude Sonnet 4.6
-- **URL fetch-and-summarize in chat agent**
-  - Added `fetch_and_summarize_url` `@ai_function` to `VaultTools` (`monocle/agents/tools.py`): fetches URL via httpx (500 KB cap, 15 s timeout), strips HTML, AI-summarizes with structured prompt, creates reference note with `review_status=pending` and `tags=["web-reference", ...]`
-  - Updated `_ALLOWED_TOOL_HINTS` and system prompt in `monocle/agents/__init__.py` with explicit URL-routing instruction
-  - Added URL detection banner to `ChatInput.tsx`: `useMemo`-computed `detectedUrl` regex; banner with "Yes, summarize" (passes `fetch_and_summarize_url` hint) and "No thanks" (sends without hint) buttons
-  - Restructured `ChatInput.css`: `.chat-input` becomes column flex; `.chat-input__row` inner row for textarea + actions; added `.chat-input__url-suggestion` banner styles
-  - Updated `ChatScreen.tsx` `handleSend` to accept `inputToolHint?` from `ChatInput` and forward it, falling back to pending-hint logic
-  - Updated `Chat.test.tsx`: fixed `toHaveBeenCalledWith` assertions for new 2-arg signature; added 5 URL suggestion strip tests (show/hide, fetch click, skip click)
-  - Updated `test_agents.py`: bumped tool count assertion 8 → 9
-  - **749 backend tests, 394 frontend tests — all passing**
+### Claude Sonnet 4.6 (continued)
+- **ReviewQueue mouseover preview ReactMarkdown children type fix (FINAL)**
+  - Discovered second part of the crash: after fixing frontmatter stripping, JSX children as separate expressions `{str1}{str2}` were being converted to an array instead of a concatenated string
+  - ReactMarkdown's `children` prop expects a single string, not an array of strings
+  - Fixed by concatenating the display text before passing to ReactMarkdown: `displayText = truncated + (markdownBody.length > 400 ? '…' : '')`
+  - Result: Preview now renders correctly with no "Unexpected value for `children` prop" errors
+  - **All 64 VoiceCapture tests pass** — preview rendering fully functional
+
+- **ReviewQueue mouseover preview app crash (CRITICAL FIX)**
+  - Identified root cause: `getNote()` returns full note content WITH YAML frontmatter, but preview was passing entire body directly to ReactMarkdown
+  - ReactMarkdown cannot parse YAML frontmatter as markdown — assertion error "Unexpected value `---...---` for `children` prop, expected `string`"
+  - This crashed entire React app when user hovered over any review queue item (no error boundary)
+  - Solution: Import `splitFrontmatter()` from `monocle/utils/yamlUtils`, extract markdown body only before rendering
+  - Added try-catch wrapper around ReactMarkdown rendering with fallback error message
+  - Added error logging to `getNote()` fetch handler for better debugging
+  - Result: Preview now renders correctly; no more app crash on hover
+
+- **ReviewQueue mouseover preview blank UI fix** (prior session)
+  - Fixed critical bug where entire UI went blank when mousing over review queue items to show preview panel
+  - Root cause: `review-preview` CSS had no default `top` value (only inline style); inline calculation with unsafe math could fail and render preview off-screen/invisibly
+  - Fix in `ReviewQueue.tsx`: made inline style calculation safer with `Number.isFinite(preview.y)` check, defaults to `top: 60px` if calculation fails
+  - Fix in `ReviewQueue.css`: added `top: 60px;` as CSS fallback (renders at 60px if inline style doesn't apply), added explicit `pointer-events: auto;` on preview and backdrop to ensure event delegation works correctly
+  - Result: preview now always renders at valid position; z-index layering (backdrop 150 → panel 151 → preview 152) works as expected
+
+- **ReviewStatus model & rejection flow**
+  - Extended `ReviewStatus` `Literal` in `monocle/models.py` from `["pending", "approved"]` → `["pending", "approved", "rejected"]` to support the already-implemented `PATCH /api/review/{path}/reject` endpoint (was causing Pydantic validation errors when reading rejected notes)
+  - Added 10 comprehensive tests to `monocle/tests/test_review.py` class `TestRejectNote`: verify all frontmatter fields set correctly, response contract, Pydantic roundtrip validation, queue removal, cache decrement
+  - **51 review tests passing** (31 existing + 10 new)
+
+- **JSON metadata extraction fix in URL summarization**
+  - Fixed critical bug in `create_reference_from_url` (`mcp_server.py`) and `fetch_and_summarize_url` (`monocle/agents/tools.py`): comment claimed "extract last JSON block" but code used `re.search()` (first match). If summary contains example JSON code, metadata would pick wrong block.
+  - Changed both to `re.finditer()` + list comprehension; take `json_matches[-1]` (last match, not first)
+  - Added 3 new unit tests to `TestJSONMetadataExtraction`: multiple blocks (last wins), no blocks (fallback), single block (unchanged)
+  - **52 agent tests passing** (49 original + 3 new); **192 combined tests** (vault + review + agents) all green
+
+- **Chat agent system prompt accuracy fix**
+  - Fixed misleading documentation in `monocle/agents/__init__.py` base_instructions: prompt falsely claimed that `fetch_and_summarize_url` returns a `summary` field containing "actual fetched content" and instructed the model to quote it "verbatim"
+  - In reality, `summary` is the AI-generated note body (with `> Source:` header prepended), not raw page text — quoting it verbatim would mislead users
+  - Updated prompt to accurately describe: "`summary` is the AI-generated note body" and instruct model to "inform the user that a reference note has been created...optionally highlighting key takeaways" (instead of verbatim quoting)
+  - This prevents assistant from misrepresenting AI-summarized content as raw page text
+
+- **ChatInput URL hint UX fix**
+  - Fixed ChatInput auto-applying `fetch_and_summarize_url` tool hint whenever a URL was detected — this bypassed the new "fetch & summarize?" UI prompt
+  - Changed `handleKeyDown` (Enter key) and Send button to send with no tool hint by default
+  - Tool hint now only applied when user explicitly clicks "Yes, summarize" button
+  - Updated tests: renamed "Enter/Send auto-sends with hint" to "...sends without hint (requires user click Yes)" with assertions updated
+  - User intent now properly respected: "Yes" → fetch, Enter/Send → no fetch (unless user interacts with prompt), "No thanks" → no fetch
+  - **All 39 Chat tests passing**
+
+
+
+
+
 
 
 
