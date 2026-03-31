@@ -8,6 +8,7 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ### Claude Sonnet 4.6 (continued)
 - **ReviewQueue mouseover preview ReactMarkdown children type fix (FINAL)**
+- **Created `docs/architecture.md`**: 12 Mermaid diagrams covering system overview (layers + technologies), 8-step ingest pipeline flow, re-index sequence, chat/agent SSE streaming, weekly summary agent process, frontend component hierarchy, data model ER diagram, process topology (unified vs separate), MCP auth + tool routing, AI provider selection + transcription sub-abstraction, confidence scoring formula, and vault file layout
   - Discovered second part of the crash: after fixing frontmatter stripping, JSX children as separate expressions `{str1}{str2}` were being converted to an array instead of a concatenated string
   - ReactMarkdown's `children` prop expects a single string, not an array of strings
   - Fixed by concatenating the display text before passing to ReactMarkdown: `displayText = truncated + (markdownBody.length > 400 ? '…' : '')`
