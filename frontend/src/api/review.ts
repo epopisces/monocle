@@ -22,6 +22,8 @@ export interface ApproveResponse {
   approval_mode: string
 }
 
+export type RejectResponse = ApproveResponse
+
 export interface ApproveAllResponse {
   approved: number
   skipped: number
@@ -38,6 +40,10 @@ export function getReviewCount(): Promise<ReviewCountResponse> {
 
 export function approveNote(path: string): Promise<ApproveResponse> {
   return apiPatch<ApproveResponse>(`/api/review/${encodeURIComponent(path)}/approve`, {})
+}
+
+export function rejectNote(path: string): Promise<RejectResponse> {
+  return apiPatch<RejectResponse>(`/api/review/${encodeURIComponent(path)}/reject`, {})
 }
 
 export function approveAll(): Promise<ApproveAllResponse> {

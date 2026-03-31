@@ -155,6 +155,29 @@
   height: 100%;
 }
 
+/* Force cursor and selection to be visible in both light and dark themes.
+   Using hardcoded hex values because CSS custom properties can lose resolution
+   inside CodeMirror's injected style scope when !important specificity races occur. */
+:root .note-editor__cm .cm-editor .cm-cursor,
+:root .note-editor__cm .cm-editor .cm-dropCursor {
+  border-left: 2px solid #7c8af7 !important;  /* --accent dark */
+}
+
+[data-theme="light"] .note-editor__cm .cm-editor .cm-cursor,
+[data-theme="light"] .note-editor__cm .cm-editor .cm-dropCursor {
+  border-left: 2px solid #5865f2 !important;  /* --accent light */
+}
+
+:root .note-editor__cm .cm-editor .cm-selectionBackground,
+:root .note-editor__cm .cm-editor.cm-focused .cm-selectionBackground {
+  background-color: rgba(124, 138, 247, 0.3) !important;
+}
+
+[data-theme="light"] .note-editor__cm .cm-editor .cm-selectionBackground,
+[data-theme="light"] .note-editor__cm .cm-editor.cm-focused .cm-selectionBackground {
+  background-color: rgba(88, 101, 242, 0.3) !important;
+}
+
 /* Preview */
 .note-editor__preview {
   flex: 1;

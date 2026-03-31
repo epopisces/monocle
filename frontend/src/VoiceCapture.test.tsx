@@ -22,7 +22,12 @@ vi.mock('./api/review', () => ({
   listReview: vi.fn(),
   getReviewCount: vi.fn(),
   approveNote: vi.fn(),
+  rejectNote: vi.fn(),
   approveAll: vi.fn(),
+}))
+
+vi.mock('./api/notes', () => ({
+  getNote: vi.fn(),
 }))
 
 vi.mock('./api/ingest', () => ({
@@ -57,8 +62,11 @@ vi.mock('react-router-dom', async () => {
 import {
   listReview,
   approveNote,
+  rejectNote,
   approveAll,
 } from './api/review'
+
+import { getNote } from './api/notes'
 
 import {
   ingest,
@@ -443,6 +451,18 @@ describe('ReviewQueue — loaded state', () => {
       limit: 50,
     })
     vi.mocked(useNavigate).mockReturnValue(mockNavigate)
+    vi.mocked(getNote).mockResolvedValue({
+      file_path: NOTE_LOW_CONFIDENCE.file_path,
+      title: NOTE_LOW_CONFIDENCE.title,
+      body: 'Preview body content.',
+      type: NOTE_LOW_CONFIDENCE.type,
+      domain: NOTE_LOW_CONFIDENCE.domain,
+      tags: NOTE_LOW_CONFIDENCE.tags,
+      confidence: NOTE_LOW_CONFIDENCE.confidence,
+      review_status: NOTE_LOW_CONFIDENCE.review_status,
+      created: NOTE_LOW_CONFIDENCE.created,
+      updated: NOTE_LOW_CONFIDENCE.updated,
+    })
   })
   afterEach(() => {
     vi.clearAllMocks()
@@ -525,11 +545,11 @@ describe('ReviewQueue — loaded state', () => {
     expect(onClose).toHaveBeenCalledOnce()
   })
 
-  it('Fix button closes panel', async () => {
+  it('Edit button closes panel', async () => {
     const onClose = vi.fn()
     renderInRouter(<ReviewQueue open={true} onClose={onClose} />)
-    const fixBtns = await screen.findAllByTestId('fix-btn')
-    fireEvent.click(fixBtns[0])
+    const editBtns = await screen.findAllByTestId('edit-btn')
+    fireEvent.click(editBtns[0])
     expect(onClose).toHaveBeenCalledOnce()
   })
 
@@ -543,20 +563,53 @@ describe('ReviewQueue — loaded state', () => {
     })
     renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
     const approveBtns = await screen.findAllByTestId('approve-btn')
-    const fixBtns = await screen.findAllByTestId('fix-btn')
+    const editBtns = await screen.findAllByTestId('edit-btn')
     expect(approveBtns[0]).toHaveAttribute('aria-label', `Approve ${noteNoTitle.file_path}`)
-    expect(fixBtns[0]).toHaveAttribute('aria-label', `Fix ${noteNoTitle.file_path}`)
+    expect(editBtns[0]).toHaveAttribute('aria-label', `Edit ${noteNoTitle.file_path}`)
   })
-  it('navigates to /docs?path=<encoded> on Fix click', async () => {
+  it('navigates to /docs?path=<encoded> on Edit click', async () => {
     renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const fixBtns = await screen.findAllByTestId('fix-btn')
-    fireEvent.click(fixBtns[0])
+    const editBtns = await screen.findAllByTestId('edit-btn')
+    fireEvent.click(editBtns[0])
 
     const expectedPath = NOTE_LOW_CONFIDENCE.file_path
     const expectedEncoded = encodeURIComponent(expectedPath)
     const expectedUrl = `/docs?path=${expectedEncoded}`
 
     expect(mockNavigate).toHaveBeenCalledWith(expectedUrl)
+  })
+
+  it('Reject button calls rejectNote and removes card', async () => {
+    vi.mocked(rejectNote).mockResolvedValue({
+      file_path: NOTE_LOW_CONFIDENCE.file_path,
+      review_status: 'rejected',
+      approved_by: 'user',
+      approved_at: new Date().toISOString(),
+      approval_mode: 'manual',
+    })
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const rejectBtns = await screen.findAllByTestId('reject-btn')
+    await act(async () => { fireEvent.click(rejectBtns[0]) })
+    await waitFor(() => {
+      expect(rejectNote).toHaveBeenCalledWith(NOTE_LOW_CONFIDENCE.file_path)
+    })
+    await waitFor(() => {
+      const remainingTitles = screen.getAllByTestId('review-item-title')
+      expect(remainingTitles).toHaveLength(1)
+      expect(remainingTitles[0]).toHaveTextContent('High confidence note')
+    })
+  })
+
+  it('Reject button keeps item when rejectNote fails', async () => {
+    vi.mocked(rejectNote).mockRejectedValue(new Error('HTTP 500'))
+    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
+    const initialItems = await screen.findAllByTestId('review-item')
+    expect(initialItems).toHaveLength(2)
+    const rejectBtns = await screen.findAllByTestId('reject-btn')
+    await act(async () => { fireEvent.click(rejectBtns[0]) })
+    await waitFor(() => {
+      expect(screen.getAllByTestId('review-item')).toHaveLength(2)
+    })
   })
 
   it('approve button keeps item in list when error occurs', async () => {

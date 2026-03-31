@@ -361,6 +361,7 @@ _ALLOWED_TOOL_HINTS = frozenset({
     "write_note",
     "append_to_note",
     "create_note",
+    "fetch_and_summarize_url",
     "get_stats",
     "list_notes",
     "get_person_graph",
@@ -414,7 +415,13 @@ def create_chat_agent(
             "(never as JSON). The tool will intelligently merge the new content with the "
             "existing note body.\n"
             "- To CREATE a brand-new note: use create_note.\n"
-            "- For person relationship graphs: use get_person_graph."
+            "- For person relationship graphs: use get_person_graph.\n"
+            "- To CREATE A REFERENCE NOTE FROM A URL: use fetch_and_summarize_url. "
+            "When a user asks to capture, save, or create a reference note for a URL, "
+            "ALWAYS use fetch_and_summarize_url — never use create_note with made-up content. "
+            "The tool fetches the actual page content, summarises it with AI, and creates the note. "
+            "The tool returns a JSON object with a 'summary' field containing the actual fetched content. "
+            "ALWAYS use that 'summary' field verbatim in your response — do NOT paraphrase or invent content."
         )
 
     # Inject tool hint directive when provided and valid

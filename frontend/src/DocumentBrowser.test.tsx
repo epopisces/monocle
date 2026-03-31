@@ -38,6 +38,8 @@ vi.mock('@codemirror/lang-yaml', () => ({ yaml: vi.fn(() => ({})) }))
 const mockListNotes = vi.fn()
 const mockGetNote = vi.fn()
 const mockPutNote = vi.fn()
+const mockPatchNote = vi.fn()
+const mockDeleteNote = vi.fn()
 const mockListTemplates = vi.fn()
 const mockGetNoteBacklinks = vi.fn()
 
@@ -45,6 +47,8 @@ vi.mock('./api/notes', () => ({
   listNotes: (...args: unknown[]) => mockListNotes(...args),
   getNote: (...args: unknown[]) => mockGetNote(...args),
   putNote: (...args: unknown[]) => mockPutNote(...args),
+  patchNote: (...args: unknown[]) => mockPatchNote(...args),
+  deleteNote: (...args: unknown[]) => mockDeleteNote(...args),
   listTemplates: (...args: unknown[]) => mockListTemplates(...args),
   getNoteBacklinks: (...args: unknown[]) => mockGetNoteBacklinks(...args),
 }))
@@ -169,6 +173,112 @@ describe('FileTree', () => {
     expect(folderBtn.getAttribute('aria-expanded')).toBe('true')
     fireEvent.click(folderBtn)
     expect(folderBtn.getAttribute('aria-expanded')).toBe('false')
+  })
+})
+
+describe('FileTree — context menu', () => {
+  beforeEach(() => {
+    mockPatchNote.mockResolvedValue({ file_path: 'people/alice.md', title: 'Alice Renamed' })
+    mockDeleteNote.mockResolvedValue(undefined)
+  })
+  afterEach(() => vi.clearAllMocks())
+
+  it('shows context menu on right-click of a file', () => {
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    expect(screen.getByTestId('context-menu')).toBeInTheDocument()
+    expect(screen.getByTestId('context-edit')).toBeInTheDocument()
+    expect(screen.getByTestId('context-rename')).toBeInTheDocument()
+    expect(screen.getByTestId('context-delete')).toBeInTheDocument()
+  })
+
+  it('Edit calls onSelect and closes menu', () => {
+    const onSelect = vi.fn()
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={onSelect} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-edit'))
+    expect(onSelect).toHaveBeenCalledWith(expect.stringContaining('.md'))
+    expect(screen.queryByTestId('context-menu')).toBeNull()
+  })
+
+  it('Rename shows inline input pre-filled with note title', () => {
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-rename'))
+    const input = screen.getByTestId('rename-input') as HTMLInputElement
+    expect(input).toBeInTheDocument()
+    expect(input.value).toBeTruthy()
+  })
+
+  it('Rename commits on Enter and calls patchNote', async () => {
+    const onRenamed = vi.fn()
+    render(
+      <FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} onRenamed={onRenamed} />,
+    )
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-rename'))
+    const input = screen.getByTestId('rename-input')
+    fireEvent.change(input, { target: { value: 'New Title' } })
+    await act(async () => { fireEvent.keyDown(input, { key: 'Enter' }) })
+    await waitFor(() => expect(mockPatchNote).toHaveBeenCalledWith(
+      expect.stringContaining('.md'),
+      { updates: { title: 'New Title' } },
+    ))
+    expect(onRenamed).toHaveBeenCalledWith(expect.stringContaining('.md'), 'New Title')
+  })
+
+  it('Rename cancels on Escape', () => {
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-rename'))
+    const input = screen.getByTestId('rename-input')
+    fireEvent.keyDown(input, { key: 'Escape' })
+    expect(screen.queryByTestId('rename-input')).toBeNull()
+  })
+
+  it('Delete shows inline confirm', () => {
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-delete'))
+    expect(screen.getByTestId('delete-confirm-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('delete-cancel-btn')).toBeInTheDocument()
+  })
+
+  it('Delete confirms and calls deleteNote', async () => {
+    const onDeleted = vi.fn()
+    render(
+      <FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} onDeleted={onDeleted} />,
+    )
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-delete'))
+    await act(async () => { fireEvent.click(screen.getByTestId('delete-confirm-btn')) })
+    await waitFor(() => expect(mockDeleteNote).toHaveBeenCalledWith(expect.stringContaining('.md')))
+    expect(onDeleted).toHaveBeenCalledWith(expect.stringContaining('.md'))
+  })
+
+  it('Delete cancel hides confirm row', () => {
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    fireEvent.click(screen.getByTestId('context-delete'))
+    fireEvent.click(screen.getByTestId('delete-cancel-btn'))
+    expect(screen.queryByTestId('delete-confirm-btn')).toBeNull()
+  })
+
+  it('menu closes on outside mousedown', () => {
+    render(<FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />)
+    const files = screen.getAllByTestId('tree-file')
+    fireEvent.contextMenu(files[0])
+    expect(screen.getByTestId('context-menu')).toBeInTheDocument()
+    fireEvent.mouseDown(document.body)
+    expect(screen.queryByTestId('context-menu')).toBeNull()
   })
 })
 

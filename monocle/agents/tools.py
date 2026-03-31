@@ -141,6 +141,7 @@ class VaultTools:
             self.write_note,
             self.append_to_note,
             self.create_note,
+            self.fetch_and_summarize_url,
             self.get_stats,
             self.list_notes,
             self.get_person_graph,
@@ -574,6 +575,153 @@ class VaultTools:
             )
         except Exception as exc:
             logger.warning("append_to_note tool error for %r: %s", query, exc)
+            raise
+
+    # ------------------------------------------------------------------
+    # Tool: fetch_and_summarize_url
+    # ------------------------------------------------------------------
+
+    @ai_function
+    async def fetch_and_summarize_url(
+        self,
+        url: Annotated[str, "The https:// URL to fetch and summarize into a reference note"],
+        extra_context: Annotated[
+            str | None,
+            "Optional focus or extra instructions for the summary (e.g. 'focus on the setup steps')"
+        ] = None,
+    ) -> str:
+        """Fetch a web page, summarise its content with AI, and create a reference note.
+
+        Use this when the user asks to create a reference note from a URL.
+        The tool fetches the page, strips HTML boilerplate, uses AI to write a
+        structured Markdown summary with ## Summary and ## Key Points sections,
+        and creates a note of type 'reference' with review_status 'pending'.
+
+        Returns JSON with file_path, title, url, and status.
+        """
+        import html as _html
+        import re as _re
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Only http/https URLs are supported, got: {parsed.scheme!r}")
+
+        if self._ai is None:
+            raise RuntimeError(
+                "fetch_and_summarize_url requires an AI provider. "
+                "Configure ai.provider in config.yaml."
+            )
+
+        # 1. Fetch the page
+        _MAX_FETCH_BYTES = 500_000
+        _MAX_TEXT_CHARS = 20_000
+        try:
+            import httpx
+
+            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
+                resp = await client.get(
+                    url,
+                    headers={"User-Agent": "Monocle-Reference-Bot/1.0"},
+                )
+                resp.raise_for_status()
+                raw = resp.content[:_MAX_FETCH_BYTES].decode("utf-8", errors="replace")
+        except Exception as exc:
+            raise RuntimeError(f"Failed to fetch {url}: {exc}") from exc
+
+        # 2. Strip HTML
+        raw = _re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw, flags=_re.DOTALL | _re.IGNORECASE)
+        raw = _re.sub(r"<[^>]+>", " ", raw)
+        raw = _html.unescape(raw)
+        page_text = _re.sub(r"\s+", " ", raw).strip()[:_MAX_TEXT_CHARS]
+
+        # 3. Ask AI to summarise
+        prompt = (
+            "You are a knowledge assistant. Summarise the following web page into a concise "
+            "Markdown reference note.\n\n"
+            "Instructions:\n"
+            "- Write a `## Summary` section (3–5 sentences) then a `## Key Points` bullet list.\n"
+            "- Preserve any important code examples in fenced code blocks.\n"
+            "- Do NOT reproduce nav bars, cookie banners, or unrelated sidebar text.\n"
+            "- End with a JSON block fenced with ```json containing:\n"
+            '  {"title": "<short descriptive title>", "tags": ["tag1", "tag2"], '
+            '"domain": "<work|personal|technology|...>"}\n\n'
+            f"Web page URL: {url}\n\n"
+            f"Content:\n{page_text}"
+        )
+        if extra_context:
+            prompt += f"\n\nAdditional instructions: {extra_context}"
+
+        try:
+            raw_response = await self._ai.chat(
+                [{"role": "user", "content": prompt}],
+                stream=False,
+            )
+            if not isinstance(raw_response, str):
+                parts: list[str] = []
+                async for chunk in raw_response:
+                    parts.append(chunk)
+                raw_response = "".join(parts)
+        except Exception as exc:
+            raise RuntimeError(f"AI summarisation failed: {exc}") from exc
+
+        # 4. Extract trailing JSON metadata block
+        json_match = _re.search(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL)
+        if json_match:
+            try:
+                meta = json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                meta = {}
+            body = raw_response[: json_match.start()].strip()
+        else:
+            meta = {}
+            body = raw_response.strip()
+
+        title = meta.get("title") or url
+        ai_tags = _normalize_tags(meta.get("tags")) or []
+        domain = meta.get("domain") or "personal"
+
+        body = f"> Source: {url}\n\n{body}"
+        if len(body) > _MAX_BODY_LENGTH:
+            body = body[:_MAX_BODY_LENGTH]
+
+        # 5. Create the note
+        try:
+            from monocle.models import NoteMetadata
+
+            NoteMetadata(
+                type="reference",
+                domain=domain,
+                tags=["web-reference"] + ai_tags,
+                review_status="pending",
+                source="web",
+            )
+            note = await _to_thread(
+                self._vault.create_from_template,
+                "reference",
+                {
+                    "title": title,
+                    "domain": domain,
+                    "tags": ["web-reference"] + ai_tags,
+                    "review_status": "pending",
+                    "source": "web",
+                },
+                body,
+            )
+            await _to_thread(self._vault.write_note, note.file_path, note)
+            if self._reindex_queue is not None:
+                self._reindex_queue.push(note.file_path)
+            return json.dumps(
+                {
+                    "file_path": note.file_path,
+                    "title": note.title,
+                    "url": url,
+                    "status": "created",
+                    "summary": body,
+                }
+            )
+        except Exception as exc:
+            logger.warning("fetch_and_summarize_url tool error: %s", exc, exc_info=True)
             raise
 
     async def _merge_body(self, existing: str, new_content: str) -> str:

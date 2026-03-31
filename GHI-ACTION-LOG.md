@@ -4,6 +4,45 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-03-31
+
+### Claude Sonnet 4.6
+- **URL fetch-and-summarize in chat agent**
+  - Added `fetch_and_summarize_url` `@ai_function` to `VaultTools` (`monocle/agents/tools.py`): fetches URL via httpx (500 KB cap, 15 s timeout), strips HTML, AI-summarizes with structured prompt, creates reference note with `review_status=pending` and `tags=["web-reference", ...]`
+  - Updated `_ALLOWED_TOOL_HINTS` and system prompt in `monocle/agents/__init__.py` with explicit URL-routing instruction
+  - Added URL detection banner to `ChatInput.tsx`: `useMemo`-computed `detectedUrl` regex; banner with "Yes, summarize" (passes `fetch_and_summarize_url` hint) and "No thanks" (sends without hint) buttons
+  - Restructured `ChatInput.css`: `.chat-input` becomes column flex; `.chat-input__row` inner row for textarea + actions; added `.chat-input__url-suggestion` banner styles
+  - Updated `ChatScreen.tsx` `handleSend` to accept `inputToolHint?` from `ChatInput` and forward it, falling back to pending-hint logic
+  - Updated `Chat.test.tsx`: fixed `toHaveBeenCalledWith` assertions for new 2-arg signature; added 5 URL suggestion strip tests (show/hide, fetch click, skip click)
+  - Updated `test_agents.py`: bumped tool count assertion 8 → 9
+  - **749 backend tests, 394 frontend tests — all passing**
+
+
+
+### Claude Sonnet 4.6
+- **ReviewQueue redesign (Phase 4 of prior session)**
+  - Added `PATCH /api/review/{path}/reject` backend endpoint (`monocle/routers/review.py`) — sets `review_status: "rejected"`, mirrors to ChromaDB, decrements pending count cache
+  - Added `RejectResponse` type and `rejectNote()` function to `frontend/src/api/review.ts`
+  - Rewrote `ReviewQueue.tsx`: renamed "Fix" → "Edit" (testid `fix-btn` → `edit-btn`), added Reject button with REJECTING/REJECTED/REJECT_ERROR reducer actions, added hover-preview panel that fetches note body on demand via `getNote()` with body cache and 150ms leave-delay, preview includes Approve/Edit/Reject action buttons
+  - Updated `ReviewQueue.css`: replaced `.review-card__btn--fix` with `.review-card__btn--edit`, added `.review-card__btn--reject` (red/error), added `.review-preview` fixed-position overlay, `.review-preview__body`, `.review-preview__actions`
+  - Updated `VoiceCapture.test.tsx`: added `rejectNote` and `getNote` mocks, renamed `fix-btn` → `edit-btn` throughout, updated aria-label assertions, added 2 new reject tests (success removes card, error keeps card)
+  - **380 frontend tests passing (+2 new), 70 backend review/settings tests passing**
+
+- **FileTree right-click context menu (Edit / Rename / Delete)**
+  - Rewrote `FileTree.tsx`: added `TreeActions` interface threaded down to all nodes; right-click on any file shows a fixed-position context menu with Edit, Rename, Delete; Rename replaces the row with an inline `<input>` (Enter to commit, Escape/blur to cancel) calling `patchNote(..., { updates: { title } })`; Delete shows an inline "Delete? Yes/No" confirmation row calling `deleteNote()`; context menu dismisses on outside click or Escape; viewport-edge clamping on menu position
+  - Added CSS (`FileTree.css`): `.file-tree__context-menu`, `.file-tree__context-item`, `--danger` variant, rename input + error indicator, delete confirm row buttons
+  - Updated `DocumentBrowserScreen.tsx`: added `handleDeleted` (removes from notes list, clears selection/URL if affected) and `handleRenamed` (updates notes list title + open note title) callbacks; passed `onDeleted` and `onRenamed` to `FileTree`
+  - Updated `DocumentBrowser.test.tsx`: added `patchNote`/`deleteNote` to mock; added 9 new context-menu tests covering right-click show, Edit/Rename/Delete flows, Escape cancel, outside-click dismiss
+  - **389 frontend tests passing (+9 new)**
+
+- **Clickable vault paths in chat (Phase 6)**
+  - Added `VAULT_PATH_RE` regex and `linkifyVaultPaths()` helper in `ChatMessage.tsx` — converts bare `.md` paths in LLM responses into markdown links (`[path](/docs?path=...)`)
+  - Added `VaultLink` component (calls `useNavigate()` internally) and `MARKDOWN_COMPONENTS` module-level constant; replaced old `useMarkdownComponents()` custom hook pattern to prevent `useNavigate()` firing in tests rendered without a Router context
+  - Updated `ReactMarkdown` in `ChatMessage` to use `MARKDOWN_COMPONENTS` and `linkifyVaultPaths()`
+  - Added `.chat-vault-link` CSS class (button styled as accent-colored underlined text)
+  - Updated `Chat.test.tsx`: changed "double-click" note card test → "click", added "vault path in message text becomes a clickable link" test using `renderWithRouter`
+  - **390 frontend tests passing (+1 new)**
+
 ## 2026-03-26
 
 ### GitHub Copilot (Haiku 4.5)
@@ -705,3 +744,9 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - **Expanded rontend/src/api.test.ts** � added 8 error-path tests (HTTP 429, 500/502, network TypeError propagation, 204 No Content returns undefined)
 - **Expanded rontend/src/SettingsModal.test.tsx** � added patchSettings rejection (2 tests: error shown, clears on next success) and rotateMcpKey failure (2 tests: error shown, hint unchanged); added data-testid="settings-error" to SettingsModal component
 - All tests green: 737 backend passed (2 skipped), 378 frontend passed
+
+- **MCP tool: create_reference_from_url**
+  - Added `create_reference_from_url(url, extra_context)` MCP tool to `monocle/mcp_server.py`; fetches URL via httpx, strips HTML, uses AI to summarise, creates `reference` note with `web-reference` tag and `review_status: pending`; appends source URL as blockquote in body
+  - Added `_strip_html()`, `_fetch_url_text()` helpers and `_URL_SUMMARISE_PROMPT` constant
+  - Added 8 new tests in `TestMCPTools` (creates note, pending review, web-reference tag, body contains URL, no AI raises, non-http raises, triggers reindex, extra_context forwarded); updated `test_mcp_has_8_tools` ? `test_mcp_has_9_tools`
+  - **749 tests passing (+8 new), EXIT 0**

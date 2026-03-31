@@ -54,7 +54,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'hello' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    expect(mockSend).toHaveBeenCalledWith('hello')
+    expect(mockSend).toHaveBeenCalledWith('hello', undefined)
   })
 
   it('does not call onSend on Shift+Enter', () => {
@@ -70,7 +70,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'world' } })
     fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith('world')
+    expect(mockSend).toHaveBeenCalledWith('world', undefined)
   })
 
   it('does not send empty or whitespace-only input', () => {
@@ -95,6 +95,54 @@ describe('ChatInput', () => {
   it('does not render voice button when onVoiceClick is absent', () => {
     render(<ChatInput onSend={mockSend} />)
     expect(screen.queryByTestId('voice-btn')).toBeNull()
+  })
+
+  it('shows URL suggestion strip when message contains a URL', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'Check out https://example.com/page' } })
+    expect(screen.getByTestId('url-suggestion')).toBeInTheDocument()
+    expect(screen.getByTestId('url-fetch-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('url-skip-btn')).toBeInTheDocument()
+  })
+
+  it('does not show URL suggestion strip when message has no URL', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'just a plain message' } })
+    expect(screen.queryByTestId('url-suggestion')).toBeNull()
+  })
+
+  it('Fetch & summarize button calls onSend with fetch_and_summarize_url hint', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
+    fireEvent.click(screen.getByTestId('url-fetch-btn'))
+    expect(mockSend).toHaveBeenCalledWith('https://example.com', 'fetch_and_summarize_url')
+  })
+
+  it('Skip button calls onSend without tool hint', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
+    fireEvent.click(screen.getByTestId('url-skip-btn'))
+    expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined)
+  })
+
+  it('Enter key with URL auto-sends with fetch_and_summarize_url hint', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'Add a note for https://example.com' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    expect(mockSend).toHaveBeenCalledWith('Add a note for https://example.com', 'fetch_and_summarize_url')
+  })
+
+  it('Send button with URL auto-sends with fetch_and_summarize_url hint', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://example.com/page' } })
+    fireEvent.click(screen.getByTestId('send-btn'))
+    expect(mockSend).toHaveBeenCalledWith('https://example.com/page', 'fetch_and_summarize_url')
   })
 })
 
@@ -252,14 +300,26 @@ describe('ChatMessage', () => {
     expect(screen.getByTestId('note-card').textContent).toContain('alice.md')
   })
 
-  it('double-click on note card navigates to document browser', () => {
+  it('click on note card navigates to document browser', () => {
     const msg: ThreadMessage = {
       role: 'assistant',
       content: 'Done',
       noteCreated: { filePath: 'inbox/lucas-gallagher.md', type: 'other' },
     }
     renderWithRouter(<ChatMessage message={msg} />)
-    fireEvent.dblClick(screen.getByTestId('note-card'))
+    fireEvent.click(screen.getByTestId('note-card'))
+    expect(window.location.pathname).toBe('/docs')
+  })
+
+  it('vault path in message text becomes a clickable link', () => {
+    const msg: ThreadMessage = {
+      role: 'assistant',
+      content: 'See inbox/lucas-gallagher.md for details.',
+    }
+    renderWithRouter(<ChatMessage message={msg} />)
+    const link = screen.getByRole('button', { name: 'inbox/lucas-gallagher.md' })
+    expect(link).toBeInTheDocument()
+    fireEvent.click(link)
     expect(window.location.pathname).toBe('/docs')
   })
 

@@ -290,13 +290,13 @@ class TestChatSSEStream:
 class TestVaultTools:
     """Tests that VaultTools builds correctly and exposes the right tools."""
 
-    def test_tools_list_has_8_entries(self, tmp_vault, memory_index, mock_ai):
+    def test_tools_list_has_9_entries(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
         from monocle.agents.tools import VaultTools
 
         vault = VaultLayer(str(tmp_vault))
         vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=None)
-        assert len(vt.tools) == 8
+        assert len(vt.tools) == 9
 
     def test_all_tools_are_callable(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer

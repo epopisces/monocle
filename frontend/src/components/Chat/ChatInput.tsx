@@ -1,8 +1,11 @@
-import React, { useRef, useState, forwardRef } from 'react'
+import React, { useRef, useState, forwardRef, useMemo } from 'react'
 import './ChatInput.css'
 
+// Detect http/https URLs in the input text
+const URL_RE = /https?:\/\/[^\s)>\]"']+/
+
 interface Props {
-  onSend: (content: string) => void
+  onSend: (content: string, toolHint?: string) => void
   onVoiceClick?: () => void
   disabled?: boolean
 }
@@ -20,6 +23,12 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const historyRef = useRef<string[]>([])
   const historyIndexRef = useRef<number>(-1) // -1 = not browsing
   const draftRef = useRef<string>('')       // saved value before browsing started
+
+  // Detected URL (null when none present in current value)
+  const detectedUrl = useMemo<string | null>(() => {
+    const m = URL_RE.exec(value)
+    return m ? m[0] : null
+  }, [value])
 
   // Expose methods for parent to populate the input
   React.useImperativeHandle(ref, () => ({
@@ -41,7 +50,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     },
   }), [])
 
-  const doSend = () => {
+  const doSend = (toolHint?: string) => {
     const trimmed = value.trim()
     if (!trimmed || disabled) return
     // Push to history; ignore duplicates of the most-recent entry
@@ -51,7 +60,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     }
     historyIndexRef.current = -1
     draftRef.current = ''
-    onSend(trimmed)
+    onSend(trimmed, toolHint)
     setValue('')
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -69,7 +78,8 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      doSend()
+      // Auto-use fetch_and_summarize_url when a URL is present in the message
+      doSend(detectedUrl ? 'fetch_and_summarize_url' : undefined)
       return
     }
 
@@ -125,41 +135,70 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
 
   return (
     <div className="chat-input">
-      <textarea
-        ref={textareaRef}
-        className="chat-input__textarea"
-        placeholder="Message the assistant…"
-        value={value}
-        onChange={handleChange}
-        onKeyDown={handleKeyDown}
-        disabled={disabled}
-        rows={1}
-        aria-label="Message input"
-        data-testid="chat-input-textarea"
-      />
-      <div className="chat-input__actions">
-        {onVoiceClick && (
+      {detectedUrl && (
+        <div className="chat-input__url-suggestion" data-testid="url-suggestion">
+          <span className="chat-input__url-suggestion-text">
+            🔗 URL detected — fetch &amp; summarize?
+          </span>
+          <div className="chat-input__url-suggestion-actions">
+            <button
+              className="chat-input__url-btn chat-input__url-btn--yes"
+              onClick={() => doSend('fetch_and_summarize_url')}
+              disabled={disabled}
+              data-testid="url-fetch-btn"
+              type="button"
+            >
+              Yes, summarize
+            </button>
+            <button
+              className="chat-input__url-btn chat-input__url-btn--no"
+              onClick={() => doSend()}
+              disabled={disabled}
+              data-testid="url-skip-btn"
+              type="button"
+            >
+              No thanks
+            </button>
+          </div>
+        </div>
+      )}
+      <div className="chat-input__row">
+        <textarea
+          ref={textareaRef}
+          className="chat-input__textarea"
+          placeholder="Message the assistant…"
+          value={value}
+          onChange={handleChange}
+          onKeyDown={handleKeyDown}
+          disabled={disabled}
+          rows={1}
+          aria-label="Message input"
+          data-testid="chat-input-textarea"
+        />
+        <div className="chat-input__actions">
+          {onVoiceClick && (
+            <button
+              className="chat-input__btn chat-input__btn--voice"
+              onClick={onVoiceClick}
+              disabled={disabled}
+              aria-label="Voice input"
+              title="Voice capture"
+              data-testid="voice-btn"
+            >
+              🎤
+            </button>
+          )}
           <button
-            className="chat-input__btn chat-input__btn--voice"
-            onClick={onVoiceClick}
-            disabled={disabled}
-            aria-label="Voice input"
-            title="Voice capture"
-            data-testid="voice-btn"
+            className="chat-input__btn chat-input__btn--send"
+            onClick={() => doSend(detectedUrl ? 'fetch_and_summarize_url' : undefined)}
+            disabled={disabled || !value.trim()}
+            aria-label="Send message"
+            title="Send"
+            data-testid="send-btn"
           >
-            🎤
+            →
           </button>
-        )}
-        <button
-          className="chat-input__btn chat-input__btn--send"
-          onClick={doSend}
-          disabled={disabled || !value.trim()}
-          aria-label="Send message"
-          title="Send"
-          data-testid="send-btn"
-        >
-          →
-        </button>
+        </div>
       </div>
     </div>
   )
