@@ -8,6 +8,31 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ### Claude Sonnet 4.6 (continued)
 - **ReviewQueue mouseover preview ReactMarkdown children type fix (FINAL)**
+- **Created `docs/architecture.md`**: 12 Mermaid diagrams covering system overview (layers + technologies), 8-step ingest pipeline flow, re-index sequence, chat/agent SSE streaming, weekly summary agent process, frontend component hierarchy, data model ER diagram, process topology (unified vs separate), MCP auth + tool routing, AI provider selection + transcription sub-abstraction, confidence scoring formula, and vault file layout
+- **Fixed agent tool selection bug (append_to_note vs create_note)**:
+  - Root cause: `append_to_note` was accepting low-similarity semantic search results (e.g., "Lucas Gallagher" when searching for "Grayson Gallagher"), then failing when the found note didn't exist
+  - Changes: 
+    - Added 0.6 similarity threshold in `append_to_note` semantic search fallback — low scores now rejected
+    - Rewrote `append_to_note` docstring to emphasize it's for APPENDING to EXISTING notes only
+    - Rewrote `create_note` docstring to emphasize it's for CREATING NEW notes
+    - Added test `test_append_to_note_rejects_low_similarity_search_results` to verify threshold
+  - 53 agent tests passing
+- **Fixed InboxWatcher double-ingest creating spurious `people/person.md`**:
+  - Root cause: `_inbox_ingest_callback` passed raw file bytes (including YAML frontmatter) to `IngestPipeline`; when agent's `create_note` wrote a note to `inbox/`, the watcher re-ingested it with the YAML as content, LLM couldn't extract the title, fell back to `"person"` → `people/person.md`
+  - Changes:
+    - Extracted `_is_monocle_note(raw)` helper — checks for `approval_mode:` in first 3KB (Monocle always writes this field; hand-crafted Obsidian notes never do)
+    - Extracted `_strip_frontmatter(raw)` helper — strips YAML block before passing to IngestPipeline
+    - `_inbox_ingest_callback` now: detects Monocle-generated files → push to reindex_queue only; strips frontmatter from user notes before IngestPipeline
+    - Added 7 unit tests (`TestInboxCallbackHelpers`) in `test_api.py`
+  - 51 API tests passing, 376 total (1 pre-existing MCP test unrelated)
+- **Implemented Option A: Minimal medallion architecture**:
+  - **Bronze → Silver transition (inbox cleanup)**: Files remain in `inbox/` indefinitely per spec FR-WTCH-02 violation; fixed by:
+    - Added inbox file deletion to `InboxWatcher._on_stable_file()` after successful ingest (cleanup happens in watcher, not callback)
+    - Deletion logs as `.info()`, handles `FileNotFoundError` gracefully if file already gone
+  - **Agent note placement**: `create_note` tool default changed from `note_type="other"` (→ blank template → inbox) to `note_type="observation"` (→ work folder by default); prevents agent-created notes from landing in inbox
+  - **Test coverage**: New test `test_successful_ingest_deletes_inbox_file` in watcher suite verifies file deletion after successful ingest
+  - Result: Bronze (inbox) now transient; silver/gold tier distinction via `review_status` frontmatter (approval workflow unchanged for now)
+  - 67 watcher + reindex tests passing, 376 total backend tests passing
   - Discovered second part of the crash: after fixing frontmatter stripping, JSX children as separate expressions `{str1}{str2}` were being converted to an array instead of a concatenated string
   - ReactMarkdown's `children` prop expects a single string, not an array of strings
   - Fixed by concatenating the display text before passing to ReactMarkdown: `displayText = truncated + (markdownBody.length > 400 ? '…' : '')`
@@ -22,6 +47,18 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Added try-catch wrapper around ReactMarkdown rendering with fallback error message
   - Added error logging to `getNote()` fetch handler for better debugging
   - Result: Preview now renders correctly; no more app crash on hover
+
+### GitHub Copilot
+- **Created M23: Organization Note Type & Cross-Linked People Backreferences milestone** — inserted into `docs/build-plan.md` after M22 and before (now-renumbered) M24
+  - Added cohesive 25+ field organization template with sections (Identity, Structure, Size, Status, Metadata)
+  - Added user-facing `vault/.templates/organization.md` body template with leadership/alumni tables
+  - Extended `prompts/extract.md` guidance for multi-org extraction with YYYY-MM date format support
+  - Defined wiring logic: person notes with `organizations` field automatically create/link to org notes via `links` field with temporal metadata
+  - Graph layer backreferences show all people working at an org sorted by recency
+  - Test coverage includes `test_org_linking.py` suite (3–5 focused tests)
+  - Updated build-plan header: `active-milestone: M23`, `last-updated: 2026-03-31`
+  - Bumped subsequent milestones: M24→M25 (OneNote Import), M25→M26 (Voice Hardening), M25→M26 (Teams Integration)
+  - Design rationale (Option 3 from Phase 9): Frontmatter for queryable metadata, body for narrative, `links` for relationships, graph for backreferences — avoids sync complexity while maintaining rich org context
 
 - **ReviewQueue mouseover preview blank UI fix** (prior session)
   - Fixed critical bug where entire UI went blank when mousing over review queue items to show preview panel

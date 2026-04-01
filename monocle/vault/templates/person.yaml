@@ -1,7 +1,7 @@
 template: person
 note_type: person_note
 default_folder: people
-description: "Observation or note about a specific person."
+description: "Person you know — contact, relationship context, and life events."
 
 sentence_starters:
   - "I met"
@@ -17,25 +17,97 @@ sentence_starters:
   - "got to know"
 
 fields:
+  # Identity & Contact
   - name: title
     required: true
     type: string
-    description: "Person's full name."
+    description: "Full name or primary name."
+  
+  - name: email
+    required: false
+    type: string
+    description: "Email address."
+  
+  - name: phone
+    required: false
+    type: string
+    description: "Phone number."
+  
+  - name: location
+    required: false
+    type: string
+    description: "City, organization, or primary location."
+  
+  # Context & Relationships
   - name: people
     required: true
     type: list
-    description: "People mentioned in this note."
+    description: "People mentioned in this note (auto-populated; used for backlinks)."
+  
+  - name: relationship_type
+    required: false
+    type: string
+    description: "How you know them: colleague | member | friend | family | mentor | mentee | acquaintance | contact"
+  
+  - name: met_context
+    required: false
+    type: string
+    description: "Where/how you met (e.g., 'work', 'conference', 'introduced by Alice', 'church')."
+  
+  - name: org
+    required: false
+    type: string
+    description: "Primary organization or company."
+  
+  - name: org_role
+    required: false
+    type: string
+    description: "Their role/title in the organization."
+  
+  # Important Dates
+  - name: birthdate
+    required: false
+    type: string
+    description: "YYYY-MM-DD format for sorting/reminders. Use partial (e.g. 'MM-DD') if year unknown."
+  
+  - name: met_date
+    required: false
+    type: string
+    description: "YYYY-MM-DD when you first met. Use partial (e.g. 'YYYY-MM') if exact date unknown."
+  
+  - name: last_contact_date
+    required: false
+    type: string
+    description: "YYYY-MM-DD of most recent interaction (for filtering by recency). Use partial (e.g. 'YYYY-MM') if exact date unknown."
+  
+  # Workflow & Follow-up
+  - name: next_action
+    required: false
+    type: string
+    description: "Next step: 'Email re: project', 'Coffee catchup', 'Reconnect', etc."
+  
+  - name: action_items
+    required: false
+    type: list
+  
+  - name: priority
+    required: false
+    type: string
+    description: "low | medium | high (for sorting active relationships)."
+  
+  # Metadata
   - name: domain
     required: false
     type: string
     default: personal
+    description: "Category: work | personal | community | faith | etc."
+  
   - name: tags
     required: false
     type: list
-  - name: org
+    description: "Topics/interests: python, photography, leadership, etc."
+  
+  - name: status
     required: false
     type: string
-    description: "Organisation this person is associated with."
-  - name: action_items
-    required: false
-    type: list
+    description: "active | inactive | archived (for filtering)."

@@ -14,6 +14,7 @@ Design notes
 from __future__ import annotations
 
 import asyncio
+import logging
 import os
 import threading
 import time
@@ -220,8 +221,9 @@ class TestInboxWatcherOnStableFile:
 
         calls: list[str] = []
 
-        async def mock_ingest(fp: str) -> None:
+        async def mock_ingest(fp: str) -> bool:
             calls.append(fp)
+            return True  # Callback signals ingest was run
 
         watcher = InboxWatcher(inbox_path=str(inbox), ingest_callback=mock_ingest)
         await watcher._on_stable_file(str(md_file))
@@ -247,7 +249,7 @@ class TestInboxWatcherOnStableFile:
         md_file = inbox / "capture.md"
         md_file.write_text("# Note\nContent", encoding="utf-8")
 
-        async def failing_ingest(fp: str) -> None:
+        async def failing_ingest(fp: str) -> bool:
             raise ValueError("Routing pipeline failure")
 
         watcher = InboxWatcher(inbox_path=str(inbox), ingest_callback=failing_ingest)
@@ -257,6 +259,102 @@ class TestInboxWatcherOnStableFile:
         assert sidecar.exists(), ".error.md sidecar should be written on ingest failure"
         content = sidecar.read_text(encoding="utf-8")
         assert "Routing pipeline failure" in content
+
+    async def test_successful_ingest_deletes_inbox_file(self, tmp_path: Path):
+        """When callback returns True, the inbox file is deleted (FR-WTCH-02).
+
+        This is a critical requirement: inbox files should not accumulate
+        indefinitely. The watcher must remove the source file only when ingest
+        actually runs and succeeds (callback returns True).
+        """
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        md_file = inbox / "capture.md"
+        md_file.write_text("# Note\nContent", encoding="utf-8")
+
+        # Track calls to the ingest callback
+        calls: list[str] = []
+
+        async def successful_ingest(fp: str) -> bool:
+            calls.append(fp)
+            return True  # Signal that ingest succeeded and file can be deleted
+
+        watcher = InboxWatcher(inbox_path=str(inbox), ingest_callback=successful_ingest)
+        await watcher._on_stable_file(str(md_file))
+
+        # Verify callback was invoked
+        assert calls == [str(md_file)], "Ingest callback should have been called"
+
+        # Verify the inbox file was deleted after successful ingest
+        assert not md_file.exists(), (
+            f"Inbox file {md_file} should be deleted after successful ingest; "
+            "it remains in the inbox indefinitely, violating FR-WTCH-02"
+        )
+
+    async def test_skipped_ingest_does_not_delete_inbox_file(self, tmp_path: Path):
+        """When callback returns False, the inbox file is NOT deleted.
+
+        This prevents data loss for intentionally-skipped ingests (e.g.,
+        Monocle-generated notes that are queued for re-index only rather than
+        re-ingested). The file remains in the inbox for the user's reference.
+        """
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        md_file = inbox / "capture.md"
+        md_file.write_text("# Note\nContent", encoding="utf-8")
+
+        calls: list[str] = []
+
+        async def skipped_ingest(fp: str) -> bool:
+            calls.append(fp)
+            return False  # Signal that ingest was skipped; file should NOT be deleted
+
+        watcher = InboxWatcher(inbox_path=str(inbox), ingest_callback=skipped_ingest)
+        await watcher._on_stable_file(str(md_file))
+
+        # Verify callback was invoked
+        assert calls == [str(md_file)]
+
+        # Verify the inbox file was NOT deleted (preserved for user)
+        assert md_file.exists(), (
+            f"Inbox file {md_file} should NOT be deleted when ingest is skipped; "
+            "deleting it would cause data loss"
+        )
+
+    async def test_deletion_permission_error_does_not_fail_ingest(
+        self, tmp_path: Path, caplog
+    ):
+        """If deletion fails with PermissionError, it's logged as a warning, not error.
+
+        Ingest success should not be revoked due to deletion failures.
+        This is a critical fix for Windows systems where file locks prevent deletion.
+        """
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        md_file = inbox / "capture.md"
+        md_file.write_text("# Note\nContent", encoding="utf-8")
+
+        async def successful_ingest(fp: str) -> bool:
+            return True  # Ingest succeeded
+
+        watcher = InboxWatcher(inbox_path=str(inbox), ingest_callback=successful_ingest)
+
+        # Mock unlink to raise PermissionError
+        import unittest.mock as mock
+        with mock.patch(
+            "pathlib.Path.unlink",
+            side_effect=PermissionError("File is locked by another process"),
+        ):
+            await watcher._on_stable_file(str(md_file))
+
+        # Verify warning was logged (not error)
+        assert any(
+            "Failed to delete inbox file" in record.message and record.levelno == logging.WARNING
+            for record in caplog.records
+        ), "Deletion failure should be logged as WARNING, not ERROR"
+
+        # Verify the inbox file still exists (couldn't delete)
+        assert md_file.exists(), "File should still exist if deletion failed"
 
 
 #endregion

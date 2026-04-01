@@ -41,6 +41,37 @@ logger = logging.getLogger(__name__)
 #endregion
 
 # ---------------------------------------------------------------------------
+#region #*   Helpers
+# ---------------------------------------------------------------------------
+
+
+def _is_monocle_note(raw: str) -> bool:
+    """Return True if *raw* is a file already written by the Monocle pipeline.
+
+    Monocle's ``create_from_template`` always writes ``approval_mode:`` into
+    the frontmatter (even as null).  Hand-crafted Obsidian notes never contain
+    this field.  Checking the first 3 KB is enough to cover normal frontmatter.
+
+    Used by the inbox watcher callback to skip re-ingesting files that were
+    already processed (e.g. notes placed in inbox/ by the agent's create_note
+    tool), preventing spurious duplicates like ``people/person.md``.
+    """
+    return raw.startswith("---") and "approval_mode:" in raw[:3000]
+
+
+def _strip_frontmatter(raw: str) -> str:
+    """Return the body of *raw*, with the leading YAML frontmatter block removed.
+
+    If no closing ``---`` delimiter is found the original string is returned.
+    """
+    if not raw.startswith("---"):
+        return raw
+    end = raw.find("\n---", 3)
+    if end == -1:
+        return raw
+    return raw[end + 4:].lstrip("\n")
+
+# ---------------------------------------------------------------------------
 #region #*   Application state (shared across requests)
 # ---------------------------------------------------------------------------
 
@@ -323,20 +354,45 @@ async def lifespan(app: FastAPI):
         )
 
         # Wire ingest callback for inbox file captures
-        async def _inbox_ingest_callback(file_path: str) -> None:
-            """Run the ingest pipeline for a newly stable inbox file."""
+        async def _inbox_ingest_callback(file_path: str) -> bool:
+            """Run the ingest pipeline for a newly stable inbox file.
+
+            Files already written by the Monocle pipeline or agent tools have
+            full Monocle frontmatter (detected via ``_is_monocle_note``).
+            Those are queued for re-indexing only — running them through
+            IngestPipeline again creates spurious duplicates (e.g.
+            ``people/person.md``) when the LLM cannot extract the title.
+
+            Raw content (no frontmatter, or non-Monocle frontmatter) is passed
+            to IngestPipeline with the YAML block stripped so the router sees
+            only the note body.
+
+            Returns:
+                True if ingest pipeline was triggered (file should be deleted).
+                False if ingest was skipped (file should NOT be deleted).
+            """
             import asyncio as _asyncio
             from pathlib import Path as _Path
 
             try:
-                content = await _asyncio.to_thread(_Path(file_path).read_text, encoding="utf-8")
+                raw = await _asyncio.to_thread(_Path(file_path).read_text, encoding="utf-8")
+
+                if _is_monocle_note(raw):
+                    reindex_queue.push(file_path)
+                    logger.info(
+                        "[WATCHER] Skipped re-ingest of already-processed note %s", file_path
+                    )
+                    return False  # Do NOT delete; this file was intentionally queued for re-index only
+
                 from monocle.models import IngestRequest
 
-                req = IngestRequest(content=content, source="web")
+                req = IngestRequest(content=_strip_frontmatter(raw), source="web")
                 await ingest_pipeline.run(req)
                 logger.info("[WATCHER] Ingest complete for %s", file_path)
+                return True  # Ingest succeeded; file can be deleted
             except Exception as exc:  # noqa: BLE001
                 logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
+                return False  # Do NOT delete; ingest failed, keep the file for debugging
 
         watcher.set_ingest_callback(_inbox_ingest_callback)
         await watcher.start()

@@ -294,14 +294,17 @@ class VaultTools:
         self,
         title: Annotated[str, "Title of the new note"],
         body: Annotated[str, "Markdown body content"],
-        note_type: Annotated[str, "Note type: 'person_note' (or 'person'), 'idea', 'decision', 'observation', 'reference', 'meeting_note', 'project', 'action_item', 'other'"] = "other",
+        note_type: Annotated[str, "Note type: 'person_note' (or 'person'), 'idea', 'decision', 'observation', 'reference', 'meeting_note', 'project', 'action_item'"] = "observation",
         domain: Annotated[str, "Domain, e.g. 'work' or 'personal'"] = "personal",
         tags: Annotated[
             str | list[str] | None,
             Field(description="List of string tags or a string representation, e.g. ['python', 'automation']."),
         ] = None,
     ) -> str:
-        """Create a new note in the vault using the appropriate template.
+        """Create a NEW note in the vault from scratch using the appropriate template.
+
+        **Use this whenever the user wants to CREATE or START a new note** — e.g., 'add a note for Grayson', 'create a decision note'.
+        **DO NOT use this to APPEND to an existing note** — use append_to_note instead.
 
         Returns the file_path of the newly created note.
         Notes created by the agent are placed in the review queue (review_status: pending).
@@ -484,15 +487,15 @@ class VaultTools:
         query: Annotated[str, "Person name, title, or topic to find the target note (e.g. 'Lucas Gallagher')"],
         content: Annotated[str, "New content to append to the existing note body (required — must not be empty)"],
     ) -> str:
-        """Append new content to an existing note (WRITE operation — both query and content are required).
+        """Append new content to an EXISTING note (WRITE operation — both query and content are required).
 
-        Use ONLY when the user explicitly wants to ADD or APPEND new text to a note,
-        e.g. 'add to my note on Alice' or 'update Lucas's note with <new info>'.
+        **IMPORTANT: Use ONLY when the user explicitly wants to ADD or APPEND to an EXISTING note.**
+        Examples: 'add to my note on Alice', 'update Lucas's note with <new info>'.
 
-        Do NOT use this for reading, retrieving, or looking up notes — use search_vault
-        or read_note instead.
+        **DO NOT use this to CREATE a new note** — use create_note instead.
+        Do NOT use this for reading/looking up notes — use search_vault or read_note instead.
 
-        Returns JSON with file_path, title, and status.
+        Returns JSON with file_path, title, and status. Fails with error if note not found.
         """
         if len(content) > _MAX_BODY_LENGTH:
             raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
@@ -528,26 +531,22 @@ class VaultTools:
                 if best:
                     file_path = best.file_path
 
-            # Step 3: Fall back to semantic search when the index is populated
-            if not file_path:
-                if self._ai is not None:
-                    embedding = await self._ai.embed(query)
-                    scored = await _to_thread(
-                        self._index.search,
-                        embedding,
-                        1,
-                        None,
-                        query,
-                    )
-                else:
-                    scored = await _to_thread(
-                        self._index.search,
-                        [],
-                        1,
-                        None,
-                        query,
-                    )
-                if scored:
+            # Step 3: Fall back to semantic search when the index is populated AND
+            # an AI embedder is available. Without an embedder, we cannot compute
+            # embeddings and would get a DimensionMismatch error if we tried to search.
+            # IMPORTANT: require a minimum similarity threshold (0.6) to avoid matching
+            # unrelated notes (e.g., "Lucas" when searching for "Grayson")
+            if not file_path and self._ai is not None:
+                embedding = await self._ai.embed(query)
+                scored = await _to_thread(
+                    self._index.search,
+                    embedding,
+                    1,
+                    None,
+                    query,
+                )
+                # Only accept semantic match if similarity is reasonably high (0.6+)
+                if scored and scored[0].score >= 0.6:
                     file_path = scored[0].file_path
 
             if not file_path:

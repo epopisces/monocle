@@ -578,6 +578,41 @@ class TestVaultToolsExecution:
         # Both old and new content should appear in the merged body
         assert "She now leads the infra guild." in content
 
+    @pytest.mark.asyncio
+    async def test_append_to_note_rejects_low_similarity_search_results(self, tmp_vault, memory_index, mock_ai):
+        """append_to_note must reject semantic search results below 0.6 similarity threshold.
+        
+        This prevents matching unrelated notes (e.g., 'Lucas' when searching for 'Grayson').
+        The test uses MemoryIndex which returns dummy embeddings, so the score is controlled.
+        """
+        from monocle.vault import VaultLayer
+        from monocle.agents.tools import VaultTools
+        from monocle.models import ScoredChunk
+        from unittest.mock import patch
+
+        vault = VaultLayer(str(tmp_vault))
+        vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai)
+        
+        # Mock the index.search to return a result with low similarity (0.4)
+        with patch.object(memory_index, 'search') as mock_search:
+            # Create a mock chunk with low score
+            low_score_chunk = ScoredChunk(
+                chunk_id="lucas-example.md::0",
+                file_path="people/lucas-example.md",
+                score=0.4,  # Below threshold
+                text="Lucas is a developer",
+            )
+            # Make search return [low_score_chunk]
+            mock_search.return_value = [low_score_chunk]
+            
+            # Query for a completely different name
+            result = await vt.append_to_note("Grayson Gallagher", "New content.")
+            parsed = json.loads(result)
+            
+            # Should return error, not accept the low-similarity match
+            assert "error" in parsed
+            assert "No note found" in parsed["error"]
+
     #endregion
 
 #endregion
