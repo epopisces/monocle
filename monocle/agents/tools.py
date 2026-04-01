@@ -531,27 +531,20 @@ class VaultTools:
                 if best:
                     file_path = best.file_path
 
-            # Step 3: Fall back to semantic search when the index is populated
+            # Step 3: Fall back to semantic search when the index is populated AND
+            # an AI embedder is available. Without an embedder, we cannot compute
+            # embeddings and would get a DimensionMismatch error if we tried to search.
             # IMPORTANT: require a minimum similarity threshold (0.6) to avoid matching
             # unrelated notes (e.g., "Lucas" when searching for "Grayson")
-            if not file_path:
-                if self._ai is not None:
-                    embedding = await self._ai.embed(query)
-                    scored = await _to_thread(
-                        self._index.search,
-                        embedding,
-                        1,
-                        None,
-                        query,
-                    )
-                else:
-                    scored = await _to_thread(
-                        self._index.search,
-                        [],
-                        1,
-                        None,
-                        query,
-                    )
+            if not file_path and self._ai is not None:
+                embedding = await self._ai.embed(query)
+                scored = await _to_thread(
+                    self._index.search,
+                    embedding,
+                    1,
+                    None,
+                    query,
+                )
                 # Only accept semantic match if similarity is reasonably high (0.6+)
                 if scored and scored[0].score >= 0.6:
                     file_path = scored[0].file_path

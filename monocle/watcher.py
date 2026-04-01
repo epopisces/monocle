@@ -281,17 +281,29 @@ class InboxWatcher:
             return
 
         try:
-            await self._ingest_callback(file_path)
-            # Delete inbox source file after successful ingest (FR-WTCH-02)
+            should_delete = await self._ingest_callback(file_path)
+        except Exception as exc:  # noqa: BLE001
+            logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
+            _write_error_sidecar(file_path, exc)
+            return
+
+        # Only delete the inbox file if ingest actually ran (and succeeded).
+        # Skipped ingests (e.g., Monocle-generated notes queued for re-index only)
+        # should NOT be deleted to prevent data loss.
+        if should_delete:
             from pathlib import Path as _Path
             try:
                 await asyncio.to_thread(_Path(file_path).unlink)
                 logger.info("[WATCHER] Deleted inbox file after successful ingest: %s", file_path)
             except FileNotFoundError:
                 logger.debug("[WATCHER] Inbox file already deleted: %s", file_path)
-        except Exception as exc:  # noqa: BLE001
-            logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
-            _write_error_sidecar(file_path, exc)
+            except Exception as exc:  # noqa: BLE001
+                # Deletion failure is not an ingest failure; log as warning only.
+                logger.warning(
+                    "[WATCHER] Failed to delete inbox file %s (permission or other OS error): %s",
+                    file_path,
+                    exc,
+                )
 
 
 #endregion

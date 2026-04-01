@@ -354,7 +354,7 @@ async def lifespan(app: FastAPI):
         )
 
         # Wire ingest callback for inbox file captures
-        async def _inbox_ingest_callback(file_path: str) -> None:
+        async def _inbox_ingest_callback(file_path: str) -> bool:
             """Run the ingest pipeline for a newly stable inbox file.
 
             Files already written by the Monocle pipeline or agent tools have
@@ -366,6 +366,10 @@ async def lifespan(app: FastAPI):
             Raw content (no frontmatter, or non-Monocle frontmatter) is passed
             to IngestPipeline with the YAML block stripped so the router sees
             only the note body.
+
+            Returns:
+                True if ingest pipeline was triggered (file should be deleted).
+                False if ingest was skipped (file should NOT be deleted).
             """
             import asyncio as _asyncio
             from pathlib import Path as _Path
@@ -378,15 +382,17 @@ async def lifespan(app: FastAPI):
                     logger.info(
                         "[WATCHER] Skipped re-ingest of already-processed note %s", file_path
                     )
-                    return
+                    return False  # Do NOT delete; this file was intentionally queued for re-index only
 
                 from monocle.models import IngestRequest
 
                 req = IngestRequest(content=_strip_frontmatter(raw), source="web")
                 await ingest_pipeline.run(req)
                 logger.info("[WATCHER] Ingest complete for %s", file_path)
+                return True  # Ingest succeeded; file can be deleted
             except Exception as exc:  # noqa: BLE001
                 logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
+                return False  # Do NOT delete; ingest failed, keep the file for debugging
 
         watcher.set_ingest_callback(_inbox_ingest_callback)
         await watcher.start()
