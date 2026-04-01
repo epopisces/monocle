@@ -282,6 +282,13 @@ class InboxWatcher:
 
         try:
             await self._ingest_callback(file_path)
+            # Delete inbox source file after successful ingest (FR-WTCH-02)
+            from pathlib import Path as _Path
+            try:
+                await asyncio.to_thread(_Path(file_path).unlink)
+                logger.info("[WATCHER] Deleted inbox file after successful ingest: %s", file_path)
+            except FileNotFoundError:
+                logger.debug("[WATCHER] Inbox file already deleted: %s", file_path)
         except Exception as exc:  # noqa: BLE001
             logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
             _write_error_sidecar(file_path, exc)

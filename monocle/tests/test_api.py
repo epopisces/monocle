@@ -509,6 +509,66 @@ class TestStats:
         assert body["total_notes"] >= 2  # alice.md + decision-one.md from fixture
 
 
+
+# ===========================================================================
+# Inbox callback helpers (_is_monocle_note, _strip_frontmatter)
+# ===========================================================================
+
+class TestInboxCallbackHelpers:
+    """Unit tests for the helpers used inside _inbox_ingest_callback.
+
+    These helpers prevent double-ingest of notes that were already written by
+    the Monocle pipeline or agent tools (the root cause of the spurious
+    ``people/person.md`` duplicate when an agent creates a note).
+    """
+
+    def test_is_monocle_note_detects_approval_mode(self):
+        from monocle.main import _is_monocle_note
+        raw = "---\ntitle: Foo\napproval_mode: null\n---\nBody text"
+        assert _is_monocle_note(raw) is True
+
+    def test_is_monocle_note_false_for_plain_obsidian(self):
+        from monocle.main import _is_monocle_note
+        raw = "---\ntitle: Foo\ntags: [work]\n---\nBody text"
+        assert _is_monocle_note(raw) is False
+
+    def test_is_monocle_note_false_for_raw_text_no_frontmatter(self):
+        from monocle.main import _is_monocle_note
+        assert _is_monocle_note("I met Sarah today at the conference.") is False
+
+    def test_is_monocle_note_true_for_realistic_agent_note(self):
+        from monocle.main import _is_monocle_note
+        # Mirrors the exact frontmatter written by create_from_template
+        raw = (
+            "---\n"
+            "action_items: []\n"
+            "approval_mode: null\n"
+            "approved_at: null\n"
+            "approved_by: null\n"
+            "confidence: 1.0\n"
+            "review_status: pending\n"
+            "title: Grayson Gallagher\n"
+            "---\n"
+            "Grayson is a 4 year old who loves Legos.\n"
+        )
+        assert _is_monocle_note(raw) is True
+
+    def test_strip_frontmatter_removes_yaml_block(self):
+        from monocle.main import _strip_frontmatter
+        raw = "---\ntitle: Foo\n---\nBody text here"
+        assert _strip_frontmatter(raw) == "Body text here"
+
+    def test_strip_frontmatter_returns_original_when_no_frontmatter(self):
+        from monocle.main import _strip_frontmatter
+        raw = "Just raw text, no frontmatter."
+        assert _strip_frontmatter(raw) == raw
+
+    def test_strip_frontmatter_returns_original_when_no_closing_delimiter(self):
+        from monocle.main import _strip_frontmatter
+        raw = "---\ntitle: Foo\nno closing delimiter"
+        assert _strip_frontmatter(raw) == raw
+
+
 # ===========================================================================
 # Stub routes still return 501 (routes not yet implemented in M8)
 # ===========================================================================

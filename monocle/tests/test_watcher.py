@@ -258,6 +258,37 @@ class TestInboxWatcherOnStableFile:
         content = sidecar.read_text(encoding="utf-8")
         assert "Routing pipeline failure" in content
 
+    async def test_successful_ingest_deletes_inbox_file(self, tmp_path: Path):
+        """After successful ingest, the inbox source file is deleted (FR-WTCH-02).
+
+        This is a critical requirement: inbox files should not accumulate
+        indefinitely. The watcher must remove the source file after the
+        ingest pipeline successfully writes the note to its permanent location.
+        """
+        inbox = tmp_path / "inbox"
+        inbox.mkdir()
+        md_file = inbox / "capture.md"
+        md_file.write_text("# Note\nContent", encoding="utf-8")
+
+        # Track calls to the ingest callback
+        calls: list[str] = []
+
+        async def successful_ingest(fp: str) -> None:
+            calls.append(fp)
+            # Simulate successful ingest by doing nothing (callback just records)
+
+        watcher = InboxWatcher(inbox_path=str(inbox), ingest_callback=successful_ingest)
+        await watcher._on_stable_file(str(md_file))
+
+        # Verify callback was invoked
+        assert calls == [str(md_file)], "Ingest callback should have been called"
+
+        # Verify the inbox file was deleted after successful ingest
+        assert not md_file.exists(), (
+            f"Inbox file {md_file} should be deleted after successful ingest; "
+            "it remains in the inbox indefinitely, violating FR-WTCH-02"
+        )
+
 
 #endregion
 

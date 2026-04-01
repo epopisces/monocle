@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-20
-active-milestone: M13
+last-updated: 2026-03-31
+active-milestone: M23
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,7 +26,7 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M23 — OneNote Import Plugin
+**Active Milestone:** M23 — Organization Note Type & Cross-Linked People Backreferences
 **Last Completed:** M22 — Process Manager & Dev Automation (2026-03-21)
 **Blocked By:** None
 **Session Notes (M22 — Process Manager & Dev Automation):**
@@ -673,7 +673,79 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 
 ---
 
-### M23: OneNote Import Plugin
+### M23: Organization Note Type & Cross-Linked People Backreferences
+
+**Goal:** Create an `organization` note type with structured membership data, enable cross-linking from person notes to organizations, and implement backreferences (graph-based inverse links showing all people associated with an organization).
+
+**Prerequisite:** M9 (Graph Layer) complete; person template already created in M8 post-review sessions with support for `organizations` nested field.
+
+**Design Rationale (Option 3 from Phase 9):**
+- **Frontmatter:** Store stable high-level org metadata (name, founded_year, location, domain, type [company/nonprofit/govt/academic/other]).
+- **Body:** Narrative details (mission, description, notable events).
+- **Links field:** Structured relationships via person notes' `links` field pointing to org notes (relation: "works-at", "founded", "manages", carrying temporal metadata like `join_date`, `leave_date`, `current`).
+- **Backreferences:** Graph layer computes inverse links — `GET /api/graph?focus=organizations/acme-corp.md` returns all people connected via any `works-at`/`founded`/`manages` relation.
+
+**Deliverables:**
+- [ ] `monocle/vault/templates/organization.yaml` — 15-25 fields organized in sections:
+  - Identity & Contact: `name`, `short_name`, `url`, `location`, `domain`
+  - Structure: `org_type` (company|nonprofit|govt|academic|other), `parent_org` (wikilink to parent if applicable), `founded_year`, `industry` (enum or free text)
+  - Size & Scope: `employee_count`, `description` (100–500 chars)
+  - Status: `active` (boolean), `status_reason` (if inactive), lifecycle fields
+  - Metadata: `tags`, `domain` (work|personal), `source`
+- [ ] `vault/.templates/organization.md` — User-facing markdown body template with sections:
+  - Header (name, short_name, url, org_type as metadata)
+  - About (mission/description, founded_year)
+  - Contact (location, website, social handles)
+  - Key Dates (founded, IPO/acquisition, milestones)
+  - Leadership & Structure (table of notable leaders or teams, links to person notes)
+  - Notable People / Alumni (table with name, role, tenure)
+  - Notes (narrative details, history, partnerships)
+- [ ] Extend person template's `organizations` field example and prompt in `prompts/extract.md`:
+  - Document format: `organizations: [{name: "...", role: "...", join_date: "YYYY-MM", leave_date: "YYYY-MM", current: boolean}]`
+  - Include instruction: "If a person has worked at multiple organizations, extract each as a separate entry. Use YYYY-MM format for partial dates."
+  - Wire extraction prompt to pull org names and dates during person note metadata extraction.
+- [ ] Wiring: when person note is created with `organizations` field, automatically generate/update `links` entries pointing to matching organization notes:
+  - For each org in `organizations`, attempt `resolve_wikilink("organizations/" + slugify(org.name))`.
+  - If org note exists, create a link: `{target: "organizations/...", relation: "works-at", join_date: org.join_date, leave_date: org.leave_date, current: org.current}`.
+  - If org note does not exist, optionally auto-create a stub org note via `VaultLayer.create_from_template("organization", {name: org.name, domain: person.domain}, metadata)` — set `review_status: "pending"`.
+  - Update person note's `links` field via `patch_frontmatter()`.
+- [ ] Graph layer backreferences:
+  - `GET /api/graph?focus=organizations/acme-corp.md&types=person` returns all person notes with incoming `works-at` links.
+  - Graph edge includes `relation: "works-at"`, `metadata: {join_date, leave_date, current}` — reused from person links field.
+  - Backlinks panel on organization note shows all people (sorted by who worked there most recently).
+- [ ] Routing/sentence starters for organization notes:
+  - Add to `organization.yaml`: `sentence_starters: ["This is a company", "This organization", "The company was founded", "We hired from", "Working at"]`
+  - If routing confidence < 0.6 and routing suggests `person` but content mentions org names, consider routing to `organization` instead (optional heuristic).
+- [ ] Test coverage in `monocle/tests/`:
+  - `test_vault.py`: add tests for `create_from_template("organization", ...)` and `patch_frontmatter` with linked person notes
+  - `test_graph.py`: add tests for backreferences — `GET /api/graph?focus=org_note` returns only person nodes with `works-at` edges
+  - `test_ingest.py`: add tests for multi-org extraction during person ingest; stub org creation scenario
+  - New file `monocle/tests/test_org_linking.py` (3–5 tests):
+    - `test_person_ingest_creates_org_stub_if_missing`
+    - `test_person_ingest_links_to_existing_org`
+    - `test_org_backlinks_people_with_works_at_relation`
+    - `test_org_graph_filters_by_relation_type`
+- [ ] Frontend display (optional M23a follow-up):
+  - Person notes show inline org badges (clickable → org note / graph view)
+  - Organization notes show "People" panel listing all associated people (generated from backreferences)
+  - Person's work history table in document viewer shows org name, role, dates (from `organizations` frontmatter + computed via `links`)
+- [ ] Extend `.vscode/tasks.json`:
+  - `test: org-linking` — `python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q`
+
+**Acceptance Criteria:**
+- [ ] `monocle/vault/templates/organization.yaml` has 15+ fields; `sentence_starters` includes org-specific phrases
+- [ ] `vault/.templates/organization.md` has 5+ sections with guidance for user-facing template; table examples for leaders/alumni
+- [ ] `prompts/extract.md` documents multi-org extraction with example JSON format and partial date guidance
+- [ ] A new person note with `organizations: [{name: "Acme Corp", role: "VP", join_date: "2020-01", current: true}]` triggers creation of a stub `organizations/acme-corp.md` or links to existing org
+- [ ] Person note's `links` field includes a `{target: "organizations/acme-corp.md", relation: "works-at", join_date: "2020-01", current: true}` entry
+- [ ] `GET /api/graph?focus=organizations/acme-corp.md` returns only person nodes in the ego-graph
+- [ ] Backlinks panel on org note lists all associated people sorted by recency
+- [ ] `uv run python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q` passes (3–5 green tests)
+- [ ] Full test suite: **730+ backend tests passing, EXIT 0**
+
+---
+
+### M24: OneNote Import Plugin
 
 **Goal:** Implement an `OneNotePlugin` ingest plugin that accepts OneNote HTML exports and converts them to vault notes. Extends the Phase 1 plugin registry with no changes to the core ingest pipeline.
 
@@ -702,7 +774,7 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 
 ---
 
-### M24: Voice Feature Hardening & Cross-Browser Compatibility
+### M25: Voice Feature Hardening & Cross-Browser Compatibility
 
 **Goal:** Comprehensive testing and hardening of the voice capture feature across browsers and failure modes (SPIKE-5 validation tasks).
 
@@ -735,7 +807,7 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 
 ---
 
-### M25: Teams Integration
+### M26: Teams Integration
 
 **Goal:** Bot Framework webhook with JWT validation and slash command support.
 
