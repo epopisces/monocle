@@ -3,7 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import OmniSearch from './components/layout/OmniSearch'
 
-// â”€â”€ Module mocks â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Module mocks ───────────────────────────────────────────────────────────────────────────────────────────────
 
 const mockNavigate = vi.fn()
 
@@ -22,7 +22,7 @@ vi.mock('./api/search', () => ({
   keywordSearch: vi.fn(),
 }))
 
-// â”€â”€ Test data â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Test data ──────────────────────────────────────────────────────────────────────────────────────────────────
 
 const FILENAME_RESULT = {
   file_path: 'work/search_test_note.md',
@@ -41,11 +41,11 @@ const FRONTMATTER_RESULT = {
 const BODY_RESULT = {
   file_path: 'work/body_note.md',
   title: 'Body Note',
-  excerpt: 'â€¦contains the query in the textâ€¦',
+  excerpt: '…contains the query in the text…',
   match_location: 'body' as const,
 }
 
-// â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helpers ─────────────────────────────────────────────────────────────────────────────────────────────────────
 
 function renderOmniSearch() {
   return render(
@@ -64,9 +64,9 @@ async function flushDebounce() {
   await act(async () => {})
 }
 
-// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Tests ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
-describe('OmniSearch â€” render', () => {
+describe('OmniSearch — render', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
@@ -86,7 +86,7 @@ describe('OmniSearch â€” render', () => {
   })
 })
 
-describe('OmniSearch â€” Ctrl+E shortcut', () => {
+describe('OmniSearch — Ctrl+E shortcut', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
@@ -103,7 +103,7 @@ describe('OmniSearch â€” Ctrl+E shortcut', () => {
   })
 })
 
-describe('OmniSearch â€” search behaviour', () => {
+describe('OmniSearch — search behaviour', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
@@ -120,7 +120,7 @@ describe('OmniSearch â€” search behaviour', () => {
     expect(mockOmniSearch).not.toHaveBeenCalled()
   })
 
-  it('calls omniSearch after debounce for â‰¥3 chars', async () => {
+  it('calls omniSearch after debounce for ≥3 chars', async () => {
     mockOmniSearch.mockResolvedValue([FILENAME_RESULT])
     renderOmniSearch()
     const input = screen.getByTestId('omni-search-input')
@@ -141,7 +141,7 @@ describe('OmniSearch â€” search behaviour', () => {
     expect(screen.getAllByTestId('omni-result').length).toBeGreaterThan(0)
   })
 
-  it('always shows semantic option when query â‰¥ 3 chars', async () => {
+  it('always shows semantic option when query ≥ 3 chars', async () => {
     mockOmniSearch.mockResolvedValue([])
     renderOmniSearch()
     const input = screen.getByTestId('omni-search-input')
@@ -152,7 +152,7 @@ describe('OmniSearch â€” search behaviour', () => {
   })
 })
 
-describe('OmniSearch â€” navigation', () => {
+describe('OmniSearch — navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
@@ -186,7 +186,7 @@ describe('OmniSearch â€” navigation', () => {
   })
 })
 
-describe('OmniSearch â€” keyboard navigation', () => {
+describe('OmniSearch — keyboard navigation', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()

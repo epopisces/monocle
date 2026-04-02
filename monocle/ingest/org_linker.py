@@ -5,7 +5,8 @@ When a person note is ingested with an ``organizations`` frontmatter field,
 this module:
 
 1. Iterates each ``organizations`` entry (name, role, join_date, leave_date, current).
-2. Attempts to resolve an existing organization note via ``VaultLayer.resolve_wikilink``.
+2. Attempts to resolve an existing organization note via direct filesystem lookup
+   (organizations/{slug}.md) or ``VaultLayer.resolve_wikilink`` by name.
 3. If no org note exists, auto-creates a stub organization note
    (``review_status: "pending"``) via ``VaultLayer.create_from_template`` +
    ``VaultLayer.write_note``.
@@ -21,7 +22,9 @@ propagate — org-linking is best-effort and must not abort the ingest.
 from __future__ import annotations
 
 import logging
+import os
 import re
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -109,8 +112,21 @@ def wire_org_links(note: "Note", vault: "VaultLayer") -> None:
         org_name: str = str(org["name"])
         slug = _slugify(org_name)
 
-        # 1. Try to resolve an existing org note by slug path then by name
-        candidate_path = vault.resolve_wikilink(f"organizations/{slug}")
+        # 1. Try to resolve an existing org note:
+        #    First, check directly for organizations/{slug}.md to avoid cross-folder stem collisions.
+        #    Then fall back to resolve_wikilink by name.
+        candidate_path: str | None = None
+        
+        # Direct filesystem check: organizations/{slug}.md
+        org_file_path = f"organizations/{slug}.md"
+        try:
+            org_abs_path = vault.root / org_file_path
+            if org_abs_path.exists() and org_abs_path.is_file():
+                candidate_path = org_file_path.replace(os.sep, "/")
+        except (OSError, ValueError):
+            pass  # Fall through to resolve_wikilink
+        
+        # Fallback: resolve by organization name
         if candidate_path is None:
             candidate_path = vault.resolve_wikilink(org_name)
 

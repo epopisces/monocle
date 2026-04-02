@@ -2,12 +2,12 @@
 type: milestone-archive
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-18
+last-updated: 2026-04-02
 ---
 
-# Monocle â€” Completed Milestones & Technical Spike Resolutions
+# Monocle â€" Completed Milestones & Technical Spike Resolutions
 
-This document archives full details for completed milestones (M1–M11, M19–M20) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
+This document archives full details for completed milestones (M1–M11, M19–M20, M23, M27) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
 
 ---
 
@@ -30,6 +30,10 @@ This document archives full details for completed milestones (M1–M11, M19–M2
     - [M9: Graph Layer](#m9-graph-layer)
     - [M10: Agent Framework \& Chat API](#m10-agent-framework--chat-api)
     - [M11: Scheduled Agents](#m11-scheduled-agents)
+    - [M19: Voice Capture \& Review Queue UI](#m19-voice-capture--review-queue-ui)
+    - [M20: Stats, Keyboard Shortcuts \& Command Palette](#m20-stats-keyboard-shortcuts--command-palette)
+    - [M23: Organization Note Type \& Cross-Linked People Backreferences](#m23-organization-note-type--cross-linked-people-backreferences)
+    - [M27: Topbar Omnisearch](#m27-topbar-omnisearch)
   - [Resolved Technical Spikes](#resolved-technical-spikes-1)
     - [SPIKE-1: Ollama Whisper audio transcription](#spike-1-ollama-whisper-audio-transcription)
     - [SPIKE-3: Microsoft Agent Framework SSE streaming through FastAPI](#spike-3-microsoft-agent-framework-sse-streaming-through-fastapi)
@@ -709,3 +713,55 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - `.gitignore`: added `node_modules/`, `package-lock.json`, `playwright-report/`, `test-results/`
 
 **Test Results:** 693 backend tests + 313 frontend tests passing; 25 E2E tests discovered (require live server to run).
+---
+
+### M27: Topbar Omnisearch
+
+**Goal:** Replace the static health indicator in the topbar center with an always-accessible omnisearch bar. Default search is a fast, AI-free full-text scan of the vault (filename ? frontmatter ? body priority order); a semantic search escape hatch hands off to the existing Search screen.
+
+**Status:** COMPLETE (2026-04-02)
+
+**Backend Implementation:**
+- monocle/routers/search.py: Added GET /api/search/omni endpoint with:
+  - Query params: q (min 3 chars), limit (default 20, max 100)
+  - Pure text scan � no AI, no embeddings
+  - Result ordering: filename matches first, then frontmatter (title/tags/people/type/domain), then body; each note appears in only the highest-priority matching bucket
+  - Returns OmniResult list with ile_path, 	itle, excerpt, match_location ("filename" | "frontmatter" | "body")
+  - Rate limit: 60 req/min (via @limiter.limit("60/minute"))
+  - **April 2 hardening:** Added pagination loop (offset/limit, page_size=1000) to scan complete vault regardless of size; optimized parsing strategy:
+    - Filename match: extracts basename from NoteRef.file_path (zero I/O)
+    - Frontmatter match: constructs searchable text from NoteRef fields (title, type, domain, tags) � zero I/O
+    - Body match: only calls vault.read_note() when filename+frontmatter checks fail (~90% of queries avoid I/O)
+- monocle/tests/test_api.py: TestOmniSearch class with 7 tests covering min_length validation, filename/frontmatter/body matches, priority order, and result field validation
+
+**Frontend Implementation:**
+- rontend/src/api/search.ts: Added omniSearch(params) function with inline OmniResult type
+- rontend/src/components/layout/OmniSearch.tsx: New component with:
+  - Ctrl+E global keydown listener focuses the input
+  - 300ms debounce on query; fires omniSearch when query = 3 chars
+  - Dropdown closes on Escape, click outside, or result selection
+  - Keyboard navigation: ?/? move selected index; Enter navigates to selected (or first) result
+  - "Search semantically" option always visible at dropdown bottom when query = 3 chars; navigates to /search?q=<query>&mode=semantic
+  - Data testids: omni-search, omni-search-input, omni-search-dropdown, omni-result, omni-semantic-btn
+  - **April 1 bug fix:** Fixed keyboard navigation index collision (semanticIdx was evaluating before JSX render, causing first result + semantic option to both be selected; changed to const semanticIdx = results.length for correct slot after grouped items)
+- rontend/src/components/layout/OmniSearch.css: Styles per docs/ui-design.md �5.6
+- rontend/src/components/layout/Topbar.tsx: Mounted OmniSearch in center; moved compact health dot to right side
+- rontend/src/components/layout/Topbar.css: Updated .topbar-center to flex-grow; shrink health indicator to dot-only
+- rontend/src/components/Search/SearchScreen.tsx: Reads ?q and ?mode URL params for initial state; auto-triggers search on mount if ?q is non-empty
+- rontend/src/OmniSearch.test.tsx: 12 tests covering input render, Ctrl+E focus, debounce/dropdown open, result navigation, semantic option navigation, Escape close, and click-outside close
+- .vscode/tasks.json: Added 	est: omnisearch task running omni-specific backend tests
+
+**Acceptance Criteria (all met):**
+- Ctrl+E from any screen focuses the topbar search input ?
+- Typing = 3 chars triggers a search after 300 ms (no Enter required); results appear in a dropdown ?
+- Results are ordered: filename matches ? frontmatter matches ? body matches (each note in one bucket only) ?
+- Clicking a result navigates to /docs?path=<encoded_path> ?
+- "Search semantically" option navigates to /search?q=<query>&mode=semantic and auto-runs the search ?
+- Typing < 3 chars shows no dropdown ?
+- Escape closes dropdown ?
+- Backend tests pass (7 omni tests, 793 total) ?
+- Frontend tests pass (12 omni tests, 408 total) ?
+- Frontend type checks pass ?
+
+**Test Results:** 793 backend tests passing (7 omnisearch-specific), 408 frontend tests passing (12 omnisearch-specific); all acceptance criteria validated.
+

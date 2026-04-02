@@ -103,6 +103,22 @@ export default function OmniSearch() {
     navigate(`/search?q=${encodeURIComponent(query)}&mode=semantic`)
   }, [navigate, query])
 
+  // Generate option ID for aria-activedescendant based on selectedIndex
+  const getActiveDescendant = useCallback((): string | undefined => {
+    if (selectedIndex < 0) return undefined
+    if (selectedIndex === results.length) return 'omni-option-semantic'
+    
+    let idx = 0
+    for (const [location, items] of Object.entries(grouped) as Array<[keyof GroupedResults, OmniResult[]]>) {
+      if (selectedIndex < idx + items.length) {
+        const itemIdx = selectedIndex - idx
+        return `omni-option-${location}-${itemIdx}`
+      }
+      idx += items.length
+    }
+    return undefined
+  }, [selectedIndex, results.length, grouped])
+
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!isOpen || flatItems.length === 0) return
 
@@ -140,17 +156,22 @@ export default function OmniSearch() {
         {items.map(item => {
           const idx = flatIdx++
           const isSelected = selectedIndex === idx
+          const optionId = `omni-option-${location}-${idx}`
           return (
-            <button
+            <div
               key={item.file_path}
+              id={optionId}
               className={`omni-search__item${isSelected ? ' omni-search__item--selected' : ''}`}
               data-testid="omni-result"
+              role="option"
+              aria-selected={isSelected}
               onClick={() => navigateToResult(item)}
               onMouseEnter={() => setSelectedIndex(idx)}
+              tabIndex={-1}
             >
               <span className="omni-search__item-title">{item.title || item.file_path.split('/').pop()?.replace('.md', '')}</span>
               <span className="omni-search__item-excerpt">{item.excerpt}</span>
-            </button>
+            </div>
           )
         })}
       </div>
@@ -176,16 +197,19 @@ export default function OmniSearch() {
           onKeyDown={handleKeyDown}
           onFocus={() => { if (query.length >= MIN_CHARS && results.length > 0) setIsOpen(true) }}
           autoComplete="off"
-          spellCheck={false}
+          spellCheck="false"
           aria-label="Omnisearch"
+          aria-autocomplete="list"
           aria-haspopup="listbox"
           aria-expanded={isOpen}
+          aria-controls="omni-search-list"
+          aria-activedescendant={getActiveDescendant()}
         />
         {isLoading && <span className="omni-search__spinner" aria-hidden="true">⟳</span>}
       </div>
 
       {isOpen && (
-        <div className="omni-search__dropdown" data-testid="omni-search-dropdown" role="listbox">
+        <div className="omni-search__dropdown" id="omni-search-list" data-testid="omni-search-dropdown" role="listbox" aria-label="Search results">
           {results.length === 0 && !isLoading && (
             <div className="omni-search__empty">No results</div>
           )}
@@ -194,14 +218,18 @@ export default function OmniSearch() {
           {renderGroup(grouped.body, 'body')}
 
           {query.length >= MIN_CHARS && (
-            <button
+            <div
+              id="omni-option-semantic"
               className={`omni-search__item omni-search__item--semantic${selectedIndex === semanticIdx ? ' omni-search__item--selected' : ''}`}
               data-testid="omni-semantic-btn"
+              role="option"
+              aria-selected={selectedIndex === semanticIdx}
               onClick={navigateToSemantic}
               onMouseEnter={() => setSelectedIndex(semanticIdx)}
+              tabIndex={-1}
             >
               🤖 Search semantically for <strong>{query}</strong>
-            </button>
+            </div>
           )}
         </div>
       )}

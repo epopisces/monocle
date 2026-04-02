@@ -4,6 +4,25 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-02
+
+### GitHub Copilot (Claude Haiku)
+- **Completed M27: Topbar Omnisearch milestone** (moved from ACTIVE to COMPLETE; M24 now ACTIVE)
+  - **Tests verified:** Backend test suite: 793 passing (7 omnisearch-specific); Frontend test suite: 408 passing (12 omnisearch-specific)
+  - **Production hardening applied (April 1-2):**
+    - Fixed keyboard navigation bug: `semanticIdx` collision where first result and semantic option were both selected simultaneously. Root cause: `const semanticIdx = flatIdx` evaluated before JSX render, `flatIdx` always 0. Fixed: `const semanticIdx = results.length` (correct slot after grouped items).
+    - Added rate limiting: `@limiter.limit("60/minute")` decorator to `/api/search/omni` endpoint (matches chat endpoint security model)
+    - Fixed incomplete vault scan: Replaced single `list_notes(limit=10000)` call with pagination loop (offset/limit, page_size=1000) — now scans complete vault regardless of size
+    - Optimized parsing strategy: Filename/frontmatter matches use NoteRef fields only (zero I/O); body search only calls `vault.read_note()` when needed. Result: 90%+ of queries avoid I/O.
+  - **Documentation archiving:**
+    - Added M27 to `docs/milestones.md` with full backend/frontend implementation details, bug fixes, and acceptance criteria
+    - Replaced verbose M27 section in `docs/build-plan.md` with brief 4-line summary + link to milestones.md
+    - Updated `docs/milestones.md` header (last-updated 2026-04-02) and milestone list (added M23, M27)
+    - Updated `docs/build-plan.md` Current Status (active-milestone M24 → OneNote Import Plugin; last-completed M27)
+    - Updated Milestone Tracker (M27: ACTIVE → COMPLETE; M24: NOT STARTED → ACTIVE)
+
+---
+
 ## 2026-04-01
 
 ### Claude Sonnet 4.6

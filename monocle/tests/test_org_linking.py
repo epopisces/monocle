@@ -353,7 +353,7 @@ class TestOrgGraphBackreferences:
         assert len(works_at_edges) >= 1, "Expected at least one works-at edge"
 
     def test_org_graph_type_filter_returns_only_people(self, tmp_path: Path):
-        """types=[person_note] filter on org focus returns only person nodes."""
+        """types=[person_note] filter on org focus returns only person nodes (besides the focus org itself). Organization node may be present as the focus."""
         from monocle.graph import GraphBuilder
         from monocle.vault import VaultLayer
 

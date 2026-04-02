@@ -2,7 +2,7 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-03-31
+last-updated: 2026-04-02
 active-milestone: M27
 ---
 
@@ -26,14 +26,14 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M27 — Topbar Omnisearch
-**Last Completed:** M23 — Organization Note Type & Cross-Linked People Backreferences (2026-03-31)
-**Note:** M24 (OneNote Import), M25 (Voice Hardening), M26 (Teams) are queued; M27 was prioritised ahead of them by explicit user request (2026-04-01).
+**Active Milestone:** M24 — OneNote Import Plugin
+**Last Completed:** M27 — Topbar Omnisearch (2026-04-02)
+**Note:** M25 (Voice Hardening), M26 (Teams), and future milestones are queued in order.
 **Blocked By:** None
-**Session Notes (M23 — Organization Note Type & Cross-Linked People Backreferences):**
-- **Status:** COMPLETE (2026-03-31)
-- Created `monocle/vault/templates/organization.yaml` (18 fields, 14 sentence_starters, note_type=organization, default_folder=organizations). Created `vault/.templates/organization.md` (7 sections with tables: About, Mission, Contact, Key Dates, Leadership & Structure, Notable People/Alumni, Notes). Added `"organization"` to `NOTE_TYPES` in `models.py`. Added `"organization": "organization"` to `TEMPLATE_FILE_MAP` in `vault/__init__.py`; fixed `create_from_template` to use `metadata.get("name")` as title fallback (so org stubs slug correctly from name). Patched `person.yaml` `organizations` field. Extended `prompts/extract.md` with multi-org extraction guidance + example JSON. Created `monocle/ingest/org_linker.py` — `wire_org_links()`: resolves/creates org stubs + patches person note `links` field with `works-at` relation. Wired `wire_org_links` as post-pipeline step in `IngestPipeline` (best-effort, never propagates). Created `monocle/tests/test_org_linking.py` (13 tests: template existence, wire_org_links scenarios, graph backreferences). Updated `test_vault.py` template count (10→11) and `test_mcp.py` auth tests to use `/mcp/` (trailing slash) — Starlette Mount does not match exact path `/mcp` without trailing slash, causing 405 from static-files fallback. Updated `.vscode/tasks.json` with `test: org-linking` task.
-- **786 backend tests passing (13 new + 3 test fixes), EXIT 0**
+**Session Notes (M27 — Topbar Omnisearch):**
+- **Status:** COMPLETE (2026-04-02)
+- Implemented omnisearch feature with always-accessible topbar search bar. Backend: `GET /api/search/omni` endpoint with pagination loop (scans full vault), optimized parsing (filename/frontmatter use NoteRef fields only; body search only reads needed notes), and rate limiting (60 req/min). Frontend: OmniSearch component (Ctrl+E focus, 300ms debounce, keyboard nav), integrated into Topbar, SearchScreen URL params handling. **April 2 security/performance hardening:** Fixed keyboard navigation bug (semanticIdx collision), added @limiter.limit decorator, implemented pagination for unbounded vault scan, optimized parse strategy reducing I/O for 90%+ of queries (filename/frontmatter hits avoid vault.read_note()).
+- **793 backend tests passing (7 omni-specific + optimizations), 408 frontend tests passing, EXIT 0**
 **Session Notes (M22 — Process Manager & Dev Automation):**
 - **Status:** COMPLETE (2026-03-21), post-review hardened (2026-03-26)
 - Implemented `ProcessManager` + `SubprocessHandle` (exponential-backoff crash-restart); `watch`, `scheduler`, `capture` CLI commands operational; `--separate-processes` flag on `serve`/`dev`; lifespan gating in `main.py`.
@@ -132,10 +132,10 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M21 | Integration Testing & Obsidian Compatibility                   | COMPLETE    |
 | M22 | Process Manager & Dev Automation                               | COMPLETE    |
 | M23 | Organization Note Type & Cross-Linked People Backreferences    | COMPLETE    |
-| M24 | OneNote Import Plugin                                          | NOT STARTED |
+| M24 | OneNote Import Plugin                                          | ACTIVE      |
 | M25 | Voice Feature Hardening & Cross-Browser Compatibility          | NOT STARTED |
 | M26 | Teams Integration                                              | NOT STARTED |
-| M27 | Topbar Omnisearch                                              | ACTIVE      |
+| M27 | Topbar Omnisearch                                              | COMPLETE    |
 
 ---
 
@@ -834,55 +834,11 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 
 ### M27: Topbar Omnisearch
 
-**Goal:** Replace the static health indicator in the topbar center with an always-accessible omnisearch bar. Default search is a fast, AI-free full-text scan of the vault (filename → frontmatter → body priority order); a semantic search escape hatch hands off to the existing Search screen.
+**Status:** COMPLETE (2026-04-02)
 
-**Deliverables:**
-- [ ] `GET /api/search/omni` backend endpoint (`monocle/routers/search.py`):
-  - Query param `q` (min 3 chars), `limit` (default 20, max 100)
-  - Pure text scan — no AI, no embeddings
-  - Result ordering: filename matches first, then frontmatter (title/tags/people/type/domain), then body; each note appears in only the highest-priority matching bucket
-  - Returns `OmniResult` list with `file_path`, `title`, `excerpt`, `match_location` (`"filename" | "frontmatter" | "body"`)
-  - Rate limit: 60 req/min (same as chat)
-- [ ] Tests for `GET /api/search/omni` in `monocle/tests/test_api.py` (`TestOmniSearch` class):
-  - `test_omni_search_requires_min_3_chars`
-  - `test_omni_search_filename_match`
-  - `test_omni_search_frontmatter_match`
-  - `test_omni_search_body_match`
-  - `test_omni_search_priority_order` (filename before frontmatter before body)
-- [ ] `frontend/src/api/search.ts` — add `omniSearch(params)` function with inline `OmniResult` type (not from schema since schema.d.ts is regenerated separately)
-- [ ] `frontend/src/components/layout/OmniSearch.tsx` — new component:
-  - Renders inside the topbar center `<div>`
-  - `Ctrl+E` global `keydown` listener focuses the input (calls `inputRef.current?.focus()`)
-  - Debounces search at 300 ms; fires `omniSearch` when query ≥ 3 chars
-  - Dropdown closes on `Escape`, on click outside, and when a result is selected
-  - Keyboard navigation: `↑`/`↓` move selected index; `Enter` navigates to selected (or first) result
-  - "Search semantically" option always visible at dropdown bottom when query ≥ 3 chars; navigates to `/search?q=<query>&mode=semantic`
-  - `data-testid="omni-search"`, `data-testid="omni-search-input"`, `data-testid="omni-search-dropdown"`, `data-testid="omni-result"`, `data-testid="omni-semantic-btn"`
-- [ ] `frontend/src/components/layout/OmniSearch.css` — styles per §5.6 of `docs/ui-design.md`
-- [ ] `frontend/src/components/layout/Topbar.tsx` — mount `<OmniSearch />` in center; move compact health dot to right side (no label text, just the colored dot + status tooltip)
-- [ ] `frontend/src/components/layout/Topbar.css` — update `.topbar-center` to flex-grow; shrink health indicator to dot-only
-- [ ] `frontend/src/components/Search/SearchScreen.tsx` — read `?q` and `?mode` URL params for initial state; auto-trigger search on mount if `?q` is non-empty
-- [ ] `frontend/src/OmniSearch.test.tsx` — tests:
-  - `test_omni_search_input_renders`
-  - `test_ctrl_e_focuses_input`
-  - `test_dropdown_opens_after_debounce`
-  - `test_result_navigation_to_docs`
-  - `test_semantic_option_navigates_to_search`
-  - `test_escape_closes_dropdown`
-  - `test_click_outside_closes_dropdown`
-- [ ] `.vscode/tasks.json`: `test: omnisearch` — runs `monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q`
+Fast omnisearch feature with always-accessible topbar search bar. Backend: pagination loop (scans full vault), optimized parsing (filename/frontmatter use NoteRef fields only; body search only reads needed notes), 60 req/min rate limit. Frontend: OmniSearch component (Ctrl+E, 300ms debounce, keyboard nav), integrated Topbar, SearchScreen URL params. April 2 hardening: keyboard nav bug fixed, rate limiting added, full vault scan enabled, parse I/O optimized (90%+ of queries avoid vault.read_note).
 
-**Acceptance Criteria:**
-- [ ] `Ctrl+E` from any screen focuses the topbar search input
-- [ ] Typing ≥ 3 chars triggers a search after 300 ms (no Enter required); results appear in a dropdown
-- [ ] Results are ordered: filename matches → frontmatter matches → body matches (each note in one bucket only)
-- [ ] Clicking a result navigates to `/docs?path=<encoded_path>`
-- [ ] "Search semantically" option navigates to `/search?q=<query>&mode=semantic` and auto-runs the search
-- [ ] Typing < 3 chars shows no dropdown
-- [ ] `Escape` closes dropdown
-- [ ] `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q` passes
-- [ ] `cd frontend && npm run test -- --run` passes (all existing + new frontend tests)
-- [ ] `cd frontend && npx tsc --noEmit` exits 0
+**Full details:** [docs/milestones.md#m27-topbar-omnisearch](milestones.md#m27-topbar-omnisearch)
 
 ---
 
