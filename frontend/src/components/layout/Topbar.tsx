@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { getHealth, type HealthResponse } from '../../api/health'
+import OmniSearch from './OmniSearch'
 import './Topbar.css'
 
 interface TopbarProps {
@@ -79,8 +80,13 @@ export default function Topbar({
       </div>
 
       <div className="topbar-center">
+        <OmniSearch />
+      </div>
+
+      <div className="topbar-right">
+        {/* Health dot — compact, no label */}
         <span
-          className="topbar-health"
+          className="topbar-health-dot"
           data-testid="health-indicator"
           title={health ? `${health.status} — index: ${health.index_status}` : 'Checking…'}
         >
@@ -88,13 +94,8 @@ export default function Topbar({
             className="health-dot"
             style={{ backgroundColor: statusColor(status) }}
           />
-          <span className="health-label">
-            {health ? `Backend: ${health.status}` : 'Connecting…'}
-          </span>
         </span>
-      </div>
 
-      <div className="topbar-right">
         {/* Voice capture button */}
         <button
           className="topbar-menu-btn"

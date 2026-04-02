@@ -111,6 +111,14 @@
       "problemMatcher": []
     },
     {
+      "label": "test: omnisearch",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
       "label": "test: security",
       "type": "shell",
       "command": "uv run python -m pytest monocle/tests/test_security.py -x --tb=short -q",
@@ -162,6 +170,14 @@
       "label": "test: process_manager",
       "type": "shell",
       "command": "uv run python -m pytest monocle/tests/test_process_manager.py -x --tb=short -q",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    },
+    {
+      "label": "test: org-linking",
+      "type": "shell",
+      "command": "uv run python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q",
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []

@@ -245,25 +245,25 @@ class TestMCPAuth:
     """Auth middleware enforces x-monocle-key or ?key= before reaching FastMCP."""
 
     def test_no_key_returns_401(self, auth_client):
-        r = auth_client.post("/mcp", json={})
+        r = auth_client.post("/mcp/", json={})
         assert r.status_code == 401
 
     def test_wrong_key_header_returns_401(self, auth_client):
-        r = auth_client.post("/mcp", json={}, headers={"x-monocle-key": _WRONG_KEY})
+        r = auth_client.post("/mcp/", json={}, headers={"x-monocle-key": _WRONG_KEY})
         assert r.status_code == 401
 
     def test_wrong_key_query_param_returns_401(self, auth_client):
-        r = auth_client.post(f"/mcp?key={_WRONG_KEY}", json={})
+        r = auth_client.post(f"/mcp/?key={_WRONG_KEY}", json={})
         assert r.status_code == 401
 
     def test_valid_key_header_passes_auth(self, auth_client):
         """A valid header key should not get 401.  Any other status is fine (MCP
         will reject an empty / invalid JSON-RPC body with 4xx, not 401)."""
-        r = auth_client.post("/mcp", json={}, headers={"x-monocle-key": _TEST_KEY})
+        r = auth_client.post("/mcp/", json={}, headers={"x-monocle-key": _TEST_KEY})
         assert r.status_code != 401
 
     def test_valid_key_query_param_passes_auth(self, auth_client):
-        r = auth_client.post(f"/mcp?key={_TEST_KEY}", json={})
+        r = auth_client.post(f"/mcp/?key={_TEST_KEY}", json={})
         assert r.status_code != 401
 
     def test_no_key_configured_rejects_all(self, tmp_path: Path):
@@ -329,7 +329,7 @@ class TestMCPAuth:
                 with TestClient(app, raise_server_exceptions=False) as client:
                     # Any key should fail because _key="" matches nothing
                     r = client.post(
-                        "/mcp",
+                        "/mcp/",
                         json={},
                         headers={"x-monocle-key": "any-value"},
                     )

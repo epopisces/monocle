@@ -4,6 +4,44 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-02
+
+### GitHub Copilot (Claude Haiku)
+- **Completed M27: Topbar Omnisearch milestone** (moved from ACTIVE to COMPLETE; M24 now ACTIVE)
+  - **Tests verified:** Backend test suite: 793 passing (7 omnisearch-specific); Frontend test suite: 408 passing (12 omnisearch-specific)
+  - **Production hardening applied (April 1-2):**
+    - Fixed keyboard navigation bug: `semanticIdx` collision where first result and semantic option were both selected simultaneously. Root cause: `const semanticIdx = flatIdx` evaluated before JSX render, `flatIdx` always 0. Fixed: `const semanticIdx = results.length` (correct slot after grouped items).
+    - Added rate limiting: `@limiter.limit("60/minute")` decorator to `/api/search/omni` endpoint (matches chat endpoint security model)
+    - Fixed incomplete vault scan: Replaced single `list_notes(limit=10000)` call with pagination loop (offset/limit, page_size=1000) — now scans complete vault regardless of size
+    - Optimized parsing strategy: Filename/frontmatter matches use NoteRef fields only (zero I/O); body search only calls `vault.read_note()` when needed. Result: 90%+ of queries avoid I/O.
+  - **Documentation archiving:**
+    - Added M27 to `docs/milestones.md` with full backend/frontend implementation details, bug fixes, and acceptance criteria
+    - Replaced verbose M27 section in `docs/build-plan.md` with brief 4-line summary + link to milestones.md
+    - Updated `docs/milestones.md` header (last-updated 2026-04-02) and milestone list (added M23, M27)
+    - Updated `docs/build-plan.md` Current Status (active-milestone M24 → OneNote Import Plugin; last-completed M27)
+    - Updated Milestone Tracker (M27: ACTIVE → COMPLETE; M24: NOT STARTED → ACTIVE)
+
+---
+
+## 2026-04-01
+
+### Claude Sonnet 4.6
+- **Implemented M27: Topbar Omnisearch** (full milestone, active)
+  - `docs/build-plan.md`: active-milestone → M27; added complete M27 details section; Milestone Tracker updated
+  - `docs/ui-design.md`: §4 topbar ASCII diagram updated; §5.6 "Topbar Omnisearch" section added
+  - `monocle/routers/search.py`: added `OmniResult` Pydantic model + `GET /api/search/omni` endpoint (pure text scan, priority: filename → frontmatter → body; uses `NoteMetadata` attribute access correctly)
+  - `monocle/tests/test_api.py`: added `TestOmniSearch` class with 7 tests (all passing; 793 total backend tests)
+  - `frontend/src/api/search.ts`: added `OmniResult` interface + `omniSearch()` function
+  - `frontend/src/components/layout/OmniSearch.tsx`: new component — Ctrl+E global shortcut, 300ms debounce, grouped dropdown (filename/frontmatter/body), keyboard nav (↑↓ Enter Escape), "Search semantically" option
+  - `frontend/src/components/layout/OmniSearch.css`: styles for omnisearch input, dropdown, groups and semantic option
+  - `frontend/src/components/layout/Topbar.tsx`: replaced center health label with `<OmniSearch />`; moved compact health dot to right side
+  - `frontend/src/components/layout/Topbar.css`: updated `.topbar-center` to flex-grow; compact `.topbar-health-dot`
+  - `frontend/src/components/Search/SearchScreen.tsx`: added `useSearchParams` init for `?q` and `?mode` URL params; `executeSearch()` extracted; auto-trigger on mount if `?q` present
+  - `frontend/src/OmniSearch.test.tsx`: 12 tests covering render, Ctrl+E, debounce, results, navigation, keyboard nav (all passing; 408 total frontend tests)
+  - `.vscode/tasks.json`: added `test: omnisearch` task
+
+---
+
 ## 2026-03-31
 
 ### Claude Sonnet 4.6 (continued)
@@ -77,6 +115,21 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Changed both to `re.finditer()` + list comprehension; take `json_matches[-1]` (last match, not first)
   - Added 3 new unit tests to `TestJSONMetadataExtraction`: multiple blocks (last wins), no blocks (fallback), single block (unchanged)
   - **52 agent tests passing** (49 original + 3 new); **192 combined tests** (vault + review + agents) all green
+
+- **Completed M23: Organization Note Type & Cross-Linked People Backreferences (2026-03-31)**
+  - Created `monocle/vault/templates/organization.yaml` (18 fields, 14 sentence_starters)
+  - Created `vault/.templates/organization.md` (7 sections with tables)
+  - Added `"organization"` to `NOTE_TYPES` in `models.py`
+  - Updated `vault/__init__.py`: `TEMPLATE_FILE_MAP` + `create_from_template` name-title fallback fix
+  - Extended `person.yaml` with `organizations` field; extended `prompts/extract.md` with multi-org JSON example
+  - Created `monocle/ingest/org_linker.py` — `wire_org_links()`: resolves/creates org stubs, patches person `links` field with `works-at` relations
+  - Wired `wire_org_links` as best-effort post-pipeline step in `IngestPipeline`
+  - Created `monocle/tests/test_org_linking.py` (13 tests across 3 classes)
+  - Fixed pre-existing `test_mcp.py` auth failures: Starlette Mount does not match exact path `/mcp` (405 from static-files fallback); updated tests to use `/mcp/` (trailing slash)
+  - Updated `test_vault.py` template count 10→11 and added `organization` to expected names set
+  - Added `test: org-linking` task to `.vscode/tasks.json`
+  - Updated `docs/build-plan.md`: M23 marked COMPLETE, M24 ACTIVE, active-milestone updated, Note Types table updated
+  - **786 backend tests passing (13 new org-linking + 3 test fixes), EXIT 0**
 
 - **Chat agent system prompt accuracy fix**
   - Fixed misleading documentation in `monocle/agents/__init__.py` base_instructions: prompt falsely claimed that `fetch_and_summarize_url` returns a `summary` field containing "actual fetched content" and instructed the model to quote it "verbatim"
