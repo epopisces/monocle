@@ -61,17 +61,17 @@ The frontend is a **React 18 + Vite 5** single-page application served by the Fa
 ## 4. Application Shell
 
 ```
-┌────────────────────────────────────────────────────────────────┐
-│  ◉ Monocle     [Backend: Ollama ●]    [☀/☾]  [⚙ Settings] │  ← Topbar (52px)
-├───────────┬────────────────────────────────────────────────────┤
-│           │                                                    │
-│  💬 Chat  │                                                    │
-│  📄 Docs  │              Main Content Area                    │
-│  🔍 Search│                                                    │
-│  ◉ Graph  │                                                    │
-│  📊 Stats │                                                    │
-│           │                                                    │
-└───────────┴────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  ◉ Monocle   [🔍 Search vault…              Ctrl+E]  ● [🎤] [🔔] [⚙] │  ← Topbar (52px)
+├───────────┬─────────────────────────────────────────────────────────────┤
+│           │                                                             │
+│  💬 Chat  │                                                             │
+│  📄 Docs  │              Main Content Area                             │
+│  🔍 Search│                                                             │
+│  ◉ Graph  │                                                             │
+│  📊 Stats │                                                             │
+│           │                                                             │
+└───────────┴─────────────────────────────────────────────────────────────┘
    220px              flex-grow
 ```
 
@@ -79,7 +79,7 @@ The frontend is a **React 18 + Vite 5** single-page application served by the Fa
 
 **Main content area** (`flex-grow`): Phase 1 renders a single content panel. The internal React state tracks an ordered `tabs` array (each entry: `{ tabId, type: "note"|"graph", noteId? }`) so the UI is architecturally ready for multi-pane expansion in Phase 2 without a state model redesign. The tab bar is not surfaced in the Phase 1 UI but the state is wired.
 
-**Topbar**: app name/logo, backend indicator (provider name + colored dot), dark/light toggle, **notification bell with badge** (count of notes pending review — see §7), **failed-captures warning button** (shown only when ingest failures exist), settings cog. Backend dot color is driven by `GET /api/health`: green = `ai_reachable: true`, amber = server reachable but `status: indexing` or `ai_reachable: false` check in-progress, red = `ai_reachable: false`. The notification badge uses `--review-pending` color and is hidden when the count is 0.
+**Topbar**: app name/logo on the left; **omnisearch bar** (§5.6) centered and taking the majority of horizontal space; compact health dot (colored, no label), voice capture button, notification bell with review badge, failed-captures warning button, and settings cog on the right. Backend dot color is driven by `GET /api/health`: green = `ai_reachable: true`, amber = server reachable but `status: indexing` or AI check in-progress, red = `ai_reachable: false`. The notification badge uses `--review-pending` color and is hidden when the count is 0.
 
 **Settings modal** (overlay): backend selection dropdown (Ollama / Foundry Local / Azure AI Services), model configuration fields for the selected backend, vault path display, MCP access key management, confidence review threshold slider.
 
@@ -348,6 +348,52 @@ Edges are visually differentiated by type and — for wikilink and structured ed
 **Source Quality Index:** Computed from metadata completeness (tags populated, people identified, action items extracted) per source. Shown as a star rating. Provides feedback to iteratively improve capture quality per channel.
 
 Charts: **Recharts** bundled in the React bundle (no CDN). All chart data fetched from `GET /stats`.
+
+---
+
+### 5.6 Topbar Omnisearch
+
+A full-width search bar centered in the topbar, accessible from anywhere in the app via `Ctrl+E`.
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  [🔍  Search vault…                             Ctrl+E   ] │
+└────────────────────────────────────────────────────────────┘
+                        ↓ dropdown (≥3 chars typed):
+┌────────────────────────────────────────────────────────────┐
+│  In filename                                               │
+│  ● people/sarah-chen.md         Sarah Chen                │
+│  ─────────────────────────────────────────────────────    │
+│  In title / tags                                           │
+│  ● work/q4-planning.md          Q4 Planning               │
+│  ─────────────────────────────────────────────────────    │
+│  In body                                                   │
+│  ● ideas/consulting.md          Consulting Ideas          │
+│  ─────────────────────────────────────────────────────    │
+│  🤖  Search semantically for "sarah"                       │
+└────────────────────────────────────────────────────────────┘
+```
+
+**Behavior:**
+- **Keyboard shortcut `Ctrl+E`** focuses the input from anywhere in the app (global `keydown` listener; no-op when focus is already in a form/input)
+- Search fires automatically after a **300 ms debounce** when the query is **≥ 3 characters** — no Enter required
+- Results come from `GET /api/search/omni` — a pure text scan requiring **no AI or embeddings**
+- Result ordering (strict priority): filename matches → frontmatter matches (title, tags, people, type, domain) → body matches
+- A note appears in only one bucket (highest priority match wins)
+- Selecting a result navigates to `/docs?path=<encoded_path>` (opens the note in Document Browser)
+- "Search semantically" option (always visible when query ≥ 3 chars) navigates to the **Search screen** (`/search?q=<query>&mode=semantic`) — the Search screen reads `?q` and `?mode` URL params to pre-populate and auto-trigger the search
+
+**Keyboard navigation:**
+- `↑` / `↓` — move selection through results and the semantic option
+- `Enter` — navigate to selected item; if nothing selected, open first result (or semantic option if no results)
+- `Escape` — close the dropdown and blur the input
+
+**Visual design:**
+- Input: `--bg-elevated` background, 8px border-radius, full-width up to 500px max
+- Dropdown: `--bg-surface` with `--shadow-elevated`, positioned below the input, max 400px wide matching input, max-height 360px with scroll
+- Group labels (e.g. "In filename"): `--text-secondary`, 11px, uppercase
+- Selected result: `--accent` left border, `--bg-elevated` background
+- Semantic option: separated by a divider, italic accent text
 
 ---
 

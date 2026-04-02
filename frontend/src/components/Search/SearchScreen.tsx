@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   semanticSearch,
   keywordSearch,
@@ -13,8 +13,14 @@ type SearchMode = 'semantic' | 'keyword'
 
 export default function SearchScreen() {
   const navigate = useNavigate()
-  const [mode, setMode] = useState<SearchMode>('semantic')
-  const [query, setQuery] = useState('')
+  const [searchParams] = useSearchParams()
+
+  const initialQ = searchParams.get('q') ?? ''
+  const initialMode: SearchMode =
+    searchParams.get('mode') === 'keyword' ? 'keyword' : 'semantic'
+
+  const [mode, setMode] = useState<SearchMode>(initialMode)
+  const [query, setQuery] = useState(initialQ)
   const [threshold, setThreshold] = useState(0.5)
   const [semanticResults, setSemanticResults] = useState<SearchResult[]>([])
   const [keywordResults, setKeywordResults] = useState<KeywordResult[]>([])
@@ -25,7 +31,6 @@ export default function SearchScreen() {
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const showToast = (msg: string) => {
-    // Clear any pending toast timer
     if (toastTimerRef.current !== undefined) {
       clearTimeout(toastTimerRef.current)
     }
@@ -33,7 +38,6 @@ export default function SearchScreen() {
     toastTimerRef.current = setTimeout(() => setToast(null), 4000)
   }
 
-  // Clean up toast timer on unmount
   useEffect(() => {
     return () => {
       if (toastTimerRef.current !== undefined) {
@@ -42,18 +46,17 @@ export default function SearchScreen() {
     }
   }, [])
 
-  async function handleSearch(e: React.FormEvent) {
-    e.preventDefault()
-    if (!query.trim()) return
+  async function executeSearch(q: string, m: SearchMode) {
+    if (!q.trim()) return
     setLoading(true)
     setError(null)
     try {
-      if (mode === 'semantic') {
-        const results = await semanticSearch({ q: query, limit: 20, threshold })
+      if (m === 'semantic') {
+        const results = await semanticSearch({ q, limit: 20, threshold })
         setSemanticResults(results)
         setKeywordResults([])
       } else {
-        const results = await keywordSearch({ q: query, limit: 20 })
+        const results = await keywordSearch({ q, limit: 20 })
         setKeywordResults(results)
         setSemanticResults([])
       }
@@ -62,6 +65,19 @@ export default function SearchScreen() {
     } finally {
       setLoading(false)
     }
+  }
+
+  // Auto-trigger search if launched with a ?q param (e.g. from OmniSearch)
+  useEffect(() => {
+    if (initialQ.trim()) {
+      executeSearch(initialQ, initialMode)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault()
+    await executeSearch(query, mode)
   }
 
   function openNote(filePath: string) {

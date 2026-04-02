@@ -3,7 +3,7 @@ type: build-plan
 project: monocle
 maintained-by: github-copilot
 last-updated: 2026-03-31
-active-milestone: M23
+active-milestone: M27
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,9 +26,14 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M23 — Organization Note Type & Cross-Linked People Backreferences
-**Last Completed:** M22 — Process Manager & Dev Automation (2026-03-21)
+**Active Milestone:** M27 — Topbar Omnisearch
+**Last Completed:** M23 — Organization Note Type & Cross-Linked People Backreferences (2026-03-31)
+**Note:** M24 (OneNote Import), M25 (Voice Hardening), M26 (Teams) are queued; M27 was prioritised ahead of them by explicit user request (2026-04-01).
 **Blocked By:** None
+**Session Notes (M23 — Organization Note Type & Cross-Linked People Backreferences):**
+- **Status:** COMPLETE (2026-03-31)
+- Created `monocle/vault/templates/organization.yaml` (18 fields, 14 sentence_starters, note_type=organization, default_folder=organizations). Created `vault/.templates/organization.md` (7 sections with tables: About, Mission, Contact, Key Dates, Leadership & Structure, Notable People/Alumni, Notes). Added `"organization"` to `NOTE_TYPES` in `models.py`. Added `"organization": "organization"` to `TEMPLATE_FILE_MAP` in `vault/__init__.py`; fixed `create_from_template` to use `metadata.get("name")` as title fallback (so org stubs slug correctly from name). Patched `person.yaml` `organizations` field. Extended `prompts/extract.md` with multi-org extraction guidance + example JSON. Created `monocle/ingest/org_linker.py` — `wire_org_links()`: resolves/creates org stubs + patches person note `links` field with `works-at` relation. Wired `wire_org_links` as post-pipeline step in `IngestPipeline` (best-effort, never propagates). Created `monocle/tests/test_org_linking.py` (13 tests: template existence, wire_org_links scenarios, graph backreferences). Updated `test_vault.py` template count (10→11) and `test_mcp.py` auth tests to use `/mcp/` (trailing slash) — Starlette Mount does not match exact path `/mcp` without trailing slash, causing 405 from static-files fallback. Updated `.vscode/tasks.json` with `test: org-linking` task.
+- **786 backend tests passing (13 new + 3 test fixes), EXIT 0**
 **Session Notes (M22 — Process Manager & Dev Automation):**
 - **Status:** COMPLETE (2026-03-21), post-review hardened (2026-03-26)
 - Implemented `ProcessManager` + `SubprocessHandle` (exponential-backoff crash-restart); `watch`, `scheduler`, `capture` CLI commands operational; `--separate-processes` flag on `serve`/`dev`; lifespan gating in `main.py`.
@@ -102,33 +107,35 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 
 ## Milestone Tracker
 
-| ID | Milestone | Status |
-|---|---|---|
-| M1 | Foundation & Project Skeleton | COMPLETE |
-| M2 | API Skeleton — all route stubs + OpenAPI | COMPLETE |
-| M3 | Vault Layer | COMPLETE |
-| M4 | Index Layer (ChromaDB + MemoryIndex) | COMPLETE |
-| M5 | File Watcher & Re-index Queue | COMPLETE |
-| M6 | AI Provider Abstraction | COMPLETE |
-| M7 | Ingest Pipeline & Plugin Registry | COMPLETE |
-| M8 | REST API Wiring — Core | COMPLETE |
-| M9 | Graph Layer | COMPLETE |
-| M10 | Agent Framework & Chat API | COMPLETE |
-| M11 | Scheduled Agents | COMPLETE |
-| M12 | MCP Server | COMPLETE |
-| M13 | Settings & Review API | COMPLETE |
-| M14 | CLI Commands | COMPLETE |
-| M15 | Frontend Scaffold & Typed API Wrappers | COMPLETE |
-| M16 | Chat UI | COMPLETE |
-| M17 | Document Browser & Search UI | COMPLETE |
-| M18 | Graph UI | COMPLETE |
-| M19 | Voice Capture & Review Queue UI | COMPLETE |
-| M20 | Stats, Keyboard Shortcuts & Command Palette | COMPLETE |
-| M21 | Integration Testing & Obsidian Compatibility | COMPLETE |
-| M22 | Process Manager & Dev Automation | COMPLETE |
-| M23 | OneNote Import Plugin | NOT STARTED |
-| M24 | Voice Feature Hardening & Cross-Browser Compatibility | NOT STARTED |
-| M25 | Teams Integration | NOT STARTED |
+| ID  | Milestone                                                      | Status      |
+|-----|----------------------------------------------------------------|-------------|
+| M1  | Foundation & Project Skeleton                                  | COMPLETE    |
+| M2  | API Skeleton — all route stubs + OpenAPI                       | COMPLETE    |
+| M3  | Vault Layer                                                    | COMPLETE    |
+| M4  | Index Layer (ChromaDB + MemoryIndex)                           | COMPLETE    |
+| M5  | File Watcher & Re-index Queue                                  | COMPLETE    |
+| M6  | AI Provider Abstraction                                        | COMPLETE    |
+| M7  | Ingest Pipeline & Plugin Registry                              | COMPLETE    |
+| M8  | REST API Wiring — Core                                         | COMPLETE    |
+| M9  | Graph Layer                                                    | COMPLETE    |
+| M10 | Agent Framework & Chat API                                     | COMPLETE    |
+| M11 | Scheduled Agents                                               | COMPLETE    |
+| M12 | MCP Server                                                     | COMPLETE    |
+| M13 | Settings & Review API                                          | COMPLETE    |
+| M14 | CLI Commands                                                   | COMPLETE    |
+| M15 | Frontend Scaffold & Typed API Wrappers                         | COMPLETE    |
+| M16 | Chat UI                                                        | COMPLETE    |
+| M17 | Document Browser & Search UI                                   | COMPLETE    |
+| M18 | Graph UI                                                       | COMPLETE    |
+| M19 | Voice Capture & Review Queue UI                                | COMPLETE    |
+| M20 | Stats, Keyboard Shortcuts & Command Palette                    | COMPLETE    |
+| M21 | Integration Testing & Obsidian Compatibility                   | COMPLETE    |
+| M22 | Process Manager & Dev Automation                               | COMPLETE    |
+| M23 | Organization Note Type & Cross-Linked People Backreferences    | COMPLETE    |
+| M24 | OneNote Import Plugin                                          | NOT STARTED |
+| M25 | Voice Feature Hardening & Cross-Browser Compatibility          | NOT STARTED |
+| M26 | Teams Integration                                              | NOT STARTED |
+| M27 | Topbar Omnisearch                                              | ACTIVE      |
 
 ---
 
@@ -319,6 +326,7 @@ links:
 | `project` | `project` | Project overview and status |
 | `action_item` | `action_item` | A specific follow-up task |
 | `weekly_summary` | `weekly_summary` | Auto-generated weekly summary |
+| `organization` | `organization` | Organization, company, or institution profile |
 | `other` | `blank` | Catch-all; used when classification confidence < threshold |
 
 ### Chunking Config
@@ -392,7 +400,7 @@ monocle/           Python package
   vault/__init__.py   VaultLayer (all filesystem operations)
   vault/normalise.py  normalise_frontmatter()
   vault/wikilinks.py  parse_wikilinks(), parse_links_field(), resolve_wikilink()
-  vault/templates/    10 YAML note template schemas (each includes sentence_starters list + field definitions for form editor)
+  vault/templates/    11 YAML note template schemas (each includes sentence_starters list + field definitions for form editor)
                        NOTE: these are machine-readable YAML schemas in the *Python package* at monocle/vault/templates/ —
                        distinct from the user-facing Markdown templates in vault/.templates/ (inside the vault directory).
   ingest/__init__.py  IngestPipeline + IngestPluginRegistry
@@ -686,13 +694,13 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 - **Backreferences:** Graph layer computes inverse links — `GET /api/graph?focus=organizations/acme-corp.md` returns all people connected via any `works-at`/`founded`/`manages` relation.
 
 **Deliverables:**
-- [ ] `monocle/vault/templates/organization.yaml` — 15-25 fields organized in sections:
+- [x] `monocle/vault/templates/organization.yaml` — 15-25 fields organized in sections:
   - Identity & Contact: `name`, `short_name`, `url`, `location`, `domain`
   - Structure: `org_type` (company|nonprofit|govt|academic|other), `parent_org` (wikilink to parent if applicable), `founded_year`, `industry` (enum or free text)
   - Size & Scope: `employee_count`, `description` (100–500 chars)
   - Status: `active` (boolean), `status_reason` (if inactive), lifecycle fields
   - Metadata: `tags`, `domain` (work|personal), `source`
-- [ ] `vault/.templates/organization.md` — User-facing markdown body template with sections:
+- [x] `vault/.templates/organization.md` — User-facing markdown body template with sections:
   - Header (name, short_name, url, org_type as metadata)
   - About (mission/description, founded_year)
   - Contact (location, website, social handles)
@@ -700,23 +708,23 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
   - Leadership & Structure (table of notable leaders or teams, links to person notes)
   - Notable People / Alumni (table with name, role, tenure)
   - Notes (narrative details, history, partnerships)
-- [ ] Extend person template's `organizations` field example and prompt in `prompts/extract.md`:
+- [x] Extend person template's `organizations` field example and prompt in `prompts/extract.md`:
   - Document format: `organizations: [{name: "...", role: "...", join_date: "YYYY-MM", leave_date: "YYYY-MM", current: boolean}]`
   - Include instruction: "If a person has worked at multiple organizations, extract each as a separate entry. Use YYYY-MM format for partial dates."
   - Wire extraction prompt to pull org names and dates during person note metadata extraction.
-- [ ] Wiring: when person note is created with `organizations` field, automatically generate/update `links` entries pointing to matching organization notes:
+- [x] Wiring: when person note is created with `organizations` field, automatically generate/update `links` entries pointing to matching organization notes:
   - For each org in `organizations`, attempt `resolve_wikilink("organizations/" + slugify(org.name))`.
   - If org note exists, create a link: `{target: "organizations/...", relation: "works-at", join_date: org.join_date, leave_date: org.leave_date, current: org.current}`.
   - If org note does not exist, optionally auto-create a stub org note via `VaultLayer.create_from_template("organization", {name: org.name, domain: person.domain}, metadata)` — set `review_status: "pending"`.
   - Update person note's `links` field via `patch_frontmatter()`.
-- [ ] Graph layer backreferences:
+- [x] Graph layer backreferences:
   - `GET /api/graph?focus=organizations/acme-corp.md&types=person` returns all person notes with incoming `works-at` links.
   - Graph edge includes `relation: "works-at"`, `metadata: {join_date, leave_date, current}` — reused from person links field.
   - Backlinks panel on organization note shows all people (sorted by who worked there most recently).
-- [ ] Routing/sentence starters for organization notes:
+- [x] Routing/sentence starters for organization notes:
   - Add to `organization.yaml`: `sentence_starters: ["This is a company", "This organization", "The company was founded", "We hired from", "Working at"]`
   - If routing confidence < 0.6 and routing suggests `person` but content mentions org names, consider routing to `organization` instead (optional heuristic).
-- [ ] Test coverage in `monocle/tests/`:
+- [x] Test coverage in `monocle/tests/`:
   - `test_vault.py`: add tests for `create_from_template("organization", ...)` and `patch_frontmatter` with linked person notes
   - `test_graph.py`: add tests for backreferences — `GET /api/graph?focus=org_note` returns only person nodes with `works-at` edges
   - `test_ingest.py`: add tests for multi-org extraction during person ingest; stub org creation scenario
@@ -725,23 +733,23 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
     - `test_person_ingest_links_to_existing_org`
     - `test_org_backlinks_people_with_works_at_relation`
     - `test_org_graph_filters_by_relation_type`
-- [ ] Frontend display (optional M23a follow-up):
+- [x] Frontend display (optional M23a follow-up):
   - Person notes show inline org badges (clickable → org note / graph view)
   - Organization notes show "People" panel listing all associated people (generated from backreferences)
   - Person's work history table in document viewer shows org name, role, dates (from `organizations` frontmatter + computed via `links`)
-- [ ] Extend `.vscode/tasks.json`:
+- [x] Extend `.vscode/tasks.json`:
   - `test: org-linking` — `python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q`
 
 **Acceptance Criteria:**
-- [ ] `monocle/vault/templates/organization.yaml` has 15+ fields; `sentence_starters` includes org-specific phrases
-- [ ] `vault/.templates/organization.md` has 5+ sections with guidance for user-facing template; table examples for leaders/alumni
-- [ ] `prompts/extract.md` documents multi-org extraction with example JSON format and partial date guidance
-- [ ] A new person note with `organizations: [{name: "Acme Corp", role: "VP", join_date: "2020-01", current: true}]` triggers creation of a stub `organizations/acme-corp.md` or links to existing org
-- [ ] Person note's `links` field includes a `{target: "organizations/acme-corp.md", relation: "works-at", join_date: "2020-01", current: true}` entry
-- [ ] `GET /api/graph?focus=organizations/acme-corp.md` returns only person nodes in the ego-graph
-- [ ] Backlinks panel on org note lists all associated people sorted by recency
-- [ ] `uv run python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q` passes (3–5 green tests)
-- [ ] Full test suite: **730+ backend tests passing, EXIT 0**
+- [x] `monocle/vault/templates/organization.yaml` has 15+ fields; `sentence_starters` includes org-specific phrases
+- [x] `vault/.templates/organization.md` has 5+ sections with guidance for user-facing template; table examples for leaders/alumni
+- [x] `prompts/extract.md` documents multi-org extraction with example JSON format and partial date guidance
+- [x] A new person note with `organizations: [{name: "Acme Corp", role: "VP", join_date: "2020-01", current: true}]` triggers creation of a stub `organizations/acme-corp.md` or links to existing org
+- [x] Person note's `links` field includes a `{target: "organizations/acme-corp.md", relation: "works-at", join_date: "2020-01", current: true}` entry
+- [x] `GET /api/graph?focus=organizations/acme-corp.md` returns only person nodes in the ego-graph
+- [x] Backlinks panel on org note lists all associated people sorted by recency
+- [x] `uv run python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q` passes (3–5 green tests)
+- [x] Full test suite: **786 backend tests passing, EXIT 0**
 
 ---
 
@@ -821,6 +829,60 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 - [ ] Teams message ingest creates a note with `source: "teams"`
 - [ ] `/search query` replies with top 3 results
 - [ ] `uv run python -m pytest monocle/tests/test_teams.py -x --tb=short -q` passes
+
+---
+
+### M27: Topbar Omnisearch
+
+**Goal:** Replace the static health indicator in the topbar center with an always-accessible omnisearch bar. Default search is a fast, AI-free full-text scan of the vault (filename → frontmatter → body priority order); a semantic search escape hatch hands off to the existing Search screen.
+
+**Deliverables:**
+- [ ] `GET /api/search/omni` backend endpoint (`monocle/routers/search.py`):
+  - Query param `q` (min 3 chars), `limit` (default 20, max 100)
+  - Pure text scan — no AI, no embeddings
+  - Result ordering: filename matches first, then frontmatter (title/tags/people/type/domain), then body; each note appears in only the highest-priority matching bucket
+  - Returns `OmniResult` list with `file_path`, `title`, `excerpt`, `match_location` (`"filename" | "frontmatter" | "body"`)
+  - Rate limit: 60 req/min (same as chat)
+- [ ] Tests for `GET /api/search/omni` in `monocle/tests/test_api.py` (`TestOmniSearch` class):
+  - `test_omni_search_requires_min_3_chars`
+  - `test_omni_search_filename_match`
+  - `test_omni_search_frontmatter_match`
+  - `test_omni_search_body_match`
+  - `test_omni_search_priority_order` (filename before frontmatter before body)
+- [ ] `frontend/src/api/search.ts` — add `omniSearch(params)` function with inline `OmniResult` type (not from schema since schema.d.ts is regenerated separately)
+- [ ] `frontend/src/components/layout/OmniSearch.tsx` — new component:
+  - Renders inside the topbar center `<div>`
+  - `Ctrl+E` global `keydown` listener focuses the input (calls `inputRef.current?.focus()`)
+  - Debounces search at 300 ms; fires `omniSearch` when query ≥ 3 chars
+  - Dropdown closes on `Escape`, on click outside, and when a result is selected
+  - Keyboard navigation: `↑`/`↓` move selected index; `Enter` navigates to selected (or first) result
+  - "Search semantically" option always visible at dropdown bottom when query ≥ 3 chars; navigates to `/search?q=<query>&mode=semantic`
+  - `data-testid="omni-search"`, `data-testid="omni-search-input"`, `data-testid="omni-search-dropdown"`, `data-testid="omni-result"`, `data-testid="omni-semantic-btn"`
+- [ ] `frontend/src/components/layout/OmniSearch.css` — styles per §5.6 of `docs/ui-design.md`
+- [ ] `frontend/src/components/layout/Topbar.tsx` — mount `<OmniSearch />` in center; move compact health dot to right side (no label text, just the colored dot + status tooltip)
+- [ ] `frontend/src/components/layout/Topbar.css` — update `.topbar-center` to flex-grow; shrink health indicator to dot-only
+- [ ] `frontend/src/components/Search/SearchScreen.tsx` — read `?q` and `?mode` URL params for initial state; auto-trigger search on mount if `?q` is non-empty
+- [ ] `frontend/src/OmniSearch.test.tsx` — tests:
+  - `test_omni_search_input_renders`
+  - `test_ctrl_e_focuses_input`
+  - `test_dropdown_opens_after_debounce`
+  - `test_result_navigation_to_docs`
+  - `test_semantic_option_navigates_to_search`
+  - `test_escape_closes_dropdown`
+  - `test_click_outside_closes_dropdown`
+- [ ] `.vscode/tasks.json`: `test: omnisearch` — runs `monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q`
+
+**Acceptance Criteria:**
+- [ ] `Ctrl+E` from any screen focuses the topbar search input
+- [ ] Typing ≥ 3 chars triggers a search after 300 ms (no Enter required); results appear in a dropdown
+- [ ] Results are ordered: filename matches → frontmatter matches → body matches (each note in one bucket only)
+- [ ] Clicking a result navigates to `/docs?path=<encoded_path>`
+- [ ] "Search semantically" option navigates to `/search?q=<query>&mode=semantic` and auto-runs the search
+- [ ] Typing < 3 chars shows no dropdown
+- [ ] `Escape` closes dropdown
+- [ ] `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q` passes
+- [ ] `cd frontend && npm run test -- --run` passes (all existing + new frontend tests)
+- [ ] `cd frontend && npx tsc --noEmit` exits 0
 
 ---
 

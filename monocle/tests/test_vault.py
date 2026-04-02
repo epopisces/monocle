@@ -844,7 +844,7 @@ class TestVaultLayerListTemplates:
     def test_returns_ten_templates(self, tmp_path: Path):
         vault = VaultLayer(tmp_path)
         schemas = vault.list_templates()
-        assert len(schemas) == 10
+        assert len(schemas) == 11
 
     def test_each_template_has_sentence_starters(self, tmp_path: Path):
         vault = VaultLayer(tmp_path)
@@ -858,5 +858,6 @@ class TestVaultLayerListTemplates:
         expected = {
             "person", "decision", "project", "meeting", "idea",
             "observation", "reference", "action_item", "blank", "weekly_summary",
+            "organization",
         }
         assert names == expected

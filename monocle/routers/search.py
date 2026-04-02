@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
+from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -25,6 +27,13 @@ class KeywordResult(BaseModel):
     file_path: str
     title: str
     excerpt: str  # first 200 chars of matching body
+
+
+class OmniResult(BaseModel):
+    file_path: str
+    title: str
+    excerpt: str
+    match_location: Literal["filename", "frontmatter", "body"]
 
 
 @router.get("/search", response_model=list[SearchResult])
@@ -117,5 +126,89 @@ async def keyword_search(
             if len(results) >= n:
                 break
         return results
+
+    return await asyncio.to_thread(_scan)
+
+
+@router.get("/search/omni", response_model=list[OmniResult])
+async def omni_search(
+    request: Request,
+    q: str = Query(..., min_length=3, description="Search query (min 3 chars)"),
+    limit: int = Query(20, ge=1, le=100),
+) -> list[OmniResult]:
+    """Fast full-text vault scan: filename first, then frontmatter, then body."""
+    vault = request.app.state.vault
+    q_lower = q.lower()
+
+    def _scan() -> list[OmniResult]:
+        page = vault.list_notes(limit=10000)
+        filename_hits: list[OmniResult] = []
+        frontmatter_hits: list[OmniResult] = []
+        body_hits: list[OmniResult] = []
+
+        for ref in page.items:
+            try:
+                note = vault.read_note(ref.file_path)
+            except Exception:
+                continue
+
+            basename = os.path.basename(ref.file_path)
+            if basename.endswith(".md"):
+                basename = basename[:-3]
+
+            # 1. Filename match
+            if q_lower in basename.lower():
+                filename_hits.append(
+                    OmniResult(
+                        file_path=ref.file_path,
+                        title=note.title,
+                        excerpt=basename,
+                        match_location="filename",
+                    )
+                )
+                continue
+
+            # 2. Frontmatter match
+            meta = note.metadata
+            fm_parts = [
+                note.title or "",
+                meta.type or "",
+                meta.domain or "",
+            ]
+            for tag in meta.tags or []:
+                fm_parts.append(str(tag))
+            for person in meta.people or []:
+                fm_parts.append(str(person))
+            fm_text = " ".join(fm_parts).lower()
+
+            if q_lower in fm_text:
+                frontmatter_hits.append(
+                    OmniResult(
+                        file_path=ref.file_path,
+                        title=note.title,
+                        excerpt=" | ".join(p for p in fm_parts if p)[:200],
+                        match_location="frontmatter",
+                    )
+                )
+                continue
+
+            # 3. Body match
+            body = note.body or ""
+            body_lower = body.lower()
+            if q_lower in body_lower:
+                idx = body_lower.find(q_lower)
+                start = max(0, idx - 60)
+                excerpt = body[start : start + 200]
+                body_hits.append(
+                    OmniResult(
+                        file_path=ref.file_path,
+                        title=note.title,
+                        excerpt=excerpt,
+                        match_location="body",
+                    )
+                )
+
+        combined = filename_hits + frontmatter_hits + body_hits
+        return combined[:limit]
 
     return await asyncio.to_thread(_scan)

@@ -295,6 +295,87 @@ class TestSearch:
 
 
 # ===========================================================================
+# Omni Search
+# ===========================================================================
+
+class TestOmniSearch:
+    def test_omni_search_requires_min_3_chars(self, api_client: TestClient):
+        r = api_client.get("/api/search/omni?q=ab")
+        assert r.status_code == 422
+
+    def test_omni_search_requires_q(self, api_client: TestClient):
+        r = api_client.get("/api/search/omni")
+        assert r.status_code == 422
+
+    def test_omni_search_filename_match(self, api_client: TestClient):
+        api_client.put(
+            "/api/notes/work/omni_fname_test.md",
+            json={"title": "Omni Fname", "body": "some content", "metadata": {}},
+        )
+        r = api_client.get("/api/search/omni?q=omni_fname")
+        assert r.status_code == 200
+        results = r.json()
+        assert isinstance(results, list)
+        matches = [item for item in results if "omni_fname" in item["file_path"]]
+        assert matches, "Expected at least one filename match"
+        assert matches[0]["match_location"] == "filename"
+
+    def test_omni_search_frontmatter_match(self, api_client: TestClient):
+        api_client.put(
+            "/api/notes/work/omni_fm_note.md",
+            json={
+                "title": "xfmtag_unique_title",
+                "body": "body without the keyword",
+                "metadata": {"tags": ["xfmtag_unique_title"]},
+            },
+        )
+        r = api_client.get("/api/search/omni?q=xfmtag_unique")
+        assert r.status_code == 200
+        results = r.json()
+        fm_matches = [
+            item for item in results
+            if "omni_fm_note" in item["file_path"] and item["match_location"] in ("filename", "frontmatter")
+        ]
+        assert fm_matches
+
+    def test_omni_search_body_match(self, api_client: TestClient):
+        api_client.put(
+            "/api/notes/work/omni_body_note.md",
+            json={"title": "Ordinary Title", "body": "xbodyterm_unique_789 found here", "metadata": {}},
+        )
+        r = api_client.get("/api/search/omni?q=xbodyterm_unique")
+        assert r.status_code == 200
+        results = r.json()
+        body_matches = [item for item in results if "omni_body_note" in item["file_path"]]
+        assert body_matches
+        assert body_matches[0]["match_location"] == "body"
+
+    def test_omni_search_priority_order(self, api_client: TestClient):
+        """Filename matches must appear before frontmatter, frontmatter before body."""
+        api_client.put(
+            "/api/notes/work/orderprio_filename.md",
+            json={"title": "orderprio title", "body": "orderprio content", "metadata": {}},
+        )
+        r = api_client.get("/api/search/omni?q=orderprio")
+        assert r.status_code == 200
+        results = r.json()
+        assert results, "Expected results for 'orderprio'"
+        # First result for this query should be the filename match
+        first = results[0]
+        assert first["match_location"] == "filename"
+
+    def test_omni_search_result_fields(self, api_client: TestClient):
+        r = api_client.get("/api/search/omni?q=test")
+        assert r.status_code == 200
+        for item in r.json():
+            assert "file_path" in item
+            assert "title" in item
+            assert "excerpt" in item
+            assert "match_location" in item
+            assert item["match_location"] in ("filename", "frontmatter", "body")
+
+
+# ===========================================================================
 # Ingest
 # ===========================================================================
 

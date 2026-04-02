@@ -48,6 +48,7 @@ NOTE_TYPES = Literal[
     "project",
     "action_item",
     "weekly_summary",
+    "organization",
     "other",
 ]
 

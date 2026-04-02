@@ -54,6 +54,7 @@ TEMPLATE_FILE_MAP: dict[str, str] = {
     "reference": "reference",
     "action_item": "action_item",
     "weekly_summary": "weekly_summary",
+    "organization": "organization",
     "other": "blank",
     "blank": "blank",
 }
@@ -531,9 +532,12 @@ class VaultLayer:
         domain_value: str = metadata.get("domain") or schema_default_domain or "personal"
 
         # Derive title and filename
+        # Priority: explicit "title" → "name" field (used by organization template)
+        # → first people entry → template type as fallback
         people_list = metadata.get("people") or []
         title: str = (
             metadata.get("title")
+            or metadata.get("name")
             or (people_list[0] if people_list else None)
             or template_type.replace("_", " ").title()
         )

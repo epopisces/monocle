@@ -358,6 +358,23 @@ class IngestPipeline:
             # Re-read the note so callers get consistent frontmatter
             note = await asyncio.to_thread(self._vault.read_note, note.file_path)
 
+            # --------------------------------------------------------
+            # Post-pipeline: org-linking (person notes only)
+            # --------------------------------------------------------
+            # For person notes with an `organizations` field, resolve or
+            # create stub org notes and wire structured links.  Failures
+            # are best-effort — they must not abort a successful ingest.
+            try:
+                from monocle.ingest.org_linker import wire_org_links
+
+                await asyncio.to_thread(wire_org_links, note, self._vault)
+                # Re-read again to pick up any link patches
+                note = await asyncio.to_thread(self._vault.read_note, note.file_path)
+            except Exception:
+                logger.warning(
+                    "[INGEST] Org-linking step failed for %s", note.file_path, exc_info=True
+                )
+
             # Emit pipeline metrics
             self._pipeline_hist.record(
                 (time.perf_counter() - t_pipeline_start) * 1_000,

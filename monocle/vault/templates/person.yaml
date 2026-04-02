@@ -63,6 +63,14 @@ fields:
     required: false
     type: string
     description: "Their role/title in the organization."
+
+  - name: organizations
+    required: false
+    type: list
+    description: >
+      Work history and organizational affiliations. Each entry: {name, role, join_date (YYYY-MM),
+      leave_date (YYYY-MM or null), current (true/false)}. Used to auto-create structured links
+      to organization notes and populate the knowledge graph.
   
   # Important Dates
   - name: birthdate

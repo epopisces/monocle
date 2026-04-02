@@ -26,3 +26,19 @@ export function semanticSearch(params: SemanticSearchParams): Promise<SearchResu
 export function keywordSearch(params: KeywordSearchParams): Promise<KeywordResult[]> {
   return apiGet<KeywordResult[]>('/api/search/keyword', params as unknown as Record<string, string | number | boolean | null | undefined>)
 }
+
+export interface OmniResult {
+  file_path: string
+  title: string
+  excerpt: string
+  match_location: 'filename' | 'frontmatter' | 'body'
+}
+
+export interface OmniSearchParams {
+  q: string
+  limit?: number
+}
+
+export function omniSearch(params: OmniSearchParams): Promise<OmniResult[]> {
+  return apiGet<OmniResult[]>('/api/search/omni', params as unknown as Record<string, string | number | boolean | null | undefined>)
+}

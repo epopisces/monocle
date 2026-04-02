@@ -1,0 +1,114 @@
+template: organization
+note_type: organization
+default_folder: organizations
+description: "Organization, company, nonprofit, government body, or institution."
+
+sentence_starters:
+  - "This is a company"
+  - "This organization"
+  - "The company was founded"
+  - "We hired from"
+  - "Working at"
+  - "partnered with"
+  - "acquired by"
+  - "the organization"
+  - "this firm"
+  - "the nonprofit"
+  - "the institution"
+  - "founded the company"
+  - "the university"
+  - "based in"
+
+fields:
+  # Identity & Contact
+  - name: name
+    required: true
+    type: string
+    description: "Full legal or common name of the organization."
+
+  - name: short_name
+    required: false
+    type: string
+    description: "Common abbreviation or short name (e.g., 'Acme' for 'Acme Corp')."
+
+  - name: url
+    required: false
+    type: string
+    description: "Primary website URL."
+
+  - name: location
+    required: false
+    type: string
+    description: "HQ city and state/country (e.g., 'San Francisco, CA, USA')."
+
+  - name: domain
+    required: false
+    type: string
+    default: work
+    description: "Category: work | personal | community | faith | etc."
+
+  # Structure
+  - name: org_type
+    required: false
+    type: string
+    description: "Organization type: company | nonprofit | govt | academic | other"
+
+  - name: parent_org
+    required: false
+    type: string
+    description: "Wikilink to parent organization note, if applicable (e.g., '[[Acme Holdings]]')."
+
+  - name: founded_year
+    required: false
+    type: string
+    description: "Year the organization was founded (e.g., '2001'). Use string; partial years OK."
+
+  - name: industry
+    required: false
+    type: string
+    description: "Industry or sector (e.g., 'Software', 'Healthcare', 'Education', 'Finance')."
+
+  # Size & Scope
+  - name: employee_count
+    required: false
+    type: string
+    description: "Approximate headcount or range (e.g., '50-200', '10,000+', 'startup')."
+
+  - name: description
+    required: false
+    type: string
+    description: "100–500 character overview of the organization's mission or primary business."
+
+  # Status
+  - name: active
+    required: false
+    type: boolean
+    default: true
+    description: "Whether the organization is currently active (true) or defunct/inactive (false)."
+
+  - name: status_reason
+    required: false
+    type: string
+    description: "Reason for inactive/defunct status (e.g., 'acquired by Megacorp 2022', 'dissolved', 'merged')."
+
+  # Relationships
+  - name: people
+    required: false
+    type: list
+    description: "People mentioned or associated with this organization (auto-populated via backreferences)."
+
+  - name: links
+    required: false
+    type: list
+    description: "Structured links to related notes (e.g., parent org, subsidiary, partner orgs)."
+
+  # Metadata
+  - name: tags
+    required: false
+    type: list
+    description: "Classification tags: saas, fintech, b2b, enterprise, startup, public-company, etc."
+
+  - name: source
+    required: false
+    type: string
+    description: "How this note was created: web | mcp | agent | import"
