@@ -6,14 +6,15 @@ provider as constructor arguments on the ToolRegistry container class, then
 expose bound methods that the agent framework can invoke.
 
 Tools:
-  search_vault      — Semantic search returning scored note chunks
-  read_note         — Read a full note by vault-relative path
-  write_note        — Overwrite an existing note body/metadata
-  append_to_note    — Find a note by name/query and append content to it
-  create_note       — Create a new note via VaultLayer.create_from_template
-  get_stats         — Return BrainStats summary
-  list_notes        — List notes with optional type/domain filter
-  get_person_graph  — Return first-degree ego-graph for a person
+    search_vault           — Semantic search returning scored note chunks
+    read_note              — Read a full note by vault-relative path
+    write_note             — Overwrite an existing note body/metadata
+    append_to_note         — Find a note by name/query and append content to it
+    create_note            — Create a new note via VaultLayer.create_from_template
+    get_stats              — Return BrainStats summary
+    list_notes             — List notes with optional type/domain filter
+    get_person_graph       — Return first-degree ego-graph for a person
+    fetch_and_summarize_url — Fetch a web page, summarize it with AI, and create a reference note
 """
 from __future__ import annotations
 
@@ -614,7 +615,7 @@ class VaultTools:
 
         # 1. Fetch the page
         _MAX_FETCH_BYTES = 500_000
-        _MAX_TEXT_CHARS = 20_000
+        _MAX_TEXT_CHARS = 12_000  # After boilerplate removal, 12k chars is ample for most pages
         try:
             import httpx
 
@@ -628,8 +629,11 @@ class VaultTools:
         except Exception as exc:
             raise RuntimeError(f"Failed to fetch {url}: {exc}") from exc
 
-        # 2. Strip HTML
-        raw = _re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw, flags=_re.DOTALL | _re.IGNORECASE)
+        # 2. Strip HTML — remove entire boilerplate sections (including their text content)
+        # before stripping remaining tags.  Without this, nav menus, footers, sidebars,
+        # breadcrumbs, and cookie banners all end up in the text sent to the LLM.
+        _BOILERPLATE = "script|style|nav|header|footer|aside|noscript|iframe|form"
+        raw = _re.sub(rf"<({_BOILERPLATE})[^>]*>.*?</\1>", " ", raw, flags=_re.DOTALL | _re.IGNORECASE)
         raw = _re.sub(r"<[^>]+>", " ", raw)
         raw = _html.unescape(raw)
         page_text = _re.sub(r"\s+", " ", raw).strip()[:_MAX_TEXT_CHARS]
@@ -719,7 +723,6 @@ class VaultTools:
                     "title": note.title,
                     "url": url,
                     "status": "created",
-                    "summary": body,
                 }
             )
         except Exception as exc:

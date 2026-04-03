@@ -12,30 +12,31 @@
     "gen-api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts"
   },
   "dependencies": {
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1",
-    "react-router-dom": "^6.26.2",
-    "react-markdown": "^9.0.1",
-    "react-force-graph": "^1.44.4",
-    "recharts": "^2.12.7",
-    "@codemirror/state": "^6.4.1",
-    "@codemirror/view": "^6.34.1",
     "@codemirror/commands": "^6.7.0",
     "@codemirror/lang-markdown": "^6.3.0",
-    "@codemirror/lang-yaml": "^6.1.1"
+    "@codemirror/lang-yaml": "^6.1.1",
+    "@codemirror/state": "^6.4.1",
+    "@codemirror/view": "^6.34.1",
+    "aframe": "^1.7.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-force-graph": "^1.44.4",
+    "react-markdown": "^9.0.1",
+    "react-router-dom": "^6.26.2",
+    "recharts": "^2.12.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.46.1",
+    "@testing-library/jest-dom": "^6.4.6",
+    "@testing-library/react": "^16.0.0",
     "@types/react": "^18.3.5",
     "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "jsdom": "^25.0.0",
+    "openapi-typescript": "^7.4.0",
     "typescript": "^5.5.3",
     "vite": "^5.4.2",
-    "vitest": "^2.0.5",
-    "@playwright/test": "^1.46.1",
-    "@vitejs/plugin-react": "^4.3.1",
-    "@testing-library/react": "^16.0.0",
-    "@testing-library/jest-dom": "^6.4.6",
-    "jsdom": "^25.0.0",
-    "openapi-typescript": "^7.4.0"
+    "vitest": "^2.0.5"
   },
   "overrides": {
     "three": "0.183.2"

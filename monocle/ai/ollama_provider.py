@@ -52,6 +52,10 @@ class OllamaProvider(AIProvider):
         self._embed_model = embed_model
         self._chat_model = chat_model
         self._base_url = base_url
+        # Do NOT set timeout here. For streaming responses, a hard HTTP timeout prevents
+        # legitimate slow responses (e.g., 2-3 min LLM generations). Instead, the chat
+        # router wraps streaming in asyncio.timeout(300) for timeout control at the app level.
+        # httpx default is 5 minutes, which provides a safety net.
         self._client = ollama.AsyncClient(host=base_url)
         # Track which models have been confirmed / pulled so we only check once
         self._ready_models: set[str] = set()

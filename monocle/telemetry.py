@@ -193,6 +193,44 @@ async def timed(histogram: Any, **attrs: Any) -> AsyncIterator[None]:
             pass
 
 
+def add_user_message_event(span: Any, content: str, max_length: int = 1000) -> None:
+    """Record a user.message span event for AI Toolkit Input/Output columns.
+
+    Allows the AI Toolkit to populate the "Input" column in the trace viewer.
+
+    Args:
+        span: OTel span object (can be None; no-op if so).
+        content: User message text to record.
+        max_length: Maximum characters to record (default 1000 to avoid bloating spans).
+    """
+    if not span:
+        return
+    try:
+        truncated = content[:max_length] if content else ""
+        span.add_event("user.message", {"message.content": truncated})
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def add_assistant_message_event(span: Any, content: str, max_length: int = 1000) -> None:
+    """Record an assistant.message span event for AI Toolkit Input/Output columns.
+
+    Allows the AI Toolkit to populate the "Output" column in the trace viewer.
+
+    Args:
+        span: OTel span object (can be None; no-op if so).
+        content: Assistant message text to record.
+        max_length: Maximum characters to record (default 1000 to avoid bloating spans).
+    """
+    if not span:
+        return
+    try:
+        truncated = content[:max_length] if content else ""
+        span.add_event("assistant.message", {"message.content": truncated})
+    except Exception:  # noqa: BLE001
+        pass
+
+
 #endregion
 
 # ---------------------------------------------------------------------------
@@ -202,6 +240,9 @@ async def timed(histogram: Any, **attrs: Any) -> AsyncIterator[None]:
 
 class _NoOpSpan:
     def set_attribute(self, key: str, value: Any) -> None:
+        pass
+
+    def add_event(self, name: str, attributes: dict | None = None) -> None:
         pass
 
 
