@@ -32,6 +32,37 @@ _meter = None
 _configured = False
 
 
+class _HealthCheckFilterSpanProcessor:
+    """Span processor that filters out /api/health traces before export.
+    
+    Wraps the real BatchSpanProcessor to drop spans where http.route == "/api/health".
+    This reduces trace noise while keeping application traces intact.
+    """
+
+    def __init__(self, wrapped_processor: Any) -> None:
+        self.wrapped_processor = wrapped_processor
+
+    def on_start(self, span: Any, parent_context: Any = None) -> None:
+        self.wrapped_processor.on_start(span, parent_context)
+
+    def on_end(self, span: Any) -> None:
+        # Filter: skip health check spans
+        if span.attributes.get("http.route") == "/api/health":
+            return
+        self.wrapped_processor.on_end(span)
+
+    def _on_ending(self, span: Any) -> None:
+        # Required by OTel SDK lifecycle — forward to wrapped processor
+        if hasattr(self.wrapped_processor, "_on_ending"):
+            self.wrapped_processor._on_ending(span)
+
+    def shutdown(self) -> None:
+        self.wrapped_processor.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self.wrapped_processor.force_flush(timeout_millis)
+
+
 def configure_telemetry(settings: "Settings") -> None:
     """Wire up TracerProvider, MeterProvider, and root-logger handler.
 
@@ -70,7 +101,9 @@ def configure_telemetry(settings: "Settings") -> None:
             )
 
         tracer_provider = TracerProvider(resource=resource)
-        tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+        batch_processor = BatchSpanProcessor(span_exporter)
+        filtered_processor = _HealthCheckFilterSpanProcessor(batch_processor)
+        tracer_provider.add_span_processor(filtered_processor)
         trace.set_tracer_provider(tracer_provider)
 
         # --- Metric exporter ---
