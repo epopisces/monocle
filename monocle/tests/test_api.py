@@ -65,6 +65,26 @@ class TestHealth:
         # watcher is None in test fixture → False
         assert body["watcher_running"] is False
 
+    def test_health_models_200(self, api_client: TestClient):
+        r = api_client.get("/api/health/models")
+        assert r.status_code == 200
+        body = _json(r)
+        assert "provider" in body
+        assert "provider_reachable" in body
+        assert "models" in body
+        assert isinstance(body["models"], list)
+
+    def test_health_models_structure(self, api_client: TestClient):
+        """Each model entry must have the expected fields."""
+        r = api_client.get("/api/health/models")
+        body = _json(r)
+        for m in body["models"]:
+            assert "name" in m
+            assert "role" in m
+            assert "available" in m
+            assert "loaded" in m
+            assert m["role"] in ("chat", "embed", "transcribe")
+
 
 # ===========================================================================
 # Notes

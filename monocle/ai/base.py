@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, AsyncIterator
 
 if TYPE_CHECKING:
-    from monocle.models import NoteMetadata
+    from monocle.models import NoteMetadata, ProviderModelsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -168,6 +168,7 @@ class AIProvider(ABC):
         messages: list[dict],
         stream: bool = False,
         tools: list[dict] | None = None,
+        tool_choice: dict | str | None = None,
     ) -> str | AsyncIterator[str]:
         """Send *messages* to the chat model.
 
@@ -180,6 +181,20 @@ class AIProvider(ABC):
         provider accumulates streaming tool-call deltas and emits the same
         JSON string as a single final chunk so the adapter can detect it.
         """
+
+    async def get_model_status(self) -> "ProviderModelsResponse":
+        """Return the availability and load state of all configured model roles.
+
+        The default implementation returns provider-unreachable with an empty
+        model list.  Subclasses override this to query provider-specific APIs.
+        """
+        from monocle.models import ProviderModelsResponse
+
+        return ProviderModelsResponse(
+            provider=self._provider_name,
+            provider_reachable=False,
+            models=[],
+        )
 
     async def detect_embed_dimensions(self) -> int:
         """Auto-detect embedding dimensions by performing a test embedding.

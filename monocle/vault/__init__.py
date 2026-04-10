@@ -378,10 +378,11 @@ class VaultLayer:
         note: Note,
         if_mtime: float | None = None,
     ) -> None:
-        """Write (create or overwrite) a note atomically.
+        """Write (update) a note atomically. Creates the file if it doesn't exist.
 
-        If the file already exists:
-        - Raises 409 if *if_mtime* is provided and does not match.
+        Primarily intended for updating existing notes. If the file does not exist,
+        creates it. If it does exist:
+        - Raises 409 if *if_mtime* is provided and does not match (optimistic concurrency).
         - Creates a shadow version in ``.versions/`` before overwriting.
 
         Raises:

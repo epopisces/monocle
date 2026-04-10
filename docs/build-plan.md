@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-02
-active-milestone: M27
+last-updated: 2026-04-09
+active-milestone: M33
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,10 +26,22 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M24 — OneNote Import Plugin
-**Last Completed:** M27 — Topbar Omnisearch (2026-04-02)
-**Note:** M25 (Voice Hardening), M26 (Teams), and future milestones are queued in order.
+**Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
+**Last Completed:** M32 — MCP-First: Chat Tool Adapter & Orchestration Cleanup (2026-04-09)
+**Note:** M24 (OneNote), M25 (Voice Hardening), M26 (Teams), and future milestones are queued after M28.
 **Blocked By:** None
+**Session Notes (M29-M32 Post-Completion Validation & Security Hardening):**
+- **Status:** COMPLETE (2026-04-09)
+- Conducted comprehensive security audit and quality review of MCP-First milestones (M29-M32). Identified and fixed 8 issues: 1 HIGH (SSRF in URL fetcher), 2 MEDIUM (exception disclosure in SSE stream, stale docs), 2 LOW (hard limit on note discovery, invalid note_type accepted), 3 coverage gaps (SSRF boundary tests, confidence=None path, MCP auth non-HTTP scope).
+- **Security Fixes:** Added `_is_private_url()` function with `ipaddress` module validation for SSRF protection (blocks loopback, private ranges 10/172/192, link-local 169.254/fe80::/10, multicast); exception handler in chat.py now returns generic message instead of raw exception to prevent information leakage; `fetch_url_text()` validates before HTTP request.
+- **UX/Data Quality Fixes:** `update_note()` agent tool now paginated (1000-item pages) to discover notes across entire vault (was hard-capped at 500); `create_note()` service validates note_type at boundary before template creation.
+- **Follow-up Hardening:** Resolved remaining review findings by blocking hostname-resolution and redirect-based SSRF, making `/api/chat` stop work on client disconnect, unifying MCP/chat search fallback behavior through the shared search service, and normalizing template aliases like `person`/`meeting`/`blank` at the create-note service boundary.
+- **Test Coverage:** Added 19 new backend tests total, including DNS/redirect SSRF cases, MemoryIndex no-AI search parity, note-type alias normalization, and disconnect-aware chat stream cancellation.
+- **Results:** 900 backend tests passing (baseline 881 → +19), 416 frontend tests passing, EXIT 0, no regressions, all security improvements validated.
+**Session Notes (M28 — Provider & Model Status Detection):**
+- **Status:** COMPLETE (2026-04-02)
+- Added provider reachability and model status detection to backend & frontend. Backend: `ModelStatus` + `ProviderModelsResponse` models; `get_model_status()` method on `AIProvider` ABC with provider-specific implementations (Ollama: `list()` + `ps()` APIs; Foundry: `models.list()`; Azure: reachability ping); `GET /api/health/models` endpoint. Frontend: model status polling (15s interval), SettingsModal model status panel with provider reachability and per-model rows, Topbar model status badges (green ✓ when loaded, amber ⏳ when cold-start, always shown when available). 
+- **807 backend tests passing (no regressions), 411 frontend tests passing, EXIT 0**
 **Session Notes (M27 — Topbar Omnisearch):**
 - **Status:** COMPLETE (2026-04-02)
 - Implemented omnisearch feature with always-accessible topbar search bar. Backend: `GET /api/search/omni` endpoint with pagination loop (scans full vault), optimized parsing (filename/frontmatter use NoteRef fields only; body search only reads needed notes), and rate limiting (60 req/min). Frontend: OmniSearch component (Ctrl+E focus, 300ms debounce, keyboard nav), integrated into Topbar, SearchScreen URL params handling. **April 2 security/performance hardening:** Fixed keyboard navigation bug (semanticIdx collision), added @limiter.limit decorator, implemented pagination for unbounded vault scan, optimized parse strategy reducing I/O for 90%+ of queries (filename/frontmatter hits avoid vault.read_note()).
@@ -132,10 +144,16 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M21 | Integration Testing & Obsidian Compatibility                   | COMPLETE    |
 | M22 | Process Manager & Dev Automation                               | COMPLETE    |
 | M23 | Organization Note Type & Cross-Linked People Backreferences    | COMPLETE    |
-| M24 | OneNote Import Plugin                                          | ACTIVE      |
+| M24 | OneNote Import Plugin                                          | NOT STARTED |
 | M25 | Voice Feature Hardening & Cross-Browser Compatibility          | NOT STARTED |
 | M26 | Teams Integration                                              | NOT STARTED |
 | M27 | Topbar Omnisearch                                              | COMPLETE    |
+| M28 | Provider & Model Status Detection                              | COMPLETE    |
+| M29 | MCP-First: Contract Freeze & Canonical Tool Schema             | COMPLETE    |
+| M30 | MCP-First: Shared Service Layer Extraction                     | COMPLETE    |
+| M31 | MCP-First: MCP Canonicalization                                | COMPLETE    |
+| M32 | MCP-First: Chat Tool Adapter & Orchestration Cleanup           | COMPLETE    |
+| M33 | MCP-First: Third-Party MCP Composition                         | NOT STARTED |
 
 ---
 
@@ -839,6 +857,65 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 Fast omnisearch feature with always-accessible topbar search bar. Backend: pagination loop (scans full vault), optimized parsing (filename/frontmatter use NoteRef fields only; body search only reads needed notes), 60 req/min rate limit. Frontend: OmniSearch component (Ctrl+E, 300ms debounce, keyboard nav), integrated Topbar, SearchScreen URL params. April 2 hardening: keyboard nav bug fixed, rate limiting added, full vault scan enabled, parse I/O optimized (90%+ of queries avoid vault.read_note).
 
 **Full details:** [docs/milestones.md#m27-topbar-omnisearch](milestones.md#m27-topbar-omnisearch)
+
+---
+
+### M29: MCP-First: Contract Freeze & Canonical Tool Schema
+
+**Status:** COMPLETE (2026-04-08)
+
+Established single source-of-truth contract for all 7 canonical Monocle data operations. Audited both `VaultTools` (6 agent tools) and `mcp_server.py` (7 MCP tools), documented all behavioral divergences, and recorded the `fetch_and_summarize_url` → `create_reference_from_url` disposition decision. No code changes.
+
+**Full details:** [docs/tool-contracts.md](tool-contracts.md)
+
+---
+
+### M30: MCP-First: Shared Service Layer Extraction
+
+**Status:** COMPLETE (2026-04-09)
+Extracted all business logic into `monocle/services/` (search, notes, graph, references, ingest). MCP tools and agent tools refactored to thin wrappers. 24 service-level tests added. 852 tests passing.
+**Full details:** [docs/milestones.md#m30-mcp-first-shared-service-layer-extraction](milestones.md#m30-mcp-first-shared-service-layer-extraction)
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M31: MCP-First: MCP Canonicalization
+
+**Status:** COMPLETE (2026-04-09)
+MCP tool surface established as the authoritative schema definition for all 7 Monocle data operations. Return contracts frozen in `docs/tool-contracts.md`. 32 contract parity tests added. `_normalize_tags` consolidated into `monocle/services/tags.py`. 884 tests passing.
+**Full details:** [docs/milestones.md#m31-mcp-first-mcp-canonicalization](milestones.md#m31-mcp-first-mcp-canonicalization)
+
+---
+
+### M32: MCP-First: Chat Tool Adapter & Orchestration Cleanup
+
+**Status:** COMPLETE (2026-04-09)
+Agent tool names aligned with canonical MCP names (`fetch_and_summarize_url` → `create_reference_from_url`, `get_person_graph` → `get_graph`). VaultTools verified as thin adapters. Chat-only orchestration confirmed in `routers/chat.py`. 6 adapter↔MCP parity tests added. 8 obsolete duplicate tests removed. 881 backend tests, 416 frontend tests passing.
+**Full details:** [docs/milestones.md#m32-mcp-first-chat-tool-adapter--orchestration-cleanup](milestones.md#m32-mcp-first-chat-tool-adapter--orchestration-cleanup)
+
+**Test commands:**
+```
+uv run python -m pytest monocle/tests/ -x --tb=short -q
+cd frontend && npm run test -- --run
+```
+
+---
+
+### M33: MCP-First: Third-Party MCP Composition
+
+**Status:** NOT STARTED — depends on M32
+
+Add explicit support for agent composition across internal Monocle and external third-party MCP servers.
+
+**Deliverables:**
+
+- [ ] Agent planner distinguishes Monocle-owned vs third-party tools
+- [ ] External MCP server configuration in `config.yaml`
+- [ ] At least one third-party MCP integration tested E2E
+- [ ] Documentation: how to add external MCP servers
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 
 ---
 

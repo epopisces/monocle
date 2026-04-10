@@ -9,6 +9,7 @@ export interface ChatRequest {
   messages: ChatMessage[]
   session_id?: string
   tool_hint?: string
+  fetch_urls?: string[]
 }
 
 /** SSE event payloads */

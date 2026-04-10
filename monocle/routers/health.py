@@ -1,4 +1,4 @@
-"""monocle/routers/health.py — GET /api/health"""
+"""monocle/routers/health.py — GET /api/health, GET /api/health/models"""
 from __future__ import annotations
 
 import asyncio
@@ -6,6 +6,8 @@ import logging
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
+
+from monocle.models import ModelStatus, ProviderModelsResponse  # noqa: F401 — re-exported for OpenAPI
 
 router = APIRouter(tags=["health"])
 logger = logging.getLogger(__name__)
@@ -75,3 +77,26 @@ async def health(request: Request) -> HealthResponse:
         watcher_running=watcher_running,
         telemetry_endpoint=telemetry_endpoint,
     )
+
+
+@router.get("/health/models", response_model=ProviderModelsResponse)
+async def health_models(request: Request) -> ProviderModelsResponse:
+    """Return configured AI provider and per-model availability / load status.
+
+    This endpoint is polled by the frontend to show which models are running
+    (loaded in memory) vs. merely available (downloaded but not warm).
+    A model that is available but not loaded will incur a cold-start delay on
+    first use.
+    """
+    ai = getattr(request.app.state, "ai", None)
+    settings = getattr(request.app.state, "settings", None)
+
+    if ai is None:
+        provider_name = settings.ai.provider if settings else "unknown"
+        return ProviderModelsResponse(
+            provider=provider_name,
+            provider_reachable=False,
+            models=[],
+        )
+
+    return await ai.get_model_status()

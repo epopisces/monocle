@@ -250,6 +250,77 @@ class TestOllamaProvider:
         # should return defaults, not raise
         assert result.type == "other"
 
+    # ------------------------------------------------------------------
+    # get_model_status tests
+    # ------------------------------------------------------------------
+
+    @pytest.mark.asyncio
+    async def test_get_model_status_provider_reachable(self):
+        """When ollama list/ps succeed, it reports provider reachable."""
+        mock_client = AsyncMock()
+        mock_client.list.return_value = MagicMock(
+            models=[MagicMock(model="llama3.2"), MagicMock(model="nomic-embed-text")]
+        )
+        mock_client.ps.return_value = MagicMock(
+            models=[MagicMock(model="llama3.2")]
+        )
+        provider = self._make_provider(mock_client)
+
+        result = await provider.get_model_status()
+
+        assert result.provider_reachable is True
+        assert result.provider == "ollama"
+        chat = next(m for m in result.models if m.role == "chat")
+        embed = next(m for m in result.models if m.role == "embed")
+        assert chat.available is True
+        assert chat.loaded is True
+        assert embed.available is True
+        assert embed.loaded is False  # not in ps output
+
+    @pytest.mark.asyncio
+    async def test_get_model_status_provider_unreachable(self):
+        """When ollama list() raises, it reports provider unreachable."""
+        mock_client = AsyncMock()
+        mock_client.list.side_effect = Exception("connection refused")
+        provider = self._make_provider(mock_client)
+
+        result = await provider.get_model_status()
+
+        assert result.provider_reachable is False
+        assert result.models == []
+
+    @pytest.mark.asyncio
+    async def test_get_model_status_model_not_available(self):
+        """Model not in the local list is reported as unavailable and not loaded."""
+        mock_client = AsyncMock()
+        mock_client.list.return_value = MagicMock(models=[])  # nothing pulled
+        mock_client.ps.return_value = MagicMock(models=[])
+        provider = self._make_provider(mock_client)
+
+        result = await provider.get_model_status()
+
+        assert result.provider_reachable is True
+        for m in result.models:
+            assert m.available is False
+            assert m.loaded is False
+
+    @pytest.mark.asyncio
+    async def test_get_model_status_ps_failure_is_non_fatal(self):
+        """If ps() fails, available is still reported (just loaded=False for all)."""
+        mock_client = AsyncMock()
+        mock_client.list.return_value = MagicMock(
+            models=[MagicMock(model="llama3.2"), MagicMock(model="nomic-embed-text")]
+        )
+        mock_client.ps.side_effect = Exception("ps not supported")
+        provider = self._make_provider(mock_client)
+
+        result = await provider.get_model_status()
+
+        assert result.provider_reachable is True
+        for m in result.models:
+            assert m.available is True
+            assert m.loaded is False  # ps failed → none known loaded
+
 
 #endregion
 
@@ -660,6 +731,188 @@ class TestAzureChatWithTools:
         )
         parsed = _json.loads(result)
         assert parsed["tool_calls"][0]["function"]["name"] == "get_stats"
+
+
+class TestToolChoiceOllama:
+    """OllamaProvider enforces tool_choice via schema filtering."""
+
+    def _make_provider(self):
+        from monocle.ai.ollama_provider import OllamaProvider
+
+        mock_client = AsyncMock()
+        with patch("monocle.ai.ollama_provider.ollama.AsyncClient", return_value=mock_client):
+            provider = OllamaProvider(embed_model="nomic-embed-text", chat_model="llama3.2")
+        provider._client = mock_client
+        provider._ready_models.add("llama3.2")
+        return provider, mock_client
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_filters_to_single_tool(self):
+        """tool_choice filters the tools list to only the named function."""
+        provider, mock_client = self._make_provider()
+        mock_client.chat.return_value = MagicMock(message=MagicMock(content="ok", tool_calls=None))
+
+        all_tools = [
+            {"type": "function", "function": {"name": "search_vault", "parameters": {}}},
+            {"type": "function", "function": {"name": "read_note", "parameters": {}}},
+        ]
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=all_tools,
+            tool_choice={"type": "function", "function": {"name": "search_vault"}},
+        )
+        call_kwargs = mock_client.chat.call_args.kwargs
+        assert len(call_kwargs["tools"]) == 1
+        assert call_kwargs["tools"][0]["function"]["name"] == "search_vault"
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_unknown_name_passes_all_tools(self):
+        """When the hinted name doesn't match any tool, all tools are forwarded unfiltered."""
+        provider, mock_client = self._make_provider()
+        mock_client.chat.return_value = MagicMock(message=MagicMock(content="ok", tool_calls=None))
+
+        all_tools = [
+            {"type": "function", "function": {"name": "search_vault", "parameters": {}}},
+        ]
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=all_tools,
+            tool_choice={"type": "function", "function": {"name": "nonexistent_tool"}},
+        )
+        call_kwargs = mock_client.chat.call_args.kwargs
+        # Falls back to all tools when hint doesn't match any name
+        assert len(call_kwargs["tools"]) == 1
+        assert call_kwargs["tools"][0]["function"]["name"] == "search_vault"
+
+    @pytest.mark.asyncio
+    async def test_no_tool_choice_passes_all_tools(self):
+        """Without tool_choice, all tools are forwarded unchanged."""
+        provider, mock_client = self._make_provider()
+        mock_client.chat.return_value = MagicMock(message=MagicMock(content="ok", tool_calls=None))
+
+        all_tools = [
+            {"type": "function", "function": {"name": "search_vault", "parameters": {}}},
+            {"type": "function", "function": {"name": "read_note", "parameters": {}}},
+        ]
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=all_tools,
+        )
+        call_kwargs = mock_client.chat.call_args.kwargs
+        assert len(call_kwargs["tools"]) == 2
+
+
+class TestToolChoiceFoundryLocal:
+    """FoundryLocalProvider forwards tool_choice to the OpenAI SDK."""
+
+    def _make_provider(self):
+        from monocle.ai.foundry_local_provider import FoundryLocalProvider
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = FoundryLocalProvider(
+                base_url="http://localhost:5272",
+                api_key="local",
+                embed_model="nomic-embed-text",
+                chat_model="llama3.2",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_forwarded_non_stream(self):
+        """tool_choice is forwarded to chat.completions.create in non-streaming mode."""
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        tc = {"type": "function", "function": {"name": "read_note"}}
+        await provider.chat(
+            [{"role": "user", "content": "read"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "read_note", "parameters": {}}}],
+            tool_choice=tc,
+        )
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["tool_choice"] == tc
+
+    @pytest.mark.asyncio
+    async def test_no_tool_choice_not_forwarded(self):
+        """Without tool_choice, the SDK is not passed a tool_choice key."""
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "search_vault", "parameters": {}}}],
+        )
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert "tool_choice" not in call_kwargs
+
+
+class TestToolChoiceAzure:
+    """AzureOpenAIProvider forwards tool_choice to the OpenAI SDK."""
+
+    def _make_provider(self):
+        from monocle.ai.azure_provider import AzureOpenAIProvider
+
+        with patch("openai.AsyncAzureOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = AzureOpenAIProvider(
+                api_key="test-key",
+                endpoint="https://example.openai.azure.com",
+                api_version="2024-02-01",
+                embed_deployment="text-embedding-3-large",
+                chat_deployment="gpt-4o",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_forwarded_non_stream(self):
+        """tool_choice is forwarded to Azure chat.completions.create."""
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        tc = {"type": "function", "function": {"name": "search_vault"}}
+        await provider.chat(
+            [{"role": "user", "content": "search"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "search_vault", "parameters": {}}}],
+            tool_choice=tc,
+        )
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["tool_choice"] == tc
+
+    @pytest.mark.asyncio
+    async def test_no_tool_choice_not_forwarded(self):
+        """Without tool_choice, no tool_choice key in Azure SDK call."""
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+        )
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert "tool_choice" not in call_kwargs
 
 
 #endregion

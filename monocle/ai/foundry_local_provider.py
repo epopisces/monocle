@@ -19,6 +19,7 @@ from monocle.telemetry import get_meter, span, timed
 
 if TYPE_CHECKING:
     from monocle.ai.transcription import TranscriptionProvider
+    from monocle.models import ProviderModelsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,7 @@ class FoundryLocalProvider(AIProvider):
         messages: list[dict],
         stream: bool = False,
         tools: list[dict] | None = None,
+        tool_choice: dict | str | None = None,
     ) -> str | AsyncIterator[str]:
         attrs = {"ai.provider": self._provider_name, "ai.model": self._chat_model}
         if not stream:
@@ -120,6 +122,8 @@ class FoundryLocalProvider(AIProvider):
                     kwargs: dict = {"model": self._chat_model, "messages": messages, "stream": False}  # type: ignore[assignment]
                     if tools:
                         kwargs["tools"] = tools
+                    if tool_choice:
+                        kwargs["tool_choice"] = tool_choice
                     response = await self._client.chat.completions.create(**kwargs)
                     message = response.choices[0].message
                     if message.tool_calls:
@@ -138,9 +142,9 @@ class FoundryLocalProvider(AIProvider):
                         })
                     return message.content or ""
         else:
-            return self._stream_chat(messages, tools)
+            return self._stream_chat(messages, tools, tool_choice)
 
-    async def _stream_chat(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[str]:  # type: ignore[override]
+    async def _stream_chat(self, messages: list[dict], tools: list[dict] | None = None, tool_choice: dict | str | None = None) -> AsyncIterator[str]:  # type: ignore[override]
         # Use the synchronous OTel span directly — async context managers are not
         # compatible with async generator functions.
         with _open_span(
@@ -151,6 +155,8 @@ class FoundryLocalProvider(AIProvider):
             create_kwargs: dict = {"model": self._chat_model, "messages": messages, "stream": True}  # type: ignore[assignment]
             if tools:
                 create_kwargs["tools"] = tools
+            if tool_choice:
+                create_kwargs["tool_choice"] = tool_choice
             stream = await self._client.chat.completions.create(**create_kwargs)
             accumulated: dict[int, dict] = {}
             async for chunk in stream:
@@ -183,3 +189,34 @@ class FoundryLocalProvider(AIProvider):
 
     # transcribe() is inherited from AIProvider.transcribe() which delegates to
     # self._transcription_provider (NativeOpenAITranscriptionProvider by default).
+
+    async def get_model_status(self) -> "ProviderModelsResponse":  # type: ignore[override]
+        """Query Foundry Local's OpenAI-compatible /v1/models endpoint."""
+        from monocle.models import ModelStatus, ProviderModelsResponse
+
+        try:
+            response = await self._client.models.list()
+            available_ids = {m.id for m in response.data}
+        except Exception as exc:
+            logger.debug("[AI] FoundryLocal models.list() failed: %s", exc)
+            return ProviderModelsResponse(
+                provider=self._provider_name,
+                provider_reachable=False,
+                models=[],
+            )
+
+        def _status(name: str, role: str) -> ModelStatus:
+            avail = name in available_ids
+            # Foundry Local auto-loads models on demand — treat available=loaded
+            return ModelStatus(name=name, role=role, available=avail, loaded=avail)  # type: ignore[arg-type]
+
+        models = [
+            _status(self._chat_model, "chat"),
+            _status(self._embed_model, "embed"),
+            _status(self._transcribe_model, "transcribe"),
+        ]
+        return ProviderModelsResponse(
+            provider=self._provider_name,
+            provider_reachable=True,
+            models=models,
+        )

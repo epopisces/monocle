@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import TYPE_CHECKING, Any, AsyncIterable
 
 from agent_framework import (
@@ -89,9 +90,10 @@ class _AIProviderChatClient(BaseChatClient):
 
     OTEL_PROVIDER_NAME = "monocle_ai_provider"
 
-    def __init__(self, ai: "AIProvider") -> None:
+    def __init__(self, ai: "AIProvider", tool_hint: str | None = None) -> None:
         super().__init__()
         self._ai = ai
+        self._tool_hint = tool_hint
 
     @staticmethod
     def _normalize_tool_call_arguments(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -217,10 +219,15 @@ class _AIProviderChatClient(BaseChatClient):
 
         # AIProvider.chat with stream=False returns a str or AsyncIterator.
         # We always pass stream=False for the non-streaming path.
+        tool_choice: dict | None = None
+        if self._tool_hint and tools and _is_first_tool_call_turn(messages):
+            tool_choice = {"type": "function", "function": {"name": self._tool_hint}}
+            logger.debug("[AGENT] First-turn tool policy: tool_choice=%s", self._tool_hint)
         raw = await self._ai.chat(
             normalized_messages,
             stream=False,
             tools=tools,
+            tool_choice=tool_choice,
         )
 
         # raw is either a plain str or (fallback) an AsyncIterator — consume it
@@ -265,10 +272,15 @@ class _AIProviderChatClient(BaseChatClient):
         normalized_messages = self._normalize_tool_call_arguments(dict_messages)
         tools = self._build_openai_tools(chat_options)
 
+        tool_choice: dict | None = None
+        if self._tool_hint and tools and _is_first_tool_call_turn(messages):
+            tool_choice = {"type": "function", "function": {"name": self._tool_hint}}
+            logger.debug("[AGENT] First-turn tool policy: tool_choice=%s", self._tool_hint)
         stream = await self._ai.chat(
             normalized_messages,
             stream=True,
             tools=tools,
+            tool_choice=tool_choice,
         )
 
         if isinstance(stream, str):
@@ -331,20 +343,82 @@ def _parse_arguments(args: dict | str | None) -> dict:
 def _try_parse_tool_calls(raw: str) -> list[dict] | None:
     """Attempt to extract tool calls from a raw LLM response string.
 
-    Some providers (particularly when accessed via AIProvider.chat with a
-    schema-unaware call) embed tool call JSON inline.  This helper tries
-    to detect that pattern; returns None if not a tool call response.
+    Handles several formats local models emit:
+
+    1. Clean JSON:        {"tool_calls": [...]}
+    2. Fenced code block: ```json\n{"tool_calls": [...]}\n```
+    3. Embedded in prose: "Sure! {"tool_calls": [...]} Let me know."
+
+    Returns None if no tool call structure is detected.
+    Logs a warning when a ``tool_calls`` pattern is present but unparseable
+    so that silent failures are visible in logs.
     """
     stripped = raw.strip()
-    if not stripped.startswith("{"):
+    if not stripped:
         return None
-    try:
-        data = json.loads(stripped)
-        if isinstance(data, dict) and "tool_calls" in data:
-            return data["tool_calls"]
-    except (json.JSONDecodeError, KeyError):
-        pass
+
+    # Strategy 1: direct clean JSON — fast path
+    if stripped.startswith("{"):
+        try:
+            data = json.loads(stripped)
+            if isinstance(data, dict) and "tool_calls" in data:
+                return data["tool_calls"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Strategy 2: fenced code block (```json ... ``` or ``` ... ```)
+    fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, re.DOTALL)
+    if fenced_match:
+        try:
+            data = json.loads(fenced_match.group(1))
+            if isinstance(data, dict) and "tool_calls" in data:
+                return data["tool_calls"]
+        except (json.JSONDecodeError, KeyError):
+            pass
+
+    # Strategy 3: JSON object embedded in prose — find '{"tool_calls"' by scanning
+    brace_pos = stripped.find('{"tool_calls"')
+    if brace_pos != -1:
+        depth = 0
+        for i, ch in enumerate(stripped[brace_pos:], brace_pos):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = stripped[brace_pos : i + 1]
+                    try:
+                        data = json.loads(candidate)
+                        if isinstance(data, dict) and "tool_calls" in data:
+                            logger.debug("_try_parse_tool_calls: extracted tool calls from embedded JSON")
+                            return data["tool_calls"]
+                    except (json.JSONDecodeError, KeyError):
+                        pass
+                    break
+
+    # Warn if the keyword appears but nothing could be extracted
+    if "tool_calls" in stripped:
+        logger.warning(
+            "_try_parse_tool_calls: response contains 'tool_calls' but could not be parsed; "
+            "preview: %.120s",
+            stripped,
+        )
+
     return None
+
+
+def _is_first_tool_call_turn(messages: list["ChatMessage"]) -> bool:
+    """Return True if no tool invocations have occurred yet in this conversation.
+
+    The adapter uses this to decide whether to enforce the first-turn tool policy.
+    ``tool_choice`` is only passed to the provider on the very first LLM call;
+    subsequent turns (after at least one FunctionCallContent) are unconstrained.
+    """
+    for msg in messages:
+        for content in msg.contents:
+            if isinstance(content, (FunctionCallContent, FunctionResultContent)):
+                return False
+    return True
 
 
 #endregion
@@ -354,17 +428,14 @@ def _try_parse_tool_calls(raw: str) -> list[dict] | None:
 # ---------------------------------------------------------------------------
 
 
-# Allowed tool_hint values — must match VaultTools method names
+# Allowed tool_hint values — must match VaultTools method names (canonical MCP names)
 _ALLOWED_TOOL_HINTS = frozenset({
     "search_vault",
     "read_note",
-    "write_note",
-    "append_to_note",
+    "update_note",
     "create_note",
-    "fetch_and_summarize_url",
-    "get_stats",
-    "list_notes",
-    "get_person_graph",
+    "create_reference_from_url",
+    "get_graph",
 })
 
 
@@ -377,7 +448,7 @@ def create_chat_agent(
     reindex_queue: "ReindexQueue | None" = None,
     tool_hint: str | None = None,
 ):
-    """Create a ``ChatAgent`` wired with all 8 vault tools.
+    """Create a ``ChatAgent`` wired with all 6 vault tools (canonical MCP names).
 
     Args:
         ai: The configured ``AIProvider`` instance.
@@ -388,7 +459,7 @@ def create_chat_agent(
         reindex_queue: Optional ``ReindexQueue`` for triggering re-indexing when notes are created/updated.
 
     Returns:
-        A ready-to-use ``ChatAgent`` with all 7 tools registered.
+        A ready-to-use ``ChatAgent`` with all 6 tools registered.
     """
     from agent_framework import ChatAgent
 
@@ -397,7 +468,7 @@ def create_chat_agent(
     _configure_agent_otel(settings)
 
     tool_registry = VaultTools(vault=vault, index=index, ai=ai, graph_builder=graph_builder, reindex_queue=reindex_queue)
-    client = _AIProviderChatClient(ai=ai)
+    client = _AIProviderChatClient(ai=ai, tool_hint=tool_hint)
 
     base_instructions = (
             "You are Monocle, a personal knowledge assistant. "
@@ -409,16 +480,15 @@ def create_chat_agent(
             "- To RETRIEVE or LOOK UP notes (e.g. 'What are my notes on X?', "
             "'What do I know about Y?', 'Tell me about Z'): use search_vault, "
             "then read_note to get full details of the most relevant result.\n"
-            "- To ADD or APPEND new information to an existing note "
+            "- To ADD, APPEND, or MODIFY information in an existing note "
             "(e.g. 'add to my note on X', 'update my note about Y with <new info>'): "
-            "use append_to_note — pass the query AND the new information as plain text "
-            "(never as JSON). The tool will intelligently merge the new content with the "
-            "existing note body.\n"
+            "use update_note — pass 'body' (the new text, never as JSON) and either "
+            "'file_path' (preferred, from a prior search_vault/read_note result) or "
+            "'query' (the note name/topic to find). The tool intelligently merges new "               "content with the existing note body using AI.\n"
             "- To CREATE a brand-new note: use create_note.\n"
-            "- For person relationship graphs: use get_person_graph.\n"
-            "- To CREATE A REFERENCE NOTE FROM A URL: use fetch_and_summarize_url. "
-            "When a user asks to capture, save, or create a reference note for a URL, "
-            "ALWAYS use fetch_and_summarize_url — never use create_note with made-up content. "
+            "- For person relationship graphs: use get_graph.\n"
+            "- To CREATE A REFERENCE NOTE FROM A URL: use create_reference_from_url. "
+            "Never use create_note with made-up content. "
             "The tool fetches the page, generates an AI summary, and creates a reference note. "
             "The tool returns file_path, title, and summary (the AI-generated note body). "
             "Inform the user that a reference note has been created and saved to that file path, "

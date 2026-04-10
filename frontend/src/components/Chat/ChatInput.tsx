@@ -1,11 +1,11 @@
 import React, { useRef, useState, forwardRef, useMemo } from 'react'
 import './ChatInput.css'
 
-// Detect http/https URLs in the input text
-const URL_RE = /https?:\/\/[^\s)>\]"']+/
+// Detect all http/https URLs in the input text (global flag — finds every match)
+const URL_RE_GLOBAL = /https?:\/\/[^\s)>\]"']+/g
 
 interface Props {
-  onSend: (content: string, toolHint?: string) => void
+  onSend: (content: string, toolHint?: string, fetchUrls?: string[]) => void
   onVoiceClick?: () => void
   disabled?: boolean
 }
@@ -17,6 +17,7 @@ export interface ChatInputHandle {
 
 const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, disabled }, ref) => {
   const [value, setValue] = useState('')
+  const [optedOutUrls, setOptedOutUrls] = useState<Set<string>>(new Set())
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // History navigation — shell-like ArrowUp/Down through sent messages
@@ -24,11 +25,41 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const historyIndexRef = useRef<number>(-1) // -1 = not browsing
   const draftRef = useRef<string>('')       // saved value before browsing started
 
-  // Detected URL (null when none present in current value)
-  const detectedUrl = useMemo<string | null>(() => {
-    const m = URL_RE.exec(value)
-    return m ? m[0] : null
+  // All unique URLs found in the current input value
+  const detectedUrls = useMemo<string[]>(() => {
+    const matches = [...value.matchAll(URL_RE_GLOBAL)]
+    const seen = new Set<string>()
+    const result: string[] = []
+    for (const m of matches) {
+      if (!seen.has(m[0])) {
+        seen.add(m[0])
+        result.push(m[0])
+      }
+    }
+    return result
   }, [value])
+
+  // Prune opted-out set to only URLs still present in the input (removes stale entries)
+  const activeOptedOut = useMemo<Set<string>>(() => {
+    const urlSet = new Set(detectedUrls)
+    const pruned = new Set<string>()
+    for (const u of optedOutUrls) {
+      if (urlSet.has(u)) pruned.add(u)
+    }
+    return pruned
+  }, [detectedUrls, optedOutUrls])
+
+  const toggleOptOut = (url: string) => {
+    setOptedOutUrls(prev => {
+      const next = new Set(prev)
+      if (next.has(url)) {
+        next.delete(url)
+      } else {
+        next.add(url)
+      }
+      return next
+    })
+  }
 
   // Expose methods for parent to populate the input
   React.useImperativeHandle(ref, () => ({
@@ -60,8 +91,10 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     }
     historyIndexRef.current = -1
     draftRef.current = ''
-    onSend(trimmed, toolHint)
+    const fetchUrls = detectedUrls.filter(u => !activeOptedOut.has(u))
+    onSend(trimmed, toolHint, fetchUrls.length > 0 ? fetchUrls : undefined)
     setValue('')
+    setOptedOutUrls(new Set())
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
     }
@@ -78,7 +111,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      // Send without tool hint; if a URL is detected, the UI prompt gives user choice
+      // Send; fetchUrls are computed automatically from opted-in URL pills
       doSend()
       return
     }
@@ -135,31 +168,29 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
 
   return (
     <div className="chat-input">
-      {detectedUrl && (
-        <div className="chat-input__url-suggestion" data-testid="url-suggestion">
-          <span className="chat-input__url-suggestion-text">
-            🔗 URL detected — fetch &amp; summarize?
-          </span>
-          <div className="chat-input__url-suggestion-actions">
-            <button
-              className="chat-input__url-btn chat-input__url-btn--yes"
-              onClick={() => doSend('fetch_and_summarize_url')}
-              disabled={disabled}
-              data-testid="url-fetch-btn"
-              type="button"
-            >
-              Yes, summarize
-            </button>
-            <button
-              className="chat-input__url-btn chat-input__url-btn--no"
-              onClick={() => doSend()}
-              disabled={disabled}
-              data-testid="url-skip-btn"
-              type="button"
-            >
-              No thanks
-            </button>
-          </div>
+      {detectedUrls.length > 0 && (
+        <div className="chat-input__url-pills" data-testid="url-pills">
+          {detectedUrls.map(url => {
+            const isOptedOut = activeOptedOut.has(url)
+            let label = url
+            try { label = new URL(url).hostname } catch { label = url.slice(0, 40) }
+            return (
+              <button
+                key={url}
+                className={`chat-input__url-pill${isOptedOut ? ' chat-input__url-pill--opted-out' : ''}`}
+                onClick={() => toggleOptOut(url)}
+                disabled={disabled}
+                title={isOptedOut ? `Skip fetch (click to re-enable): ${url}` : `Will fetch & summarize (click to skip): ${url}`}
+                data-testid={isOptedOut ? 'url-pill-opted-out' : 'url-pill-active'}
+                type="button"
+              >
+                🔗 {label}
+                <span className="chat-input__url-pill-x" aria-hidden="true">
+                  {isOptedOut ? '↩' : '×'}
+                </span>
+              </button>
+            )
+          })}
         </div>
       )}
       <div className="chat-input__row">

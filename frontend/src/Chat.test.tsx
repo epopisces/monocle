@@ -54,7 +54,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'hello' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    expect(mockSend).toHaveBeenCalledWith('hello', undefined)
+    expect(mockSend).toHaveBeenCalledWith('hello', undefined, undefined)
   })
 
   it('does not call onSend on Shift+Enter', () => {
@@ -70,7 +70,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'world' } })
     fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith('world', undefined)
+    expect(mockSend).toHaveBeenCalledWith('world', undefined, undefined)
   })
 
   it('does not send empty or whitespace-only input', () => {
@@ -97,54 +97,101 @@ describe('ChatInput', () => {
     expect(screen.queryByTestId('voice-btn')).toBeNull()
   })
 
-  it('shows URL suggestion strip when message contains a URL', () => {
+  it('shows URL pills when message contains a URL', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'Check out https://example.com/page' } })
-    expect(screen.getByTestId('url-suggestion')).toBeInTheDocument()
-    expect(screen.getByTestId('url-fetch-btn')).toBeInTheDocument()
-    expect(screen.getByTestId('url-skip-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('url-pills')).toBeInTheDocument()
+    // The pill should be active (opted-in) by default
+    expect(screen.getByTestId('url-pill-active')).toBeInTheDocument()
   })
 
-  it('does not show URL suggestion strip when message has no URL', () => {
+  it('does not show URL pills when message has no URL', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'just a plain message' } })
-    expect(screen.queryByTestId('url-suggestion')).toBeNull()
+    expect(screen.queryByTestId('url-pills')).toBeNull()
   })
 
-  it('Fetch & summarize button calls onSend with fetch_and_summarize_url hint', () => {
+  it('shows a pill for each distinct URL', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://foo.com and https://bar.com' } })
+    expect(screen.getAllByTestId('url-pill-active')).toHaveLength(2)
+  })
+
+  it('deduplicates repeated URLs in pills', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://example.com https://example.com' } })
+    expect(screen.getAllByTestId('url-pill-active')).toHaveLength(1)
+  })
+
+  it('clicking an active pill opts it out (dims it)', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'https://example.com' } })
-    fireEvent.click(screen.getByTestId('url-fetch-btn'))
-    expect(mockSend).toHaveBeenCalledWith('https://example.com', 'fetch_and_summarize_url')
+    const pill = screen.getByTestId('url-pill-active')
+    fireEvent.click(pill)
+    expect(screen.getByTestId('url-pill-opted-out')).toBeInTheDocument()
+    expect(screen.queryByTestId('url-pill-active')).toBeNull()
   })
 
-  it('Skip button calls onSend without tool hint', () => {
+  it('clicking an opted-out pill re-activates it', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'https://example.com' } })
-    fireEvent.click(screen.getByTestId('url-skip-btn'))
-    expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined)
+    fireEvent.click(screen.getByTestId('url-pill-active'))
+    fireEvent.click(screen.getByTestId('url-pill-opted-out'))
+    expect(screen.getByTestId('url-pill-active')).toBeInTheDocument()
   })
 
-  it('Enter key with URL sends without tool hint (requires user to click "Yes")', () => {
+  it('Send button passes opted-in URLs as fetchUrls', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'Add a note for https://example.com' } })
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    // Should send with NO hint — hint only applied if user clicks "Yes, summarize" button
-    expect(mockSend).toHaveBeenCalledWith('Add a note for https://example.com', undefined)
-  })
-
-  it('Send button with URL sends without tool hint (requires user to click "Yes")', () => {
-    render(<ChatInput onSend={mockSend} />)
-    const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'https://example.com/page' } })
+    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
     fireEvent.click(screen.getByTestId('send-btn'))
-    // Should send with NO hint — hint only applied if user clicks "Yes, summarize" button
-    expect(mockSend).toHaveBeenCalledWith('https://example.com/page', undefined)
+    expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined, ['https://example.com'])
+  })
+
+  it('Enter key passes opted-in URLs as fetchUrls (default-on)', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'Check this https://example.com' } })
+    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
+    expect(mockSend).toHaveBeenCalledWith('Check this https://example.com', undefined, ['https://example.com'])
+  })
+
+  it('opting out a URL removes it from fetchUrls', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
+    fireEvent.click(screen.getByTestId('url-pill-active'))
+    fireEvent.click(screen.getByTestId('send-btn'))
+    // fetchUrls should be undefined since all URLs opted-out
+    expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined, undefined)
+  })
+
+  it('opting out one URL in multi-URL message only excludes that URL', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'https://foo.com and https://bar.com' } })
+    // Opt out the first pill
+    const pills = screen.getAllByTestId('url-pill-active')
+    fireEvent.click(pills[0])
+    fireEvent.click(screen.getByTestId('send-btn'))
+    const call = mockSend.mock.calls[0]
+    // fetchUrls should contain only the second URL
+    expect(call[2]).toHaveLength(1)
+    expect(call[2][0]).toBe('https://bar.com')
+  })
+
+  it('no URL in message sends without fetchUrls', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'just text' } })
+    fireEvent.click(screen.getByTestId('send-btn'))
+    expect(mockSend).toHaveBeenCalledWith('just text', undefined, undefined)
   })
 })
 

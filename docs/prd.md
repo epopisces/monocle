@@ -1,10 +1,10 @@
 # Product Requirements Document — Monocle
 
-**Version:** 2.4  
-**Date:** 2026-03-13  
+**Version:** 2.5  
+**Date:** 2026-04-07  
 **Status:** Draft  
-**Supersedes:** v2.3  
-**Changes:** Single unified process (watcher and scheduler integrated into main API; capture via `/api/ingest` only); deterministic confidence scoring (no LLM call); simplified duplicate detection; lightweight built-in weekly clustering; consolidated YAML template schemas with user-friendly editor; backlinks API; plugin architecture framework; streamlined ingest progress events via content negotiation
+**Supersedes:** v2.4  
+**Changes:** MCP-first services layer: `monocle/services/` established as the single implementation of all Monocle-owned data operations; MCP tools and chat agent tools become thin wrappers over shared services; MCP is the canonical tool contract for external and internal consumers; chat remains the orchestration and streaming UX layer.
 
 ---
 
@@ -101,7 +101,8 @@ Each user has an isolated vault and collection within a shared deployment. Authe
 | Runtime selection | Settings dropdown: **Ollama** (local), **Foundry Local** (local Microsoft AI), **Azure AI Services** (cloud) |
 | Routing agent | Explicit routing agent examines raw content (and uses sentence starters as classification hints) to dispatch to the appropriate handler and template; decoupled from the extraction phase |
 | Prompt files | Agent system prompts stored as editable `.md` files in `prompts/`; users can tune classification and extraction behaviour without code changes; local overrides in `prompts/local/` (gitignored) take precedence |
-| Tool library | `search_vault`, `read_note`, `write_note`, `create_note`, `link_notes`, `get_person_graph`, `get_stats`, `transcribe_audio` |
+| Canonical tools | Chat agent tools are thin adapters over shared Monocle service functions. The MCP server exposes the same canonical tool contracts for external clients. Canonical Monocle-owned operations: `search_vault`, `read_note`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `create_reference_from_url`. Additional chat-only tools: `list_notes`, `get_stats` |
+| Tool canonicality | MCP is the authoritative tool contract for Monocle-owned data operations. Chat remains the orchestration layer for streaming UX, URL prefetch, session handling, and tool-hint policy |
 
 ### 5.5 LLM Index
 
@@ -110,6 +111,22 @@ Each user has an isolated vault and collection within a shared deployment. Authe
 | Phase 1 | ChromaDB (file-backed `PersistentClient`, cosine distance, per-chunk embeddings) |
 | Migration path | `IndexLayer` ABC isolates ChromaDB; `AzureSearchIndex` implementation targets Azure AI Search + Cosmos DB for Phase 2 |
 | Index content | Embeddings per ~512-token chunk with 64-token overlap; frontmatter stored as metadata; file path stored for lazy load |
+
+### 5.6 Services Layer (`monocle/services/`)
+
+All Monocle-owned data operations are implemented once in a shared services layer. Both the MCP server tools and the chat agent tools are thin wrappers that delegate to these service functions.
+
+| Service Module | Operations |
+|---|---|
+| `monocle/services/search.py` | `search_vault(query, n, threshold, filters)` — semantic search pipeline |
+| `monocle/services/notes.py` | `read_note(file_path)`, `create_note(...)`, `update_note(...)` — vault CRUD with reindex |
+| `monocle/services/graph.py` | `get_graph(focus, max_degree, types, n)` — graph build and cache |
+| `monocle/services/references.py` | `create_reference_from_url(url, context)` — URL fetch, AI summarise, reference note creation |
+| `monocle/services/ingest.py` | `capture_thought(content, source)` — full ingest pipeline delegation |
+
+**Architectural principle:** Service modules contain all business logic, side effects, reindex queue triggering, and review-status semantics. Tool wrappers (MCP and agent) validate input format, call services, and serialize output — they contain no business logic of their own.
+
+**MCP as canonical schema:** The MCP tool layer defines the authoritative external contract for Monocle-owned operations. Chat agent tools expose the same canonical operations internally under the same names. Both converge on the same service implementations.
 
 ---
 

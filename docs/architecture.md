@@ -1,7 +1,7 @@
 ---
 type: reference
 project: monocle
-last-updated: 2026-03-31
+last-updated: 2026-04-07
 ---
 
 # Monocle — Architecture Diagrams
@@ -49,10 +49,19 @@ graph TB
         SCHEDULER["MonocleScheduler<br/>(APScheduler 3.x)"]
         WEEKLY_A["WeeklySummaryAgent<br/>(scikit-learn clustering)"]
         ROUTING_A["RoutingAgent<br/>(sentence-starters fast-path)"]
-        CHAT_A["ChatAgent<br/>(MS Agent Framework)"]
+        CHAT_A["ChatAgent<br/>(MS Agent Framework)<br/><i>tool wrappers → SVC</i>"]
         GRAPH_B["GraphBuilder<br/>(BFS, in-memory cache)"]
-        MCP_S["MCP Server<br/>(FastMCP)"]
+        MCP_S["MCP Server<br/>(FastMCP)<br/><i>tool wrappers → SVC</i>"]
         PROCESS_M["ProcessManager<br/>(crash-restart subprocesses)"]
+    end
+
+    subgraph SVC["Canonical Services Layer  ·  monocle/services/"]
+        direction LR
+        SVC_SEARCH["search.py<br/>search_vault()"]
+        SVC_NOTES["notes.py<br/>read / create / update"]
+        SVC_GRAPH["graph.py<br/>get_graph()"]
+        SVC_REF["references.py<br/>create_reference_from_url()"]
+        SVC_INGEST["ingest.py<br/>capture_thought()"]
     end
 
     subgraph AI["AI Layer"]
@@ -106,6 +115,18 @@ graph TB
     AI_P --> AZURE
     AI_P --> WHISPER
 
+    %% MCP tools and Chat agent tools → Canonical Services
+    MCP_S -->|delegates to| SVC_SEARCH
+    MCP_S -->|delegates to| SVC_NOTES
+    MCP_S -->|delegates to| SVC_GRAPH
+    MCP_S -->|delegates to| SVC_REF
+    MCP_S -->|delegates to| SVC_INGEST
+    CHAT_A -->|delegates to| SVC_SEARCH
+    CHAT_A -->|delegates to| SVC_NOTES
+    CHAT_A -->|delegates to| SVC_GRAPH
+    CHAT_A -->|delegates to| SVC_REF
+    CHAT_A -->|delegates to| SVC_INGEST
+
     %% Services → Data
     INGEST_P --> VAULT
     INGEST_P --> FAILED
@@ -118,8 +139,14 @@ graph TB
     GRAPH_B --> VAULT
     SEARCH_R --> CHROMA
     SEARCH_R --> VAULT
-    MCP_S --> VAULT
-    MCP_S --> CHROMA
+    SVC_SEARCH --> CHROMA
+    SVC_SEARCH --> VAULT
+    SVC_NOTES --> VAULT
+    SVC_NOTES --> REINDEX_Q
+    SVC_GRAPH --> GRAPH_B
+    SVC_REF --> VAULT
+    SVC_REF --> REINDEX_Q
+    SVC_INGEST --> INGEST_P
 
     SCHEDULER --> WEEKLY_A
     SCHEDULER --> REINDEX_A
@@ -130,11 +157,13 @@ graph TB
     classDef layer fill:#1e2430,stroke:#3d4f6b,color:#cdd6f4
     classDef api fill:#1e3a2f,stroke:#2d6b4a,color:#a6e3a1
     classDef service fill:#2a1f3d,stroke:#5e3d8a,color:#cba6f7
+    classDef svc fill:#1e2d3d,stroke:#3d6b8a,color:#89dceb
     classDef ai fill:#3d2a1e,stroke:#8a5e3d,color:#fab387
     classDef data fill:#1e2d3d,stroke:#3d6b8a,color:#89dceb
     class CAPTURE layer
     class API api
     class SERVICES service
+    class SVC svc
     class AI ai
     class DATA data
 ```
@@ -237,7 +266,8 @@ sequenceDiagram
     participant API as POST /api/chat
     participant CA as ChatAgent
     participant AI as AIProvider
-    participant VT as VaultTools
+    participant VT as VaultTools (thin adapter)
+    participant SVC as monocle/services/
     participant VL as VaultLayer
     participant IX as ChromaDB
 
@@ -255,10 +285,12 @@ sequenceDiagram
 
         alt Tool call: search_vault
             CA->>VT: search_vault(query)
-            VT->>AI: embed(query)
-            AI-->>VT: embedding
-            VT->>IX: search(embedding)
-            IX-->>VT: NoteChunk list
+            VT->>SVC: search_service.search_vault(query)
+            SVC->>AI: embed(query)
+            AI-->>SVC: embedding
+            SVC->>IX: search(embedding)
+            IX-->>SVC: NoteChunk list
+            SVC-->>VT: ScoredNote list
             VT-->>CA: FunctionResultContent
             CA-->>API: FunctionCallContent
             API-->>Browser: SSE: event=tool_call, data=<name>
@@ -266,9 +298,12 @@ sequenceDiagram
 
         alt Tool call: create_note
             CA->>VT: create_note(...)
-            VT->>VL: write_note() + review_status=pending
-            VL-->>VT: file_path
-            VT-->>CA: FunctionResultContent (status=created)
+            VT->>SVC: notes_service.create_note(...)
+            SVC->>VL: write_note() + review_status=pending
+            SVC->>IX: upsert_chunks() [via ReindexQueue]
+            VL-->>SVC: file_path
+            SVC-->>VT: Note (status=created)
+            VT-->>CA: FunctionResultContent
             CA-->>API: FunctionResultContent
             API-->>Browser: SSE: event=note_created, data=<path>
         end
@@ -464,7 +499,7 @@ graph LR
 
 ## 9. MCP Server — Auth & Tool Routing
 
-How MCP clients authenticate and which tools are available.
+How MCP clients authenticate and which tools are available. Each tool is a thin schema wrapper that delegates to the canonical `monocle/services/` layer.
 
 ```mermaid
 flowchart TD
@@ -473,21 +508,37 @@ flowchart TD
     AUTH["_MCPAuthMiddleware<br/>(ASGI wrapper)<br/>x-monocle-key header<br/>OR ?key= query param<br/>hmac.compare_digest()"]
     AUTH_FAIL["HTTP 401<br/>{ error: Unauthorized }"]
 
-    TOOLS["FastMCP Tool Router"]
+    TOOLS["FastMCP Tool Router<br/>(canonical tool schema layer)"]
 
-    T1["search_vault<br/>embed query → ChromaDB"]
-    T2["read_note<br/>vault.read_note()"]
-    T3["browse_recent<br/>vault.list_notes()"]
-    T4["capture_thought<br/>→ IngestPipeline"]
-    T5["create_note<br/>vault.write_note()<br/>review_status=pending<br/>→ ReindexQueue"]
-    T6["update_note<br/>vault.write_note()<br/>updated=now()<br/>→ ReindexQueue"]
-    T7["get_graph<br/>GraphBuilder.build()"]
-    T8["get_stats<br/>BrainStats (paged)"]
+    T1["search_vault<br/><i>(input validate + serialize)</i>"]
+    T2["read_note<br/><i>(input validate + serialize)</i>"]
+    T3["capture_thought<br/><i>(input validate + serialize)</i>"]
+    T4["create_note<br/><i>(input validate + serialize)</i>"]
+    T5["create_reference_from_url<br/><i>(input validate + serialize)</i>"]
+    T6["update_note<br/><i>(input validate + serialize)</i>"]
+    T7["get_graph<br/><i>(input validate + serialize)</i>"]
+
+    subgraph SVC["monocle/services/  (business logic lives here)"]
+        SVC1["search_service.search_vault()"]
+        SVC2["notes_service.read_note()"]
+        SVC3["ingest_service.capture_thought()"]
+        SVC4["notes_service.create_note()"]
+        SVC5["reference_service.create_reference_from_url()"]
+        SVC6["notes_service.update_note()"]
+        SVC7["graph_service.get_graph()"]
+    end
 
     CLIENT --> TRANSPORT --> AUTH
     AUTH -->|"invalid / missing key"| AUTH_FAIL
     AUTH -->|"valid key"| TOOLS
-    TOOLS --> T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8
+    TOOLS --> T1 & T2 & T3 & T4 & T5 & T6 & T7
+    T1 --> SVC1
+    T2 --> SVC2
+    T3 --> SVC3
+    T4 --> SVC4
+    T5 --> SVC5
+    T6 --> SVC6
+    T7 --> SVC7
 ```
 
 ---
@@ -604,3 +655,68 @@ created: 2026-03-31T10:00:00Z
 updated: 2026-03-31T10:00:00Z
 ---
 ```
+
+---
+
+## 13. Canonical Tool Plane — MCP-First Architecture
+
+How the MCP server and chat agent converge on the same service implementations. MCP is the authoritative external contract; chat is an orchestration layer that delegates to the same services.
+
+```mermaid
+flowchart TB
+    subgraph EXTERNAL["External Consumers"]
+        MCP_CLI["MCP Clients<br/>(Claude, Copilot, Cursor)"]
+    end
+
+    subgraph INTERNAL["Internal Consumers"]
+        BROWSER["React Web App<br/>(via /api/chat SSE)"]
+    end
+
+    subgraph CHAT_LAYER["Chat Orchestration Layer  ·  routers/chat.py"]
+        direction TB
+        CHAT_ORCH["/api/chat endpoint<br/>• URL prefetch + opt-in<br/>• Context injection<br/>• SSE framing (token/tool_call/done)<br/>• Session + timeout policy"]
+        CHAT_AGENT["ChatAgent<br/>(MS Agent Framework)"]
+        VAULT_TOOLS["VaultTools<br/>(thin adapter — no business logic)"]
+    end
+
+    subgraph MCP_LAYER["MCP Tool Layer  ·  mcp_server.py  (canonical schema)"]
+        direction LR
+        MCP_TOOLS["FastMCP Tools<br/>search_vault · read_note<br/>capture_thought · create_note<br/>update_note · get_graph<br/>create_reference_from_url"]
+    end
+
+    subgraph SVC["monocle/services/  (single implementation of all Monocle data operations)"]
+        direction LR
+        S1["search.py"]
+        S2["notes.py"]
+        S3["graph.py"]
+        S4["references.py"]
+        S5["ingest.py"]
+    end
+
+    subgraph DATA["Data Layer"]
+        direction LR
+        VAULT_FS["Vault<br/>(filesystem .md)"]
+        CHROMA_DB["ChromaDB<br/>(embeddings)"]
+        REINDEX["ReindexQueue"]
+    end
+
+    MCP_CLI -->|"Streamable HTTP<br/>/mcp"| MCP_TOOLS
+    BROWSER -->|"REST POST /api/chat"| CHAT_ORCH
+    CHAT_ORCH --> CHAT_AGENT --> VAULT_TOOLS
+
+    MCP_TOOLS -->|"delegates"| SVC
+    VAULT_TOOLS -->|"delegates<br/>(same functions)"| SVC
+
+    SVC --> DATA
+
+    style MCP_LAYER fill:#1e3a2f,stroke:#2d6b4a,color:#a6e3a1
+    style CHAT_LAYER fill:#2a1f3d,stroke:#5e3d8a,color:#cba6f7
+    style SVC fill:#1e2d3d,stroke:#3d6b8a,color:#89dceb
+    style DATA fill:#1e2430,stroke:#3d4f6b,color:#cdd6f4
+```
+
+**Key invariants:**
+1. Services own all business logic, side effects, validation, and reindex triggers.
+2. MCP tool handlers own input schema, auth, and output serialization only.
+3. Chat agent tool wrappers own agent-framework binding, tool-hint policy, and SSE event shaping only.
+4. Both sets of wrappers call the same service functions — behavioral parity is structural, not conventional.

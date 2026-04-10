@@ -335,6 +335,38 @@ class TestMCPAuth:
                     )
                     assert r.status_code == 401
 
+    def test_non_http_scope_passthrough(self):
+        """MCP auth middleware currently only enforces auth for HTTP scopes.
+
+        Non-HTTP scopes (e.g., 'lifespan', 'websocket') are passed through without
+        authentication. This is intentional for Phase 1 (single unified process),
+        and the architecture allows extension to guard non-HTTP transports in
+        future phases. This test documents the current behavior.
+        """
+        from monocle.mcp_server import _MCPAuthMiddleware
+
+        # Create a mock next app that records whether it was called
+        next_app_calls = []
+
+        async def mock_next(scope, receive, send):
+            next_app_calls.append(scope["type"])
+
+        middleware = _MCPAuthMiddleware(mock_next, key="test-key")
+
+        # Simulate a non-HTTP scope (e.g., lifespan)
+        lifespan_scope = {"type": "lifespan", "asgi": {"version": "3.0"}}
+        async_receive = AsyncMock()
+        async_send = AsyncMock()
+
+        # Middleware should pass through without checking auth
+        import asyncio
+
+        asyncio.run(middleware(lifespan_scope, async_receive, async_send))
+
+        # Verify next() was called (i.e., auth was NOT enforced)
+        assert len(next_app_calls) == 1
+        assert next_app_calls[0] == "lifespan"
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # TestMCPTools
@@ -407,27 +439,6 @@ class TestMCPTools:
 
         with pytest.raises(Exception):
             await mcp.call_tool("read_note", {"file_path": "nonexistent/note.md"})
-
-    @pytest.mark.asyncio
-    async def test_browse_recent_returns_list(self, mcp_state):
-        from monocle.mcp_server import mcp
-
-        result = await mcp.call_tool("browse_recent", {"limit": 5})
-        data = json.loads(_extract_text(result))
-        assert isinstance(data, list)
-
-    @pytest.mark.asyncio
-    async def test_browse_recent_result_fields(self, mcp_state):
-        from monocle.mcp_server import mcp
-
-        result = await mcp.call_tool("browse_recent", {"limit": 5})
-        data = json.loads(_extract_text(result))
-        if data:
-            item = data[0]
-            assert "file_path" in item
-            assert "title" in item
-            assert "type" in item
-            assert "domain" in item
 
     @pytest.mark.asyncio
     async def test_create_note_returns_file_path(self, mcp_state):
@@ -513,6 +524,23 @@ class TestMCPTools:
         assert data["status"] == "created"
 
     @pytest.mark.asyncio
+    async def test_create_note_person_alias_accepted(self, mcp_state, mock_vault):
+        from monocle.mcp_server import mcp
+
+        result = await mcp.call_tool(
+            "create_note",
+            {
+                "title": "Alice Person Alias",
+                "body": "Body",
+                "note_type": "person",
+            },
+        )
+        data = json.loads(_extract_text(result))
+
+        note = mock_vault.read_note(data["file_path"])
+        assert note.metadata.type == "person_note"
+
+    @pytest.mark.asyncio
     async def test_update_note_changes_body(self, mcp_state, mock_vault):
         from monocle.mcp_server import mcp
 
@@ -554,18 +582,6 @@ class TestMCPTools:
         data = json.loads(_extract_text(result))
         assert "nodes" in data
         assert "edges" in data
-
-    @pytest.mark.asyncio
-    async def test_get_stats_returns_counts(self, mcp_state):
-        from monocle.mcp_server import mcp
-
-        result = await mcp.call_tool("get_stats", {})
-        data = json.loads(_extract_text(result))
-        assert "total_notes" in data
-        assert "by_type" in data
-        assert "by_domain" in data
-        assert "pending_review" in data
-        assert "index_chunks" in data
 
     @pytest.mark.asyncio
     async def test_capture_thought_creates_note(self, mcp_state, mock_vault):
@@ -622,10 +638,34 @@ class TestMCPTools:
         assert isinstance(data, list)
 
     @pytest.mark.asyncio
+    async def test_search_vault_memory_index_without_ai(self, mock_vault, mock_index, mock_pipeline, mock_graph_builder):
+        from monocle.models import NoteChunk
+        from monocle.mcp_server import init_mcp_state, mcp
+
+        mock_index.upsert_chunks(
+            [
+                NoteChunk(
+                    chunk_id="people/alice.md::0",
+                    file_path="people/alice.md",
+                    chunk_index=0,
+                    text="Alice is an engineer",
+                    embedding=[],
+                )
+            ]
+        )
+        init_mcp_state(mock_vault, mock_index, None, mock_pipeline, mock_graph_builder)
+
+        result = await mcp.call_tool("search_vault", {"query": "engineer"})
+        data = json.loads(_extract_text(result))
+        assert len(data) == 1
+        assert data[0]["file_path"] == "people/alice.md"
+
+    @pytest.mark.asyncio
     async def test_search_vault_n_results_clamped_high(self, mcp_state, mock_index):
         """n_results=100 should be clamped to _MAX_SEARCH_RESULTS (10)."""
         from monocle.models import NoteChunk
-        from monocle.mcp_server import mcp, _MAX_SEARCH_RESULTS
+        from monocle.mcp_server import mcp
+        from monocle.services.search import _MAX_SEARCH_RESULTS
 
         chunks = [
             NoteChunk(
@@ -644,31 +684,14 @@ class TestMCPTools:
         assert len(data) <= _MAX_SEARCH_RESULTS
 
     @pytest.mark.asyncio
-    async def test_browse_recent_limit_clamped_low(self, mcp_state):
-        """limit=0 should be clamped to 1 — no crash, returns a list."""
-        from monocle.mcp_server import mcp
-
-        result = await mcp.call_tool("browse_recent", {"limit": 0})
-        data = json.loads(_extract_text(result))
-        assert isinstance(data, list)
-
-    @pytest.mark.asyncio
-    async def test_browse_recent_limit_clamped_high(self, mcp_state):
-        """limit=200 should be clamped to _MAX_LIST_RESULTS (50)."""
-        from monocle.mcp_server import mcp, _MAX_LIST_RESULTS
-
-        result = await mcp.call_tool("browse_recent", {"limit": 200})
-        data = json.loads(_extract_text(result))
-        assert len(data) <= _MAX_LIST_RESULTS
-
-    @pytest.mark.asyncio
     async def test_search_vault_without_ai_provider(self, mcp_state):
-        """search_vault must raise RuntimeError when no AI provider is configured."""
+        """search_vault falls back to MemoryIndex substring search when ai=None."""
         from monocle.mcp_server import mcp, _state
 
         _state.ai = None
-        with pytest.raises(Exception, match="AI provider"):
-            await mcp.call_tool("search_vault", {"query": "anything"})
+        result = await mcp.call_tool("search_vault", {"query": "alice"})
+        data = json.loads(_extract_text(result))
+        assert isinstance(data, list)
 
     @pytest.mark.asyncio
     async def test_update_note_missing_file_raises(self, mcp_state):
@@ -744,7 +767,7 @@ class TestMCPTools:
         )
 
         fake_html = "<html><body><p>AI project setup prompts</p></body></html>"
-        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="AI project setup prompts")):
+        with patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="AI project setup prompts")):
             result = await mcp.call_tool(
                 "create_reference_from_url",
                 {"url": "https://example.com/ai-setup"},
@@ -767,7 +790,7 @@ class TestMCPTools:
             return_value="## Summary\nContent.\n```json\n{\"title\": \"Test Page\"}\n```"
         )
 
-        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Some page content")):
+        with patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="Some page content")):
             result = await mcp.call_tool(
                 "create_reference_from_url",
                 {"url": "https://example.com/page"},
@@ -788,7 +811,7 @@ class TestMCPTools:
             return_value="## Summary\nContent.\n```json\n{\"title\": \"Tagged Page\", \"tags\": [\"python\"]}\n```"
         )
 
-        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Python tips")):
+        with patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="Python tips")):
             result = await mcp.call_tool(
                 "create_reference_from_url",
                 {"url": "https://example.com/python"},
@@ -810,7 +833,7 @@ class TestMCPTools:
             return_value="## Summary\nKey info.\n```json\n{\"title\": \"Ref Page\"}\n```"
         )
 
-        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Key info")):
+        with patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="Key info")):
             result = await mcp.call_tool(
                 "create_reference_from_url",
                 {"url": target_url},
@@ -856,7 +879,7 @@ class TestMCPTools:
             return_value="## Summary\nContent.\n```json\n{\"title\": \"RQ Test\"}\n```"
         )
 
-        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Content")):
+        with patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="Content")):
             await mcp.call_tool(
                 "create_reference_from_url",
                 {"url": "https://example.com/rq"},
@@ -875,7 +898,7 @@ class TestMCPTools:
             return_value="## Summary\nFocused content.\n```json\n{\"title\": \"Ctx Test\"}\n```"
         )
 
-        with patch("monocle.mcp_server._fetch_url_text", AsyncMock(return_value="Page text")):
+        with patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="Page text")):
             result = await mcp.call_tool(
                 "create_reference_from_url",
                 {"url": "https://example.com/ctx", "extra_context": "Focus on security."},
@@ -973,19 +996,17 @@ class TestMCPServerConfig:
         app = create_mcp_app("some-key")
         assert isinstance(app, _MCPAuthMiddleware)
 
-    def test_mcp_has_9_tools(self):
+    def test_mcp_has_7_tools(self):
         from monocle.mcp_server import mcp
 
         tool_names = {t.name for t in mcp._tool_manager._tools.values()}
         expected = {
             "search_vault",
             "read_note",
-            "browse_recent",
             "capture_thought",
             "create_note",
             "create_reference_from_url",
             "update_note",
             "get_graph",
-            "get_stats",
         }
         assert expected == tool_names

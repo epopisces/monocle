@@ -2,12 +2,12 @@
 type: milestone-archive
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-02
+last-updated: 2026-04-09
 ---
 
 # Monocle â€" Completed Milestones & Technical Spike Resolutions
 
-This document archives full details for completed milestones (M1–M11, M19–M20, M23, M27) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
+This document archives full details for completed milestones (M1–M11, M19–M20, M23, M27–M32) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
 
 ---
 
@@ -278,7 +278,7 @@ This document archives full details for completed milestones (M1–M11, M19–M2
 
 **Deliverables (all completed):**
 - `monocle/agents/tools.py` â€” 7 `@tool` decorated functions:
-  - `search_vault`, `read_note`, `write_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`
+  - `search_vault`, `read_note`, `update_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`
   - Each wraps vault/index/AI operations with try/except
   - `_to_thread` helper for syncâ†’async conversion
   - `.tools` list exposed for ChatAgent
@@ -315,27 +315,26 @@ This document archives full details for completed milestones (M1–M11, M19–M2
 **Goal:** FastMCP tools exposed at `/mcp` with key-based auth. Resolve SPIKE-2.
 
 **Deliverables (all completed):**
-- `monocle/mcp_server.py` â€” `FastMCP("monocle", stateless_http=True)` with 8 tools + auth middleware + factory:
+- `monocle/mcp_server.py` â€" `FastMCP("monocle", stateless_http=True)` with 7 tools + auth middleware + factory:
   - `_MCPState` dataclass holds module-level references to vault/index/ai/pipeline/graph_builder
   - `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder)` â€” called from app lifespan
   - `_MCPAuthMiddleware(app, key)` â€” ASGI wrapper; validates `x-monocle-key` header then `?key=` query param; returns HTTP 401 JSON `{"detail":"Unauthorized"}` if missing or invalid; passes non-HTTP scope types (lifespan, websocket) through unchanged
   - `create_mcp_app(mcp_key) -> _MCPAuthMiddleware` â€” wraps `mcp.streamable_http_app()` with auth
-  - 8 `@mcp.tool()` decorated async functions using `_state` singleton:
+  - 7 `@mcp.tool()` decorated async functions using `_state` singleton:
     1. `search_vault(query, n_results, note_type, domain)` â€” embeds query via AI, calls `index.search()`, returns JSON array with `file_path`, `similarity`, `chunk` (â‰¤500 chars)
     2. `read_note(file_path)` â€” reads via `vault.read_note()`, returns JSON with title/type/domain/tags/people/body
-    3. `browse_recent(limit, note_type, domain)` â€” calls `vault.list_notes(sort="updated")`, returns JSON array with file_path/title/type/domain/updated fields
-    4. `capture_thought(content, source)` â€” runs full `IngestPipeline.run(IngestRequest)`, returns JSON with file_path/type/confidence/review_status
-    5. `create_note(title, body, note_type, domain, tags)` â€” `create_from_template` + `write_note`; sets `review_status="pending"` (MCP-created notes go to review queue)
-    6. `update_note(file_path, body)` â€” reads note, patches body, writes back; `_MAX_BODY_LENGTH = 50_000`
-    7. `get_graph(focus, max_degree)` â€” `graph_builder.build()` in thread, returns `GraphData.model_dump_json()`
-    8. `get_stats()` â€” aggregates vault + index stats; returns total_notes/by_type/by_domain/pending_review/index_chunks/index_backend
+    3. `capture_thought(content, source)` â€" runs full `IngestPipeline.run(IngestRequest)`, returns JSON with file_path/type/confidence/review_status
+    4. `create_note(title, body, note_type, domain, tags)` â€" `create_from_template` + `write_note`; sets `review_status="pending"` (MCP-created notes go to review queue)
+    5. `create_reference_from_url(url, extra_context)` â€" fetches web page, AI summarizes, creates reference note with review_status=pending
+    6. `update_note(file_path, body)` â€" reads note, patches body, writes back; sets updated timestamp; `_MAX_BODY_LENGTH = 50_000`
+    7. `get_graph(focus, max_degree)` â€" `graph_builder.build()` in thread, returns `GraphData.model_dump_json()`
 
 - `monocle/main.py` â€” `init_mcp_state(...)` called in lifespan after IngestPipeline + GraphBuilder init; `create_mcp_app(mcp_key)` mounted at `/mcp` in `create_app()` using `os.environ.get(cfg.server.mcp_access_key_env, "")`
 
 - `monocle/tests/test_mcp.py` â€” 40 tests across 4 classes:
   - `TestMCPAuth`: no key â†’ 401; wrong key header â†’ 401; wrong key query â†’ 401; valid header passes; valid query param passes; no env key configured â†’ all requests rejected
-  - `TestMCPTools`: all 8 tools exercised via `mcp.call_tool()` with real VaultLayer + MemoryIndex; field presence assertions; `create_note` sets pending review status; `update_note` body-too-long raises; `capture_thought` returns file_path
-  - `TestMCPServerConfig`: `init_mcp_state` sets all 5 fields; `create_mcp_app` returns `_MCPAuthMiddleware`; server has exactly 8 tools
+  - `TestMCPTools`: all 7 tools exercised via `mcp.call_tool()` with real VaultLayer + MemoryIndex; field presence assertions; `create_note` sets pending review status; `update_note` body-too-long raises; `capture_thought` returns file_path
+  - `TestMCPServerConfig`: `init_mcp_state` sets all 5 fields; `create_mcp_app` returns `_MCPAuthMiddleware`; server has exactly 7 tools
   - `TestMCPSecurityBoundaries`: enforces MCP security boundaries (e.g. vault path restrictions, cross-tenant isolation, and HTTP surface hardening) around tools and routes
 
 - `.vscode/tasks.json` â€” `test: mcp` task added
@@ -764,4 +763,122 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - Frontend type checks pass ?
 
 **Test Results:** 793 backend tests passing (7 omnisearch-specific), 408 frontend tests passing (12 omnisearch-specific); all acceptance criteria validated.
+
+---
+
+### M30: MCP-First: Shared Service Layer Extraction
+
+**Goal:** Move all Monocle business logic out of both tool layers into shared service functions under `monocle/services/`. Both MCP tools and agent tools become thin wrappers that delegate to canonical services.
+
+**Completed:** 2026-04-09
+
+**Deliverables:**
+
+- [x] **D1:** `monocle/services/__init__.py` — package init with module docstrings
+- [x] **D2:** `monocle/services/search.py` — `search_vault(index, ai, query, n_results, note_type, domain)` with n-clamping (1–10), embedding via `ai.embed()`, thread-delegated `index.search()`
+- [x] **D3:** `monocle/services/notes.py` — `read_note(vault, file_path)`, `create_note(vault, rq, title, body, note_type, domain, tags)` with `review_status="pending"`, `update_note(vault, rq, file_path, body)` with `updated` timestamp; body length validation (50K chars)
+- [x] **D4:** `monocle/services/graph.py` — `get_graph(graph_builder, focus, max_degree, types, n)` delegating to `GraphBuilder.build()`
+- [x] **D5:** `monocle/services/references.py` — `create_reference_from_url(vault, ai, rq, url, extra_context)` consolidating fetch→strip→summarise→JSON-extract→create-note pipeline; `fetch_url_text(url)` with scheme validation; `_strip_html()` with boilerplate removal; `_normalize_tags()` for LLM output normalization
+- [x] **D6:** `monocle/services/ingest.py` — `capture_thought(pipeline, content, source)` with content length validation, constructs `IngestRequest` and delegates to `pipeline.run()`
+- [x] **D7:** MCP tools (7 functions in `mcp_server.py`) and agent tools (6 methods in `agents/tools.py`) refactored to thin wrappers. MCP wrappers: `_state.assert_ready()` + service call + JSON serialize. Agent wrappers: preserve chat-only adapter logic (query resolution, AI merge, MemoryIndex fallback, wikilink name resolution) while delegating data operations to services. Dead code removed from both files.
+- [x] **D8:** 24 service-level tests in `monocle/tests/test_services.py` covering: search (happy, clamp low/high, filters, no-filters), read_note (happy, missing), create_note (happy, review_status, body limit, no-rq), update_note (happy, timestamp, body limit, missing), get_graph (happy, no-focus, custom params), references (happy, bad scheme, no-JSON fallback), ingest (happy, content limit, source passthrough)
+- [x] **D9:** Wrapper-level test imports updated to reference new service locations (`_MAX_SEARCH_RESULTS` from `services.search`, `_fetch_url_text` patches from `services.references`)
+
+**Implementation Notes:**
+
+- Each service function is a standalone `async def` accepting explicit dependencies (vault, index, ai, etc.) — no global state or singletons.
+- Services own: vault reads/writes, reindex queue pushes, timestamp updates, template creation, metadata handling, body validation.
+- MCP wrappers own: auth/state assertion, MCP-specific input validation, JSON serialization.
+- Agent wrappers own: chat-specific adapter logic (query resolution via wikilink→title→semantic chain, `_merge_body()` AI merge, MemoryIndex fallback for no-AI case, wikilink name resolution for graph).
+- `_normalize_tags()` remains in both `mcp_server.py` (for `BeforeValidator` on `create_note`) and `services/references.py` (for LLM output normalization). Will be consolidated in M31/M32.
+
+**Test Results:** 852 backend tests passing (24 service-level), 0 failures, all acceptance criteria validated.
+
+### M31: MCP-First: MCP Canonicalization
+
+**Goal:** Make the MCP tool layer the authoritative schema definition for all Monocle-owned data operations. Freeze return contracts. Verify external MCP client backward compatibility.
+
+**Completed:** 2026-04-09
+
+**Deliverables:**
+
+- [x] **D1:** Each MCP tool maps 1:1 to a shared service function with no inline business logic (verified — all 7 tools delegate to `monocle.services.*` per M30, only wrapper-level code remaining: `_state.assert_ready()`, `ai is None` guards, `_normalize_tags` BeforeValidator, JSON serialization)
+- [x] **D2:** MCP tool return contracts documented and frozen — `docs/tool-contracts.md` frontmatter updated to `status: frozen`, frozen contract banner added requiring versioned acceptance for breaking changes
+- [x] **D3:** External MCP client backward compatibility verified — `TestBackwardCompatibility` (4 tests) asserts stable tool names, required parameters, and meaningful descriptions; `TestInputSchemas` (10 tests) validates all parameter names/types/defaults match canonical schemas
+- [x] **D4:** Contract parity tests added — `monocle/tests/test_contracts.py` with 32 tests across 6 classes:
+  - `TestToolRegistry` (2): exactly 7 canonical tools registered, no extras
+  - `TestInputSchemas` (10): parameter names, types, required/optional, defaults for all 7 tools
+  - `TestOutputSchemas` (7): JSON output keys match frozen contract for each tool
+  - `TestServiceDelegation` (4): both MCP and agent tools import from `monocle.services.*`; all service functions are async
+  - `TestBehavioralParity` (6): review_status=pending on both surfaces; reindex push from both; MCP hard overwrite; search output shape identical
+  - `TestBackwardCompatibility` (4): stable tool names, required params, descriptions
+- [x] **D5:** MCP tool docstrings updated — module docstring rewritten to state authoritative/canonical status with cross-references to `docs/tool-contracts.md` and `monocle/services/`; each tool docstring updated with canonical operation reference line
+
+**Additional work:**
+
+- **`_normalize_tags` consolidated:** Three duplicate definitions (in `mcp_server.py`, `agents/tools.py`, `services/references.py`) replaced with a single canonical `normalize_tags()` in `monocle/services/tags.py`. All three consumers import via `from monocle.services.tags import normalize_tags as _normalize_tags`. The canonical version adopts the most defensive behavior (str coercion on list elements, None filtering).
+- Unused `Any` import cleaned up from `mcp_server.py` and `services/references.py`.
+
+**Test Results:** 884 backend tests passing (32 contract parity), 0 failures, all acceptance criteria validated.
+
+---
+
+### M32: MCP-First: Chat Tool Adapter & Orchestration Cleanup
+
+**Goal:** Align agent tool names with canonical MCP names, verify VaultTools are thin adapters to the service layer, confirm chat-only orchestration remains cleanly separated in `routers/chat.py`, and add adapter↔MCP output parity tests.
+
+**Completed:** 2026-04-09
+
+**Deliverables:**
+
+- [x] **D1:** Agent tool names aligned with canonical MCP names:
+  - `fetch_and_summarize_url` → `create_reference_from_url` (method, docstring, error message, self.tools list, system prompt, `_ALLOWED_TOOL_HINTS`, chat router prefetch call)
+  - `get_person_graph` → `get_graph` (method, docstring, logger message, self.tools list, system prompt, `_ALLOWED_TOOL_HINTS`)
+  - All test references updated in `test_agents.py` (16 occurrences)
+
+- [x] **D2:** VaultTools verified as thin adapters — each tool delegates to `monocle.services.*`. Adapter-only responsibilities correctly retained per `docs/tool-contracts.md` §6:
+  - Query-based note discovery (wikilink → title scan → semantic search) in `update_note`
+  - AI content merge (LLM-assisted body merging) in `update_note`
+  - Wikilink name resolution in `get_graph`
+  - MemoryIndex substring fallback for no-AI search in `search_vault`
+  - Tag normalization from LLM-produced formats in `create_note`
+
+- [x] **D3:** `fetch_and_summarize_url` resolved per M29 D3 decision — renamed to `create_reference_from_url`, delegates to `monocle.services.references.create_reference_from_url`
+
+- [x] **D4:** Chat-only orchestration verified in `routers/chat.py`:
+  - URL detection and opt-in policy (ChatRequest.fetch_urls field)
+  - Parallel prefetch batching (max 5, asyncio.gather)
+  - Context injection into last user message
+  - SSE event shaping (token, tool_call, tool_error, note_created, done, error)
+  - Session and timeout policy (5-minute timeout, session_id tracking)
+  - Tool-hint policy (_ALLOWED_TOOL_HINTS in agents/__init__.py, _is_first_tool_call_turn)
+  - None of these concerns leaked into tools.py or services/
+
+- [x] **D5:** 6 adapter↔MCP output parity tests added to `TestAdapterMCPOutputParity` in `test_contracts.py`:
+  - `test_read_note_output_keys_match` — exact key set match
+  - `test_create_note_output_keys_match` — exact key set match
+  - `test_update_note_agent_superset_of_mcp_keys` — agent adds `title` for LLM context
+  - `test_get_graph_agent_superset_of_mcp_keys` — agent adds `node_count`, `edge_count` for LLM context
+  - `test_create_reference_from_url_output_keys_match` — exact key set match
+  - `test_agent_tool_names_match_canonical_minus_capture_thought` — 6 agent tools == 7 MCP tools minus capture_thought
+
+- [x] **D6:** 8 obsolete duplicate tests removed from `TestVaultToolsExecution`:
+  - `test_search_vault_returns_json_list` — covered by contract output parity
+  - `test_read_note_returns_json_with_body` — covered by `TestAdapterMCPOutputParity.test_read_note_output_keys_match`
+  - `test_update_note_updates_body` — covered by `TestUpdateNote.test_happy_path` in test_services.py
+  - `test_update_note_body_length_cap` — covered by `TestUpdateNote.test_body_too_long_raises`
+  - `test_update_note_updates_timestamp` — covered by `TestUpdateNote.test_updated_timestamp_set`
+  - `test_create_note_returns_file_path` — covered by `TestAdapterMCPOutputParity.test_create_note_output_keys_match`
+  - `test_create_note_sets_review_status_pending` — covered by `TestBehavioralParity.test_create_note_sets_review_pending_via_agent`
+  - `test_get_graph_with_builder` — covered by `TestAdapterMCPOutputParity.test_get_graph_agent_superset_of_mcp_keys`
+
+**Files modified:**
+
+- `monocle/agents/tools.py` — module docstring, tool method renames, self.tools list, logger messages
+- `monocle/agents/__init__.py` — `_ALLOWED_TOOL_HINTS`, system prompt, factory docstring
+- `monocle/routers/chat.py` — prefetch call: `create_reference_from_url`
+- `monocle/tests/test_agents.py` — all old name references updated, 8 duplicate tests removed
+- `monocle/tests/test_contracts.py` — 6 new tests in `TestAdapterMCPOutputParity`
+
+**Test Results:** 881 backend tests passing (38 contract parity), 416 frontend tests passing, 0 failures.
 

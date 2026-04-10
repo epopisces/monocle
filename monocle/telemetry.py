@@ -122,6 +122,30 @@ def configure_telemetry(settings: "Settings") -> None:
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(meter_provider)
 
+        # --- Logs/Events exporter (for AI Toolkit Input/Output columns) ---
+        from opentelemetry import _events, _logs
+        from opentelemetry.sdk._events import EventLoggerProvider
+        from opentelemetry.sdk._logs import LoggerProvider
+        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+        if settings.telemetry.otlp_transport == "grpc":
+            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
+
+            log_exporter = GrpcLogExporter(endpoint=settings.telemetry.otlp_endpoint)
+        else:
+            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+            log_exporter = OTLPLogExporter(
+                endpoint=f"{settings.telemetry.otlp_endpoint}/v1/logs"
+            )
+
+        log_provider = LoggerProvider(resource=resource)
+        log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+        _logs.set_logger_provider(log_provider)
+
+        event_logger_provider = EventLoggerProvider()
+        _events.set_event_logger_provider(event_logger_provider)
+
         # --- Auto-instrumentations ---
         LoggingInstrumentor().instrument(set_logging_format=True)
         HTTPXClientInstrumentor().instrument()
@@ -227,39 +251,45 @@ async def timed(histogram: Any, **attrs: Any) -> AsyncIterator[None]:
 
 
 def add_user_message_event(span: Any, content: str, max_length: int = 1000) -> None:
-    """Record a user.message span event for AI Toolkit Input/Output columns.
+    """Record a gen_ai.user.message event for AI Toolkit Input/Output columns.
 
     Allows the AI Toolkit to populate the "Input" column in the trace viewer.
+    Uses the OTel Events API (logs signal) to ensure events reach the AI Toolkit.
 
     Args:
-        span: OTel span object (can be None; no-op if so).
+        span: OTel span object (kept for backward compatibility; not strictly required).
         content: User message text to record.
-        max_length: Maximum characters to record (default 1000 to avoid bloating spans).
+        max_length: Maximum characters to record (default 1000 to avoid bloating events).
     """
-    if not span:
-        return
     try:
+        from opentelemetry._events import Event, get_event_logger
+
         truncated = content[:max_length] if content else ""
-        span.add_event("user.message", {"message.content": truncated})
+        get_event_logger("monocle").emit(
+            Event(name="gen_ai.user.message", body={"content": truncated})
+        )
     except Exception:  # noqa: BLE001
         pass
 
 
 def add_assistant_message_event(span: Any, content: str, max_length: int = 1000) -> None:
-    """Record an assistant.message span event for AI Toolkit Input/Output columns.
+    """Record a gen_ai.assistant.message event for AI Toolkit Input/Output columns.
 
     Allows the AI Toolkit to populate the "Output" column in the trace viewer.
+    Uses the OTel Events API (logs signal) to ensure events reach the AI Toolkit.
 
     Args:
-        span: OTel span object (can be None; no-op if so).
+        span: OTel span object (kept for backward compatibility; not strictly required).
         content: Assistant message text to record.
-        max_length: Maximum characters to record (default 1000 to avoid bloating spans).
+        max_length: Maximum characters to record (default 1000 to avoid bloating events).
     """
-    if not span:
-        return
     try:
+        from opentelemetry._events import Event, get_event_logger
+
         truncated = content[:max_length] if content else ""
-        span.add_event("assistant.message", {"message.content": truncated})
+        get_event_logger("monocle").emit(
+            Event(name="gen_ai.assistant.message", body={"content": truncated})
+        )
     except Exception:  # noqa: BLE001
         pass
 

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import json
 import logging
 import time
@@ -60,6 +61,7 @@ class ChatRequest(BaseModel):
     messages: list[ChatMessageRequest]
     session_id: str | None = None
     tool_hint: str | None = None
+    fetch_urls: list[str] | None = None
 
     def model_post_init(self, __context):
         """Validate that messages is not empty."""
@@ -79,6 +81,40 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+async def _iter_stream_with_disconnect(
+    request: Request,
+    stream_iter: AsyncIterator[Any],
+    poll_interval_s: float = 0.1,
+) -> AsyncIterator[Any]:
+    """Yield agent updates while polling for client disconnects."""
+    pending_next: asyncio.Task[Any] | None = None
+    try:
+        while True:
+            if pending_next is None:
+                pending_next = asyncio.create_task(anext(stream_iter))
+
+            done, _ = await asyncio.wait({pending_next}, timeout=poll_interval_s)
+            if done:
+                try:
+                    yield pending_next.result()
+                except StopAsyncIteration:
+                    return
+                finally:
+                    pending_next = None
+                continue
+
+            if await request.is_disconnected():
+                pending_next.cancel()
+                with suppress(asyncio.CancelledError, StopAsyncIteration):
+                    await pending_next
+                raise asyncio.CancelledError("Client disconnected")
+    finally:
+        aclose = getattr(stream_iter, "aclose", None)
+        if callable(aclose):
+            with suppress(Exception):
+                await aclose()
+
+
 async def _stream_agent_response(
     request: Request,
     chat_request: ChatRequest,
@@ -87,7 +123,8 @@ async def _stream_agent_response(
 
     Event types (see Architecture Quick Reference):
       token       — text delta from the model
-      tool_call   — tool was invoked
+      tool_call   — tool was invoked, with name and call_id
+      tool_error  — tool returned an error result (stream continues)
       note_created — agent created a new note
       error       — fatal or recoverable error (emitted before done)
       done        — stream terminator (always emitted); includes status field:
@@ -109,6 +146,8 @@ async def _stream_agent_response(
     update_count = 0
     done_status = "success"
     done_error_message = None
+    client_disconnected = False
+    _active_tool_calls: dict[str, str] = {}  # call_id → tool_name, for enriching result events
 
     app = request.app
     ai = getattr(app.state, "ai", None)
@@ -122,6 +161,56 @@ async def _stream_agent_response(
         logger.error("[CHAT] Missing provider or state: ai=%s, vault=%s, index=%s, settings=%s", ai, vault, index, settings)
         yield _sse("error", {"message": "AI provider not available"})
         return
+
+    # -----------------------------------------------------------------------
+    # Optional parallel URL pre-fetch (fetch_urls in ChatRequest)
+    # Each opted-in URL is fetched and summarised in parallel before the
+    # agent starts. Results are emitted as note_created events and injected
+    # as context into the last user message so the agent can reference them.
+    # -----------------------------------------------------------------------
+    pre_fetch_context = ""
+    if chat_request.fetch_urls:
+        from monocle.agents.tools import VaultTools
+        _MAX_PREFETCH = 5  # safety cap
+        urls_to_fetch = [
+            u for u in chat_request.fetch_urls[:_MAX_PREFETCH]
+            if isinstance(u, str) and u.startswith(("http://", "https://"))
+        ]
+        if urls_to_fetch:
+            vault_tools = VaultTools(
+                vault=vault,
+                index=index,
+                ai=ai,
+                reindex_queue=reindex_queue,
+            )
+            logger.info("[CHAT] Pre-fetching %d URL(s) in parallel", len(urls_to_fetch))
+            results = await asyncio.gather(
+                *[vault_tools.create_reference_from_url(url) for url in urls_to_fetch],
+                return_exceptions=True,
+            )
+            context_lines: list[str] = []
+            for url, result in zip(urls_to_fetch, results):
+                if isinstance(result, Exception):
+                    logger.warning("[CHAT] Pre-fetch failed for %s: %s", url, result)
+                    context_lines.append(f"- {url}: failed to fetch")
+                else:
+                    try:
+                        data = json.loads(result)  # type: ignore[arg-type]
+                        yield _sse("note_created", {
+                            "file_path": data.get("file_path", ""),
+                            "type": "reference",
+                        })
+                        context_lines.append(
+                            f"- {url} → saved as '{data.get('title', '')}' at {data.get('file_path', '')}"
+                        )
+                    except Exception:
+                        context_lines.append(f"- {url}: fetched")
+            if context_lines:
+                pre_fetch_context = (
+                    "[The following URLs have been pre-fetched and saved as reference notes:]\n"
+                    + "\n".join(context_lines)
+                    + "\n\n"
+                )
 
     try:
         logger.debug("[CHAT] Creating chat agent...")
@@ -143,6 +232,11 @@ async def _stream_agent_response(
             ChatMessage(role=m.role, text=m.content)
             for m in chat_request.messages
         ]
+        # Inject pre-fetch context into the last user message so the agent
+        # knows which URLs were already summarised and where their notes live.
+        if pre_fetch_context and af_messages:
+            last = af_messages[-1]
+            af_messages[-1] = ChatMessage(role=last.role, text=pre_fetch_context + last.text)
         logger.info("[CHAT] Starting agent stream: %d messages, session=%s", len(af_messages), chat_request.session_id)
 
         stream_iter = agent.run_stream(af_messages)
@@ -155,7 +249,7 @@ async def _stream_agent_response(
             # responses (some LLMs may take 2-3 minutes on complex queries).
             # Protects at the app level, independent of httpx transport timeouts.
             async with asyncio.timeout(300):
-                async for update in stream_iter:
+                async for update in _iter_stream_with_disconnect(request, stream_iter):
                     update_count += 1
                     update: AgentRunResponseUpdate
                     logger.info("[CHAT] Update #%d: %s (%d contents)", update_count, type(update).__name__, len(update.contents))
@@ -176,27 +270,44 @@ async def _stream_agent_response(
                             yield _sse("token", {"delta": delta})
 
                         elif isinstance(content, FunctionCallContent):
-                            logger.info("[CHAT]   → FunctionCallContent: name=%s", content.name)
-                            yield _sse("tool_call", {"name": content.name or "unknown", "result_count": 0})
+                            call_id = content.call_id or ""
+                            tool_name = content.name or "unknown"
+                            if call_id:
+                                _active_tool_calls[call_id] = tool_name
+                            logger.info("[CHAT]   → FunctionCallContent: name=%s, call_id=%s", tool_name, call_id)
+                            yield _sse("tool_call", {"name": tool_name, "call_id": call_id})
 
                         elif isinstance(content, FunctionResultContent):
-                            logger.info("[CHAT]   → FunctionResultContent: call_id=%s", content.call_id)
+                            call_id = content.call_id or ""
+                            tool_name = _active_tool_calls.get(call_id, "unknown")
+                            logger.info("[CHAT]   → FunctionResultContent: call_id=%s, tool=%s", call_id, tool_name)
                             result = content.result
                             if isinstance(result, str):
                                 try:
                                     parsed = json.loads(result)
-                                    if isinstance(parsed, dict) and parsed.get("status") == "created":
-                                        yield _sse(
-                                            "note_created",
-                                            {
-                                                "file_path": parsed.get("file_path", ""),
-                                                "type": parsed.get("type", "other"),
-                                            },
-                                        )
+                                    if isinstance(parsed, dict):
+                                        if "error" in parsed:
+                                            yield _sse("tool_error", {
+                                                "name": tool_name,
+                                                "call_id": call_id,
+                                                "message": str(parsed["error"]),
+                                            })
+                                        if parsed.get("status") == "created":
+                                            yield _sse(
+                                                "note_created",
+                                                {
+                                                    "file_path": parsed.get("file_path", ""),
+                                                    "type": parsed.get("type", "other"),
+                                                },
+                                            )
                                 except (json.JSONDecodeError, TypeError):
                                     pass
 
             logger.info("[CHAT] Stream complete: %d updates, %d tokens", update_count, total_tokens)
+
+        except asyncio.CancelledError:
+            client_disconnected = True
+            logger.info("[CHAT] Client disconnected; stopping stream after %d updates", update_count)
 
         except asyncio.TimeoutError:
             logger.warning("[CHAT] Stream timed out after 300s (received %d updates). Closing stream.", update_count)
@@ -207,7 +318,7 @@ async def _stream_agent_response(
         except Exception as stream_exc:
             logger.exception("[CHAT] Error during stream processing: %s", stream_exc)
             done_status = "error"
-            done_error_message = f"Stream error: {str(stream_exc)[:100]}"
+            done_error_message = "An error occurred processing your request"
             yield _sse("error", {"message": done_error_message})
 
     except Exception as exc:
@@ -223,12 +334,13 @@ async def _stream_agent_response(
             duration_hist.record(elapsed_total)
         except Exception:
             pass
-        done_data = {"status": done_status}
-        if chat_request.session_id:
-            done_data["session_id"] = chat_request.session_id
-        if done_error_message:
-            done_data["error"] = done_error_message
-        yield _sse("done", done_data)
+        if not client_disconnected:
+            done_data = {"status": done_status}
+            if chat_request.session_id:
+                done_data["session_id"] = chat_request.session_id
+            if done_error_message:
+                done_data["error"] = done_error_message
+            yield _sse("done", done_data)
 
 
 #endregion
