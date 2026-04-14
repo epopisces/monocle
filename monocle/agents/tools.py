@@ -1,19 +1,25 @@
 """
-monocle/agents/tools.py — Agent tool library for the chat agent.
+monocle/agents/tools.py — Chat-agent tool adapters for canonical Monocle operations.
 
-All tools are decorated with @ai_function and accept the vault, index, and AI
-provider as constructor arguments on the ToolRegistry container class, then
-expose bound methods that the agent framework can invoke.
+Each tool is a thin adapter decorated with @ai_function that delegates to the
+shared service layer in ``monocle.services.*``.  Tool names are aligned with the
+canonical MCP tool names defined in ``docs/tool-contracts.md``.
 
-Tools:
-  search_vault      — Semantic search returning scored note chunks
-  read_note         — Read a full note by vault-relative path
-  write_note        — Overwrite an existing note body/metadata
-  append_to_note    — Find a note by name/query and append content to it
-  create_note       — Create a new note via VaultLayer.create_from_template
-  get_stats         — Return BrainStats summary
-  list_notes        — List notes with optional type/domain filter
-  get_person_graph  — Return first-degree ego-graph for a person
+Adapter responsibilities (not in services):
+  - Query-based note discovery (wikilink → title scan → semantic search)
+  - AI content merge for update_note
+  - Wikilink name resolution for get_graph
+  - MemoryIndex fallback for no-AI search
+  - Tag normalization from LLM-produced formats
+  - @ai_function binding and JSON serialization
+
+Canonical tools (6 — excludes MCP-only capture_thought):
+    search_vault              — Semantic search returning scored note chunks
+    read_note                 — Read a full note by vault-relative path
+    update_note               — Find a note by path or query and merge new content
+    create_note               — Create a new note via VaultLayer.create_from_template
+    get_graph                 — Return ego-graph for an entity (name or path)
+    create_reference_from_url — Fetch a web page, summarize it with AI, and create a reference note
 """
 from __future__ import annotations
 
@@ -45,49 +51,8 @@ _MAX_LIST_RESULTS = 20
 _MAX_BODY_LENGTH = 50_000  # matches IngestRequest.content character limit
 
 
-def _normalize_tags(value: Any) -> list[str] | None:
-    """Normalise tags from various LLM-produced formats to a flat list[str].
-
-    The LLM may send tags as:
-    - A proper JSON array: ["work", "python"]
-    - A Python dict string: "{'hobbies': ['Lego', 'programming']}"
-    - A JSON object string: '{"hobbies": ["Lego"]}'
-    - A plain comma-separated string: "work, python"
-    - Already a list, dict, or None.
-    """
-    if value is None:
-        return None
-    if isinstance(value, list):
-        return [str(t) for t in value if t is not None]
-    if isinstance(value, dict):
-        # Flatten {"category": ["tag1", "tag2"], ...} → ["tag1", "tag2", ...]
-        result: list[str] = []
-        for v in value.values():
-            if isinstance(v, list):
-                result.extend(str(x) for x in v if x is not None)
-            elif v is not None:
-                result.append(str(v))
-        return result or None
-    if isinstance(value, str):
-        s = value.strip()
-        if not s:
-            return None
-        # Try JSON array / object first (handles double-quoted strings)
-        try:
-            parsed = json.loads(s)
-            return _normalize_tags(parsed)
-        except (json.JSONDecodeError, ValueError):
-            pass
-        # Try Python literal eval (handles single-quoted strings, Python dicts/lists)
-        try:
-            import ast  # stdlib, safe with literal_eval
-            parsed = ast.literal_eval(s)
-            return _normalize_tags(parsed)
-        except (ValueError, SyntaxError):
-            pass
-        # Final fallback: comma-separated plain text
-        return [t.strip() for t in s.split(",") if t.strip()] or None
-    return [str(value)]
+# Canonical tag normaliser — shared across MCP, agent tools, and services.
+from monocle.services.tags import normalize_tags as _normalize_tags
 
 
 def _try_unwrap_json_body(content: str) -> str:
@@ -138,13 +103,10 @@ class VaultTools:
         self.tools = [
             self.search_vault,
             self.read_note,
-            self.write_note,
-            self.append_to_note,
+            self.update_note,
             self.create_note,
-            self.fetch_and_summarize_url,
-            self.get_stats,
-            self.list_notes,
-            self.get_person_graph,
+            self.create_reference_from_url,
+            self.get_graph,
         ]
         
         # Rebuild input models for tools that use Annotated validators.
@@ -161,7 +123,8 @@ class VaultTools:
         for tool in self.tools:
             try:
                 # Eagerly call parameters() to trigger schema generation and catch
-                # any Pydantic model errors before agent.run_stream()
+                # any Pydantic model errors before agent.run_stream().
+                # parameters() is sync for the agent-framework decorators used here.
                 if hasattr(tool, 'parameters'):
                     tool.parameters()
             except Exception as exc:
@@ -184,41 +147,11 @@ class VaultTools:
     ) -> str:
         """Search the vault using semantic similarity and return matching note excerpts."""
         try:
-            n = max(1, min(n_results, _MAX_SEARCH_RESULTS))
-            filters: dict[str, Any] = {}
-            if note_type:
-                filters["type"] = note_type
-            if domain:
-                filters["domain"] = domain
+            from monocle.services.search import search_vault as _search_vault
 
-            if self._ai is not None:
-                embedding = await self._ai.embed(query)
-                scored = await _to_thread(
-                    self._index.search,
-                    embedding,
-                    n,
-                    filters or None,
-                    query,
-                )
-            else:
-                # No AI provider available. ChromaIndex requires embeddings; only MemoryIndex
-                # supports substring matching via query_text parameter.
-                from monocle.index.memory import MemoryIndex
-
-                if not isinstance(self._index, MemoryIndex):
-                    raise ValueError(
-                        "Semantic search requires an AI provider. "
-                        "Configure ai.provider in config.yaml "
-                        "(e.g., ollama, foundry_local, azure_openai)."
-                    )
-
-                scored = await _to_thread(
-                    self._index.search,
-                    [],
-                    n,
-                    filters or None,
-                    query,
-                )
+            scored = await _search_vault(
+                self._index, self._ai, query, n_results, note_type, domain,
+            )
 
             results = [
                 {
@@ -244,7 +177,9 @@ class VaultTools:
     ) -> str:
         """Read a full note from the vault and return its title, metadata, and body."""
         try:
-            note = await _to_thread(self._vault.read_note, file_path)
+            from monocle.services.notes import read_note as _read_note
+
+            note = await _read_note(self._vault, file_path)
             return json.dumps(
                 {
                     "file_path": note.file_path,
@@ -261,32 +196,107 @@ class VaultTools:
             raise
 
     # ------------------------------------------------------------------
-    # Tool: write_note
+    # Tool: update_note
     # ------------------------------------------------------------------
 
     @ai_function
-    async def write_note(
+    async def update_note(
         self,
-        file_path: Annotated[str, "Vault-relative path to the note to update"],
-        body: Annotated[str, "New Markdown body for the note"],
+        body: Annotated[str, "New content to merge into the existing note (required, must not be empty)"],
+        file_path: Annotated[str | None, "Vault-relative path to the note (preferred when known from search_vault/read_note, e.g. 'people/alice.md')"] = None,
+        query: Annotated[str | None, "Person name or topic to find the note (used when file_path is not known, e.g. 'Alice Example')"] = None,
     ) -> str:
-        """Overwrite the body of an existing note. Returns the updated note path."""
+        """Update an EXISTING note with new content using content-aware merging.
+
+        **Use this to ADD or MODIFY content in a note that already exists.**
+        Provide `file_path` when you have it (from search_vault or read_note results);
+        otherwise provide `query` and the tool locates the note by name or topic.
+
+        New content is intelligently merged with the existing body using AI when
+        available, so facts are synthesised rather than blindly appended.
+
+        **DO NOT use this to CREATE a new note** — use create_note instead.
+        Returns an error JSON if the note cannot be found via query.
+        Raises if the note does not exist when accessed by file_path.
+        """
+        if not body.strip():
+            raise ValueError("body must not be empty")
         if len(body) > _MAX_BODY_LENGTH:
             raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
+
+        # Unwrap JSON-encoded body that LLMs occasionally produce
+        body = _try_unwrap_json_body(body)
+        if not body.strip():
+            raise ValueError("body must not be empty")
+
+        if file_path is None and query is None:
+            raise ValueError("Either file_path or query must be provided")
+
+        resolved_path = file_path
+
+        if resolved_path is None:
+            # Step 1: Wikilink resolution
+            resolved_path = await _to_thread(self._vault.resolve_wikilink, query)
+
+            # Step 2: Title-prefix scan (scan all notes, not just first 500)
+            if not resolved_path:
+                query_lower = query.lower()
+                # Use a large limit and rely on vault.list_notes pagination
+                offset = 0
+                found = None
+                while not found:
+                    page = await _to_thread(
+                        self._vault.list_notes,
+                        None, None, None, "updated", 1000, offset,
+                    )
+                    if not page.items:
+                        break
+                    exact = next(
+                        (r for r in page.items if r.title.lower() == query_lower), None
+                    )
+                    starts = next(
+                        (r for r in page.items if r.title.lower().startswith(query_lower)), None
+                    )
+                    found = exact or starts
+                    if found:
+                        resolved_path = found.file_path
+                        break
+                    # If we got fewer items than the limit, we've hit the end
+                    if len(page.items) < 1000:
+                        break
+                    offset += 1000
+
+            # Step 3: Semantic search (min similarity 0.6 to avoid false matches)
+            if not resolved_path and self._ai is not None:
+                embedding = await self._ai.embed(query)
+                scored = await _to_thread(
+                    self._index.search, embedding, 1, None, query
+                )
+                if scored and scored[0].score >= 0.6:
+                    resolved_path = scored[0].file_path
+
+            if not resolved_path:
+                return json.dumps(
+                    {"error": f"No note found matching {query!r}. Use create_note to start one."}
+                )
+
         try:
-            note = await _to_thread(self._vault.read_note, file_path)
-            note.body = body
-            await _to_thread(self._vault.write_note, file_path, note)
-            # Trigger re-index to update embeddings and search index
-            if self._reindex_queue is not None:
-                self._reindex_queue.push(file_path)
-            return json.dumps({"file_path": file_path, "status": "updated"})
+            from monocle.services.notes import read_note as _read_note
+
+            note = await _read_note(self._vault, resolved_path)
+            merged_body = await self._merge_body(note.body or "", body)
+
+            from monocle.services.notes import update_note as _update_note
+
+            note = await _update_note(self._vault, self._reindex_queue, resolved_path, merged_body)
+            return json.dumps({"file_path": resolved_path, "title": note.title, "status": "updated"})
         except Exception as exc:
-            logger.warning("write_note tool error for %r: %s", file_path, exc)
+            logger.warning("update_note tool error for %r: %s", resolved_path, exc)
             raise
 
     # ------------------------------------------------------------------
-    # Tool: create_note
+    # Tool: create_note (previously preceded by a separate append_to_note;
+    # append behaviour is now part of update_note)
     # ------------------------------------------------------------------
 
     @ai_function
@@ -294,7 +304,7 @@ class VaultTools:
         self,
         title: Annotated[str, "Title of the new note"],
         body: Annotated[str, "Markdown body content"],
-        note_type: Annotated[str, "Note type: 'person_note' (or 'person'), 'idea', 'decision', 'observation', 'reference', 'meeting_note', 'project', 'action_item'"] = "observation",
+        note_type: Annotated[str, "Note type or template key, e.g. 'person'/'person_note', 'meeting'/'meeting_note', 'idea', 'reference', 'blank'/'other'"] = "observation",
         domain: Annotated[str, "Domain, e.g. 'work' or 'personal'"] = "personal",
         tags: Annotated[
             str | list[str] | None,
@@ -304,7 +314,7 @@ class VaultTools:
         """Create a NEW note in the vault from scratch using the appropriate template.
 
         **Use this whenever the user wants to CREATE or START a new note** — e.g., 'add a note for Grayson', 'create a decision note'.
-        **DO NOT use this to APPEND to an existing note** — use append_to_note instead.
+        **DO NOT use this to APPEND to an existing note** — use update_note instead.
 
         Returns the file_path of the newly created note.
         Notes created by the agent are placed in the review queue (review_status: pending).
@@ -316,21 +326,12 @@ class VaultTools:
         normalized_tags = _normalize_tags(tags)
         
         try:
-            note = await _to_thread(
-                self._vault.create_from_template,
-                note_type,
-                {
-                    "title": title,
-                    "domain": domain,
-                    "tags": normalized_tags or [],
-                    "review_status": "pending",
-                },
-                body,
+            from monocle.services.notes import create_note as _create_note
+
+            note = await _create_note(
+                self._vault, self._reindex_queue, title, body,
+                note_type, domain, normalized_tags,
             )
-            await _to_thread(self._vault.write_note, note.file_path, note)
-            # Trigger re-index so the new note is embedded and searchable immediately
-            if self._reindex_queue is not None:
-                self._reindex_queue.push(note.file_path)
             return json.dumps(
                 {"file_path": note.file_path, "title": note.title, "status": "created"}
             )
@@ -339,101 +340,22 @@ class VaultTools:
             raise
 
     # ------------------------------------------------------------------
-    # Tool: get_stats
+    # Tool: get_graph (canonical name — replaces former get_person_graph)
     # ------------------------------------------------------------------
 
     @ai_function
-    async def get_stats(self) -> str:
-        """Return a summary of vault statistics: note counts, type breakdown, and pending reviews."""
-        try:
-            from monocle.models import NoteMetadata
-
-            all_notes = await _to_thread(
-                self._vault.list_notes,
-                None,  # folder
-                None,  # type
-                None,  # domain
-                "updated",
-                1000,
-                0,
-            )
-            index_stats = await _to_thread(self._index.get_stats)
-
-            by_type: dict[str, int] = {}
-            by_domain: dict[str, int] = {}
-            pending = 0
-            for ref in all_notes.items:
-                by_type[ref.type] = by_type.get(ref.type, 0) + 1
-                by_domain[ref.domain] = by_domain.get(ref.domain, 0) + 1
-                if ref.review_status == "pending":
-                    pending += 1
-
-            return json.dumps(
-                {
-                    "total_notes": all_notes.total,
-                    "total_chunks": index_stats.total_chunks,
-                    "notes_by_type": by_type,
-                    "notes_by_domain": by_domain,
-                    "pending_review": pending,
-                }
-            )
-        except Exception as exc:
-            logger.warning("get_stats tool error: %s", exc)
-            raise
-
-    # ------------------------------------------------------------------
-    # Tool: list_notes
-    # ------------------------------------------------------------------
-
-    @ai_function
-    async def list_notes(
-        self,
-        note_type: Annotated[str | None, "Filter by note type, e.g. 'person_note'"] = None,
-        domain: Annotated[str | None, "Filter by domain, e.g. 'work'"] = None,
-        limit: Annotated[int, "Maximum number of notes to return (1–20)"] = 10,
-    ) -> str:
-        """List notes from the vault with optional type and domain filters."""
-        try:
-            n = max(1, min(limit, _MAX_LIST_RESULTS))
-            page = await _to_thread(
-                self._vault.list_notes,
-                None,  # folder
-                note_type,
-                domain,
-                "updated",
-                n,
-                0,
-            )
-            items = [
-                {
-                    "file_path": ref.file_path,
-                    "title": ref.title,
-                    "type": ref.type,
-                    "domain": ref.domain,
-                    "updated": ref.updated.isoformat() if ref.updated else None,
-                }
-                for ref in page.items
-            ]
-            return json.dumps({"total": page.total, "items": items})
-        except Exception as exc:
-            logger.warning("list_notes tool error: %s", exc)
-            raise
-
-    # ------------------------------------------------------------------
-    # Tool: get_person_graph
-    # ------------------------------------------------------------------
-
-    @ai_function
-    async def get_person_graph(
+    async def get_graph(
         self,
         name_or_path: Annotated[
             str,
             "Person name (e.g. 'Alice') or vault-relative path (e.g. 'people/alice.md')",
         ],
     ) -> str:
-        """Return the first-degree relationship graph for a person in the vault.
+        """Return the first-degree relationship graph for an entity in the vault.
 
-        Shows which notes mention the person and what the relationships are.
+        Canonical operation — see ``docs/tool-contracts.md § get_graph``.
+
+        Shows which notes mention the entity and what the relationships are.
         """
         try:
             if self._graph_builder is None:
@@ -446,13 +368,9 @@ class VaultTools:
             else:
                 focus = name_or_path
 
-            graph = await _to_thread(
-                self._graph_builder.build,
-                focus,  # focus
-                1,       # max_degree=1 (immediate connections only)
-                None,    # types
-                50,      # n
-            )
+            from monocle.services.graph import get_graph as _get_graph
+
+            graph = await _get_graph(self._graph_builder, focus, 1, None, 50)
             return json.dumps(
                 {
                     "focus": graph.focus,
@@ -474,114 +392,15 @@ class VaultTools:
                 }
             )
         except Exception as exc:
-            logger.warning("get_person_graph tool error: %s", exc)
+            logger.warning("get_graph tool error: %s", exc)
             raise
 
     # ------------------------------------------------------------------
-    # Tool: append_to_note
+    # Tool: create_reference_from_url (canonical name — replaces former fetch_and_summarize_url)
     # ------------------------------------------------------------------
 
     @ai_function
-    async def append_to_note(
-        self,
-        query: Annotated[str, "Person name, title, or topic to find the target note (e.g. 'Lucas Gallagher')"],
-        content: Annotated[str, "New content to append to the existing note body (required — must not be empty)"],
-    ) -> str:
-        """Append new content to an EXISTING note (WRITE operation — both query and content are required).
-
-        **IMPORTANT: Use ONLY when the user explicitly wants to ADD or APPEND to an EXISTING note.**
-        Examples: 'add to my note on Alice', 'update Lucas's note with <new info>'.
-
-        **DO NOT use this to CREATE a new note** — use create_note instead.
-        Do NOT use this for reading/looking up notes — use search_vault or read_note instead.
-
-        Returns JSON with file_path, title, and status. Fails with error if note not found.
-        """
-        if len(content) > _MAX_BODY_LENGTH:
-            raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
-
-        # Unwrap JSON-encoded content that the LLM occasionally produces,
-        # e.g. {"body": "actual text"} instead of the plain text string.
-        content = _try_unwrap_json_body(content)
-
-        try:
-            # Step 1: Prefer exact wikilink resolution (works even when index is empty)
-            file_path: str | None = await _to_thread(self._vault.resolve_wikilink, query)
-
-            # Step 2: Fall back to title-prefix scan across all notes
-            if not file_path:
-                query_lower = query.lower()
-                page = await _to_thread(
-                    self._vault.list_notes,
-                    None,  # folder
-                    None,  # type
-                    None,  # domain
-                    "updated",
-                    500,
-                    0,
-                )
-                # Prefer an exact title match, then a starts-with match
-                exact = next(
-                    (r for r in page.items if r.title.lower() == query_lower), None
-                )
-                starts = next(
-                    (r for r in page.items if r.title.lower().startswith(query_lower)), None
-                )
-                best = exact or starts
-                if best:
-                    file_path = best.file_path
-
-            # Step 3: Fall back to semantic search when the index is populated AND
-            # an AI embedder is available. Without an embedder, we cannot compute
-            # embeddings and would get a DimensionMismatch error if we tried to search.
-            # IMPORTANT: require a minimum similarity threshold (0.6) to avoid matching
-            # unrelated notes (e.g., "Lucas" when searching for "Grayson")
-            if not file_path and self._ai is not None:
-                embedding = await self._ai.embed(query)
-                scored = await _to_thread(
-                    self._index.search,
-                    embedding,
-                    1,
-                    None,
-                    query,
-                )
-                # Only accept semantic match if similarity is reasonably high (0.6+)
-                if scored and scored[0].score >= 0.6:
-                    file_path = scored[0].file_path
-
-            if not file_path:
-                return json.dumps(
-                    {"error": f"No note found matching {query!r}. Use create_note to start one."}
-                )
-
-            # Read the full note
-            note = await _to_thread(self._vault.read_note, file_path)
-
-            existing_body = note.body or ""
-
-            # Merge: use AI to integrate new content when the note already has a body,
-            # so facts are synthesised rather than raw-appended. Falls back to simple
-            # append if AI is unavailable or returns an unusable result.
-            note.body = await self._merge_body(existing_body, content)
-
-            # Persist and re-index
-            await _to_thread(self._vault.write_note, file_path, note)
-            if self._reindex_queue is not None:
-                self._reindex_queue.push(file_path)
-
-            return json.dumps(
-                {"file_path": file_path, "title": note.title, "status": "updated"}
-            )
-        except Exception as exc:
-            logger.warning("append_to_note tool error for %r: %s", query, exc)
-            raise
-
-    # ------------------------------------------------------------------
-    # Tool: fetch_and_summarize_url
-    # ------------------------------------------------------------------
-
-    @ai_function
-    async def fetch_and_summarize_url(
+    async def create_reference_from_url(
         self,
         url: Annotated[str, "The https:// URL to fetch and summarize into a reference note"],
         extra_context: Annotated[
@@ -591,6 +410,8 @@ class VaultTools:
     ) -> str:
         """Fetch a web page, summarise its content with AI, and create a reference note.
 
+        Canonical operation — see ``docs/tool-contracts.md § create_reference_from_url``.
+
         Use this when the user asks to create a reference note from a URL.
         The tool fetches the page, strips HTML boilerplate, uses AI to write a
         structured Markdown summary with ## Summary and ## Key Points sections,
@@ -598,132 +419,28 @@ class VaultTools:
 
         Returns JSON with file_path, title, url, and status.
         """
-        import html as _html
-        import re as _re
-        from urllib.parse import urlparse
-
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"Only http/https URLs are supported, got: {parsed.scheme!r}")
-
         if self._ai is None:
             raise RuntimeError(
-                "fetch_and_summarize_url requires an AI provider. "
+                "create_reference_from_url requires an AI provider. "
                 "Configure ai.provider in config.yaml."
             )
 
-        # 1. Fetch the page
-        _MAX_FETCH_BYTES = 500_000
-        _MAX_TEXT_CHARS = 20_000
         try:
-            import httpx
+            from monocle.services.references import create_reference_from_url as _create_ref
 
-            async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-                resp = await client.get(
-                    url,
-                    headers={"User-Agent": "Monocle-Reference-Bot/1.0"},
-                )
-                resp.raise_for_status()
-                raw = resp.content[:_MAX_FETCH_BYTES].decode("utf-8", errors="replace")
-        except Exception as exc:
-            raise RuntimeError(f"Failed to fetch {url}: {exc}") from exc
-
-        # 2. Strip HTML
-        raw = _re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw, flags=_re.DOTALL | _re.IGNORECASE)
-        raw = _re.sub(r"<[^>]+>", " ", raw)
-        raw = _html.unescape(raw)
-        page_text = _re.sub(r"\s+", " ", raw).strip()[:_MAX_TEXT_CHARS]
-
-        # 3. Ask AI to summarise
-        prompt = (
-            "You are a knowledge assistant. Summarise the following web page into a concise "
-            "Markdown reference note.\n\n"
-            "Instructions:\n"
-            "- Write a `## Summary` section (3–5 sentences) then a `## Key Points` bullet list.\n"
-            "- Preserve any important code examples in fenced code blocks.\n"
-            "- Do NOT reproduce nav bars, cookie banners, or unrelated sidebar text.\n"
-            "- End with a JSON block fenced with ```json containing:\n"
-            '  {"title": "<short descriptive title>", "tags": ["tag1", "tag2"], '
-            '"domain": "<work|personal|technology|...>"}\n\n'
-            f"Web page URL: {url}\n\n"
-            f"Content:\n{page_text}"
-        )
-        if extra_context:
-            prompt += f"\n\nAdditional instructions: {extra_context}"
-
-        try:
-            raw_response = await self._ai.chat(
-                [{"role": "user", "content": prompt}],
-                stream=False,
+            note = await _create_ref(
+                self._vault, self._ai, self._reindex_queue, url, extra_context,
             )
-            if not isinstance(raw_response, str):
-                parts: list[str] = []
-                async for chunk in raw_response:
-                    parts.append(chunk)
-                raw_response = "".join(parts)
-        except Exception as exc:
-            raise RuntimeError(f"AI summarisation failed: {exc}") from exc
-
-        # 4. Extract trailing JSON metadata block
-        # Use finditer to get all matches, then take the LAST one to avoid picking
-        # up example JSON code that may appear earlier in the response.
-        json_matches = list(_re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL))
-        if json_matches:
-            json_match = json_matches[-1]  # Take the last match
-            try:
-                meta = json.loads(json_match.group(1))
-            except json.JSONDecodeError:
-                meta = {}
-            body = raw_response[: json_match.start()].strip()
-        else:
-            meta = {}
-            body = raw_response.strip()
-
-        title = meta.get("title") or url
-        ai_tags = _normalize_tags(meta.get("tags")) or []
-        domain = meta.get("domain") or "personal"
-
-        body = f"> Source: {url}\n\n{body}"
-        if len(body) > _MAX_BODY_LENGTH:
-            body = body[:_MAX_BODY_LENGTH]
-
-        # 5. Create the note
-        try:
-            from monocle.models import NoteMetadata
-
-            NoteMetadata(
-                type="reference",
-                domain=domain,
-                tags=["web-reference"] + ai_tags,
-                review_status="pending",
-                source="web",
-            )
-            note = await _to_thread(
-                self._vault.create_from_template,
-                "reference",
-                {
-                    "title": title,
-                    "domain": domain,
-                    "tags": ["web-reference"] + ai_tags,
-                    "review_status": "pending",
-                    "source": "web",
-                },
-                body,
-            )
-            await _to_thread(self._vault.write_note, note.file_path, note)
-            if self._reindex_queue is not None:
-                self._reindex_queue.push(note.file_path)
             return json.dumps(
                 {
                     "file_path": note.file_path,
                     "title": note.title,
                     "url": url,
                     "status": "created",
-                    "summary": body,
                 }
             )
         except Exception as exc:
-            logger.warning("fetch_and_summarize_url tool error: %s", exc, exc_info=True)
+            logger.warning("create_reference_from_url tool error: %s", exc, exc_info=True)
             raise
 
     async def _merge_body(self, existing: str, new_content: str) -> str:

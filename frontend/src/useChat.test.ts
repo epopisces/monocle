@@ -148,22 +148,22 @@ describe('useChat — send() SSE events', () => {
 
   it('tool_error event sets error on matching tool call', async () => {
     mockStreamChat.mockReturnValue(makeStream(
-      { event: 'tool_call', data: { name: 'write_note', result_count: 0 } },
-      { event: 'tool_error', data: { name: 'write_note', error: 'Permission denied' } },
+      { event: 'tool_call', data: { name: 'update_note', result_count: 0 } },
+      { event: 'tool_error', data: { name: 'update_note', error: 'Permission denied' } },
       DONE(),
     ))
     const { result } = renderHook(() => useChat())
     await act(async () => { await result.current.send('write something') })
     const tc = result.current.thread[1].toolCalls![0]
-    expect(tc.name).toBe('write_note')
+    expect(tc.name).toBe('update_note')
     expect(tc.error).toBe('Permission denied')
   })
 
   it('tool_error does not corrupt non-matching tool calls', async () => {
     mockStreamChat.mockReturnValue(makeStream(
       { event: 'tool_call', data: { name: 'search_vault', result_count: 1 } },
-      { event: 'tool_call', data: { name: 'write_note', result_count: 0 } },
-      { event: 'tool_error', data: { name: 'write_note', error: 'err' } },
+      { event: 'tool_call', data: { name: 'update_note', result_count: 0 } },
+      { event: 'tool_error', data: { name: 'update_note', error: 'err' } },
       DONE(),
     ))
     const { result } = renderHook(() => useChat())

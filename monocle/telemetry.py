@@ -32,6 +32,38 @@ _meter = None
 _configured = False
 
 
+class _HealthCheckFilterSpanProcessor:
+    """Span processor that filters out /api/health traces before export.
+    
+    Wraps the real BatchSpanProcessor to drop spans where http.route == "/api/health".
+    This reduces trace noise while keeping application traces intact.
+    """
+
+    def __init__(self, wrapped_processor: Any) -> None:
+        self.wrapped_processor = wrapped_processor
+
+    def on_start(self, span: Any, parent_context: Any = None) -> None:
+        self.wrapped_processor.on_start(span, parent_context)
+
+    def on_end(self, span: Any) -> None:
+        # Filter: skip health check spans (including /api/health/* endpoints like /api/health/models)
+        route = span.attributes.get("http.route", "")
+        if route.startswith("/api/health"):
+            return
+        self.wrapped_processor.on_end(span)
+
+    def _on_ending(self, span: Any) -> None:
+        # Required by OTel SDK lifecycle — forward to wrapped processor
+        if hasattr(self.wrapped_processor, "_on_ending"):
+            self.wrapped_processor._on_ending(span)
+
+    def shutdown(self) -> None:
+        self.wrapped_processor.shutdown()
+
+    def force_flush(self, timeout_millis: int = 30000) -> bool:
+        return self.wrapped_processor.force_flush(timeout_millis)
+
+
 def configure_telemetry(settings: "Settings") -> None:
     """Wire up TracerProvider, MeterProvider, and root-logger handler.
 
@@ -70,7 +102,9 @@ def configure_telemetry(settings: "Settings") -> None:
             )
 
         tracer_provider = TracerProvider(resource=resource)
-        tracer_provider.add_span_processor(BatchSpanProcessor(span_exporter))
+        batch_processor = BatchSpanProcessor(span_exporter)
+        filtered_processor = _HealthCheckFilterSpanProcessor(batch_processor)
+        tracer_provider.add_span_processor(filtered_processor)
         trace.set_tracer_provider(tracer_provider)
 
         # --- Metric exporter ---
@@ -88,6 +122,41 @@ def configure_telemetry(settings: "Settings") -> None:
         metric_reader = PeriodicExportingMetricReader(metric_exporter)
         meter_provider = MeterProvider(resource=resource, metric_readers=[metric_reader])
         metrics.set_meter_provider(meter_provider)
+
+        # --- Logs/Events exporter (for AI Toolkit Input/Output columns) ---
+        # Note: These are private/experimental APIs (_events, _logs, _log_exporter)
+        # and may break across OTel releases. Wrapped in try/except for graceful degradation.
+        try:
+            from opentelemetry import _events, _logs
+            from opentelemetry.sdk._events import EventLoggerProvider
+            from opentelemetry.sdk._logs import LoggerProvider
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+
+            if settings.telemetry.otlp_transport == "grpc":
+                from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
+
+                log_exporter = GrpcLogExporter(endpoint=settings.telemetry.otlp_endpoint)
+            else:
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+
+                log_exporter = OTLPLogExporter(
+                    endpoint=f"{settings.telemetry.otlp_endpoint}/v1/logs"
+                )
+
+            log_provider = LoggerProvider(resource=resource)
+            log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+            _logs.set_logger_provider(log_provider)
+
+            event_logger_provider = EventLoggerProvider()
+            _events.set_event_logger_provider(event_logger_provider)
+        except (ImportError, AttributeError) as e:
+            # Private APIs may not be available in all OTel versions
+            logger.warning(
+                "OpenTelemetry private logs/events APIs unavailable (%s) — "
+                "AI Toolkit Input/Output columns will not be populated. "
+                "This is expected if OTel has moved these to public APIs or removed them.",
+                type(e).__name__,
+            )
 
         # --- Auto-instrumentations ---
         LoggingInstrumentor().instrument(set_logging_format=True)
@@ -193,6 +262,50 @@ async def timed(histogram: Any, **attrs: Any) -> AsyncIterator[None]:
             pass
 
 
+def add_user_message_event(span: Any, content: str, max_length: int = 1000) -> None:
+    """Record a gen_ai.user.message event for AI Toolkit Input/Output columns.
+
+    Allows the AI Toolkit to populate the "Input" column in the trace viewer.
+    Uses the OTel Events API (logs signal) to ensure events reach the AI Toolkit.
+
+    Args:
+        span: OTel span object (kept for backward compatibility; not strictly required).
+        content: User message text to record.
+        max_length: Maximum characters to record (default 1000 to avoid bloating events).
+    """
+    try:
+        from opentelemetry._events import Event, get_event_logger
+
+        truncated = content[:max_length] if content else ""
+        get_event_logger("monocle").emit(
+            Event(name="gen_ai.user.message", body={"content": truncated})
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def add_assistant_message_event(span: Any, content: str, max_length: int = 1000) -> None:
+    """Record a gen_ai.assistant.message event for AI Toolkit Input/Output columns.
+
+    Allows the AI Toolkit to populate the "Output" column in the trace viewer.
+    Uses the OTel Events API (logs signal) to ensure events reach the AI Toolkit.
+
+    Args:
+        span: OTel span object (kept for backward compatibility; not strictly required).
+        content: Assistant message text to record.
+        max_length: Maximum characters to record (default 1000 to avoid bloating events).
+    """
+    try:
+        from opentelemetry._events import Event, get_event_logger
+
+        truncated = content[:max_length] if content else ""
+        get_event_logger("monocle").emit(
+            Event(name="gen_ai.assistant.message", body={"content": truncated})
+        )
+    except Exception:  # noqa: BLE001
+        pass
+
+
 #endregion
 
 # ---------------------------------------------------------------------------
@@ -202,6 +315,9 @@ async def timed(histogram: Any, **attrs: Any) -> AsyncIterator[None]:
 
 class _NoOpSpan:
     def set_attribute(self, key: str, value: Any) -> None:
+        pass
+
+    def add_event(self, name: str, attributes: dict | None = None) -> None:
         pass
 
 

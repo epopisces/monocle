@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import SettingsModal from './components/SettingsModal'
 import { getSettings, patchSettings, rotateMcpKey } from './api/settings'
+import { getModelStatus } from './api/health'
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
@@ -9,6 +10,12 @@ vi.mock('./api/settings', () => ({
   getSettings: vi.fn(),
   patchSettings: vi.fn(),
   rotateMcpKey: vi.fn(),
+}))
+
+vi.mock('./api/health', () => ({
+  getHealth: vi.fn(),
+  // Default: never resolves — prevents state-update errors in tests that don't care
+  getModelStatus: vi.fn(() => new Promise(() => undefined)),
 }))
 
 // Replace useTheme with a controlled mock so tests don't need ThemeContext wiring
@@ -68,10 +75,20 @@ describe('SettingsModal — loading state', () => {
 })
 
 describe('SettingsModal — loaded state', () => {
+  const mockModelStatus = {
+    provider: 'ollama',
+    provider_reachable: true,
+    models: [
+      { name: 'llama3.2', role: 'chat' as const, available: true, loaded: false },
+      { name: 'nomic-embed-text', role: 'embed' as const, available: true, loaded: true },
+    ],
+  }
+
   beforeEach(() => {
     mockSetTheme.mockReset()
     vi.mocked(getSettings).mockResolvedValue({ ...mockSettings })
     vi.mocked(patchSettings).mockResolvedValue({ ...mockSettings })
+    vi.mocked(getModelStatus).mockResolvedValue(mockModelStatus)
   })
   afterEach(() => vi.restoreAllMocks())
 
@@ -127,6 +144,36 @@ describe('SettingsModal — loaded state', () => {
     await screen.findByTestId('ai-provider-select')
     fireEvent.click(screen.getByTestId('theme-radio-light'))
     expect(mockSetTheme).toHaveBeenCalledWith('light')
+  })
+
+  it('shows model status panel when model data loads', async () => {
+    renderModal()
+    await screen.findByTestId('ai-provider-select')
+    await waitFor(() => expect(screen.getByTestId('model-status-panel')).toBeInTheDocument())
+    expect(screen.getByTestId('model-status-chat')).toBeInTheDocument()
+    expect(screen.getByTestId('model-status-embed')).toBeInTheDocument()
+  })
+
+  it('shows badge "available" for chat model that is not loaded', async () => {
+    renderModal()
+    await screen.findByTestId('ai-provider-select')
+    await waitFor(() => {
+      const chatRow = screen.getByTestId('model-status-chat')
+      expect(chatRow).toHaveTextContent('available')
+    })
+  })
+
+  it('shows provider-unreachable message when provider is down', async () => {
+    vi.mocked(getModelStatus).mockResolvedValueOnce({
+      provider: 'ollama',
+      provider_reachable: false,
+      models: [],
+    })
+    renderModal()
+    await screen.findByTestId('ai-provider-select')
+    await waitFor(() =>
+      expect(screen.getByTestId('provider-unreachable')).toBeInTheDocument(),
+    )
   })
 })
 

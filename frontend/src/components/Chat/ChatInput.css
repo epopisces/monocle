@@ -10,68 +10,63 @@
   overflow: hidden;
 }
 
-/* URL suggestion banner */
-.chat-input__url-suggestion {
+/* URL pills row — shown when one or more URLs are detected in the input */
+.chat-input__url-pills {
   display: flex;
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-2) var(--space-4);
-  background: color-mix(in srgb, var(--accent) 12%, var(--bg-surface));
-  border-bottom: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
+  border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
   flex-wrap: wrap;
+  min-height: 0;
 }
 
-.chat-input__url-suggestion-text {
+.chat-input__url-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-2);
+  border-radius: 99px;
   font-size: var(--text-sm, 0.8125rem);
+  font-family: var(--font-ui);
+  cursor: pointer;
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-surface));
   color: var(--text-primary);
-  flex: 1;
-  min-width: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  transition: background 0.15s, opacity 0.15s, border-color 0.15s;
+  max-width: 220px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.chat-input__url-suggestion-actions {
-  display: flex;
-  gap: var(--space-2);
-  flex-shrink: 0;
+.chat-input__url-pill:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent) 28%, var(--bg-surface));
 }
 
-.chat-input__url-btn {
-  padding: 2px var(--space-2);
-  border-radius: var(--radius-btn);
-  font-size: var(--text-sm, 0.8125rem);
-  font-family: var(--font-ui);
-  cursor: pointer;
-  border: 1px solid transparent;
-  transition: background 0.15s, opacity 0.15s;
-}
-
-.chat-input__url-btn--yes {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-}
-
-.chat-input__url-btn--yes:hover:not(:disabled) {
-  background: var(--accent-hover, var(--accent));
-  opacity: 0.9;
-}
-
-.chat-input__url-btn--no {
-  background: transparent;
+.chat-input__url-pill--opted-out {
+  background: var(--bg-surface);
   color: var(--text-secondary);
   border-color: var(--border);
+  text-decoration: line-through;
+  opacity: 0.6;
 }
 
-.chat-input__url-btn--no:hover:not(:disabled) {
-  background: var(--bg-elevated);
-  color: var(--text-primary);
+.chat-input__url-pill--opted-out:hover:not(:disabled) {
+  opacity: 0.85;
 }
 
-.chat-input__url-btn:disabled {
+.chat-input__url-pill:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+.chat-input__url-pill-x {
+  font-style: normal;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  opacity: 0.7;
 }
 
 /* Textarea + action row */

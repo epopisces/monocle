@@ -167,6 +167,12 @@ def mock_ai():
     ai.transcribe = AsyncMock(return_value="transcribed audio content")
     ai.chat = AsyncMock(side_effect=_chat_side_effect)
     ai.extract_note_metadata = AsyncMock(return_value=NoteMetadata())
+    from monocle.models import ProviderModelsResponse
+    ai.get_model_status = AsyncMock(return_value=ProviderModelsResponse(
+        provider="ollama",
+        provider_reachable=True,
+        models=[],
+    ))
     return ai
 
 

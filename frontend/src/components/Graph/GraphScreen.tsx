@@ -5,6 +5,15 @@ import { getGraph, type GraphData, type GraphNode, type GraphEdge } from '../../
 import { listNotes, type NoteRef } from '../../api/notes'
 import './GraphScreen.css'
 
+// ── Lazy-load aframe on component mount to reduce initial bundle size ────
+const loadAFrame = async () => {
+  try {
+    await import('aframe')
+  } catch (err) {
+    console.warn('Failed to load aframe:', err)
+  }
+}
+
 // ── Constants ──────────────────────────────────────────────────────
 
 const POSITIONS_KEY = 'monocle.graph.positions'
@@ -149,6 +158,11 @@ export default function GraphScreen() {
     } finally {
       setLoading(false)
     }
+  }, [])
+
+  // Lazy-load aframe when component mounts
+  useEffect(() => {
+    loadAFrame()
   }, [])
 
   // Initial load

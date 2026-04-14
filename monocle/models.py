@@ -6,6 +6,9 @@ pipeline, vault layer, index layer, and agent layer.  No business logic here.
 """
 from __future__ import annotations
 
+# Apply Python 3.14 compatibility patches BEFORE importing Pydantic
+import monocle.compat as _compat  # noqa: F401
+
 from datetime import datetime
 import base64 as _b64
 from typing import Annotated, Any, Generic, Literal, TypeVar
@@ -277,3 +280,39 @@ class RoutingDecision(BaseModel):
     confidence: float = 0.0
     fast_path: bool = False  # True when sentence_starters matched (no LLM used)
     rationale: str | None = None
+
+
+#endregion
+
+# ---------------------------------------------------------------------------
+#region #*   Provider / model status
+# ---------------------------------------------------------------------------
+
+
+class ModelStatus(BaseModel):
+    """Status of a single configured model role."""
+
+    name: str
+    """Model name as configured (e.g. "llama3.2", "nomic-embed-text")."""
+
+    role: Literal["chat", "embed", "transcribe"]
+    """Functional role this model serves."""
+
+    available: bool
+    """True when the model is pulled/accessible on the provider (can be used)."""
+
+    loaded: bool
+    """True when the model is currently resident in memory/GPU (ready immediately)."""
+
+
+class ProviderModelsResponse(BaseModel):
+    """Response for GET /api/health/models."""
+
+    provider: str
+    """Provider name: "ollama", "foundry_local", or "azure"."""
+
+    provider_reachable: bool
+    """False when the provider HTTP endpoint could not be contacted."""
+
+    models: list[ModelStatus]
+    """Status of each configured model role."""

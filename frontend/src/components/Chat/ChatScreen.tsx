@@ -58,13 +58,13 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
   }
 
   // Wrap send to resolve pending tool hints for populate-style starters
-  const handleSend = useCallback((content: string, inputToolHint?: string) => {
+  const handleSend = useCallback((content: string, inputToolHint?: string, fetchUrls?: string[]) => {
     let toolHint: string | undefined = inputToolHint
     if (!toolHint && pendingHint && content.startsWith(pendingHint.prefix)) {
       toolHint = pendingHint.tool
     }
     setPendingHint(null)
-    send(content, toolHint)
+    send(content, toolHint, fetchUrls)
   }, [pendingHint, send])
 
   const showStarters = thread.length === 0

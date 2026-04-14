@@ -105,3 +105,33 @@
   color: var(--warning);
 }
 
+/* ── Model status badges ──────────────────────────────────────────────────── */
+.topbar-models-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.topbar-model-badge {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: var(--text-xs, 0.75rem);
+  cursor: default;
+  padding: 2px var(--space-2);
+  border-radius: var(--radius-btn);
+  white-space: nowrap;
+  font-weight: 500;
+}
+
+.topbar-model-badge--loaded {
+  color: var(--success);
+  background-color: color-mix(in srgb, var(--success) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
+}
+
+.topbar-model-badge--cold {
+  color: var(--warning);
+  background-color: color-mix(in srgb, var(--warning) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+}

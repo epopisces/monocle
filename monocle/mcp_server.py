@@ -1,19 +1,23 @@
-"""
-monocle/mcp_server.py — FastMCP server with 8 vault tools.
+"""monocle/mcp_server.py — Canonical MCP tool surface for Monocle vault operations.
 
-The server is mounted at /mcp in main.py as a Starlette sub-application.
-All requests are authenticated via an x-monocle-key header or ?key= query
-parameter before reaching the MCP handler.
+This module is the **authoritative schema definition** for all Monocle-owned
+data operations.  Every tool listed here maps 1:1 to a shared service function
+in ``monocle.services.*`` with no inline business logic.  Return contracts are
+frozen in ``docs/tool-contracts.md``; breaking changes require versioned
+acceptance.
 
-Tools exposed:
-  search_vault    — Semantic search returning scored note chunks
-  read_note       — Read a full note by vault-relative path
-  browse_recent   — List recently-updated notes
-  capture_thought — Ingest a raw text via the full IngestPipeline
-  create_note     — Create a note via VaultLayer.create_from_template
-  update_note     — Overwrite an existing note body
-  get_graph       — Return ego-graph data for a focus entity
-  get_stats       — Return vault statistics summary
+The server is mounted at ``/mcp`` in ``main.py`` as a Starlette sub-application.
+All requests are authenticated via an ``x-monocle-key`` header or ``?key=``
+query parameter before reaching the MCP handler.
+
+Canonical tools (7):
+  search_vault              — Semantic search returning scored note chunks
+  read_note                 — Read a full note by vault-relative path
+  capture_thought           — Ingest raw text via the full IngestPipeline
+  create_note               — Create a note via VaultLayer.create_from_template
+  update_note               — Overwrite an existing note body
+  get_graph                 — Return ego-graph data for a focus entity
+  create_reference_from_url — Fetch a web page, summarise it, and create a reference note
 
 Auth:
   x-monocle-key request header  (preferred)
@@ -22,6 +26,11 @@ Auth:
 A missing or invalid key returns HTTP 401 before the request reaches FastMCP.
 If the MCP_ACCESS_KEY environment variable is not set, ALL requests are
 rejected (every request returns 401) so the server is safe out-of-the-box.
+
+See also:
+  docs/tool-contracts.md — Frozen contract definitions (input/output schemas)
+  monocle/services/      — Shared service implementations
+  monocle/agents/tools.py — Chat-agent thin wrappers (mirrors this surface)
 """
 from __future__ import annotations
 
@@ -29,8 +38,7 @@ import hmac
 import json
 import logging
 import os
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated
 from urllib.parse import parse_qs
 
 from mcp.server.fastmcp import FastMCP
@@ -122,11 +130,6 @@ mcp = FastMCP("monocle", stateless_http=True)
 #region #*   Constants
 # ---------------------------------------------------------------------------
 
-_MAX_SEARCH_RESULTS = 10
-_MAX_LIST_RESULTS = 50
-_MAX_BODY_LENGTH = 50_000  # matches IngestRequest.content character limit
-
-
 #endregion
 
 # ---------------------------------------------------------------------------
@@ -134,59 +137,8 @@ _MAX_BODY_LENGTH = 50_000  # matches IngestRequest.content character limit
 # ---------------------------------------------------------------------------
 
 
-def _normalize_tags(value: Any) -> list[str] | None:
-    """Normalise tags from any LLM-produced format to a flat list[str].
-
-    LLMs frequently send tags as:
-    - A proper JSON array: ["work", "python"]
-    - A JSON array string: '["work", "python"]'
-    - A Python literal dict: "{'category': ['work', 'python']}"
-    - A plain comma-separated string: "work, python"
-    - A dict object: {"category": ["work", "python"]}
-    """
-    if value is None or isinstance(value, list):
-        return value
-    if isinstance(value, dict):
-        result: list[str] = []
-        for v in value.values():
-            if isinstance(v, list):
-                result.extend(str(x) for x in v if x is not None)
-            elif v is not None:
-                result.append(str(v))
-        return result or None
-    if isinstance(value, str):
-        s = value.strip()
-        if not s:
-            return None
-        # Try JSON first (handles double-quoted strings)
-        try:
-            parsed = json.loads(s)
-            return _normalize_tags(parsed)
-        except (json.JSONDecodeError, ValueError):
-            pass
-        # Try Python literal eval (handles single-quoted strings / Python dicts)
-        try:
-            import ast
-            parsed = ast.literal_eval(s)
-            return _normalize_tags(parsed)
-        except (ValueError, SyntaxError):
-            pass
-        # Final fallback: comma-separated plain text
-        return [t.strip() for t in s.split(",") if t.strip()] or None
-    return [str(value)]
-
-
-#endregion
-
-# ---------------------------------------------------------------------------
-#region #*   Helper: run sync vault / index calls in a thread
-# ---------------------------------------------------------------------------
-
-
-async def _to_thread(fn, *args):
-    import asyncio
-
-    return await asyncio.to_thread(fn, *args)
+# Canonical tag normaliser — shared across MCP, agent tools, and services.
+from monocle.services.tags import normalize_tags as _normalize_tags  # noqa: E402
 
 
 #endregion
@@ -205,6 +157,8 @@ async def search_vault(
 ) -> str:
     """Search the vault using semantic similarity and return matching note excerpts.
 
+    Canonical operation — see ``docs/tool-contracts.md § search_vault``.
+
     Args:
         query: The search query text.
         n_results: Maximum number of results to return (1–10).
@@ -212,31 +166,15 @@ async def search_vault(
         domain: Optional domain filter, e.g. 'work'.
 
     Returns:
-        JSON array of objects with file_path, similarity, and chunk fields.
+        JSON array of objects with ``file_path``, ``similarity``, and ``chunk``.
     """
     _state.assert_ready()
-    if _state.ai is None:
-        raise RuntimeError(
-            "search_vault requires an AI provider for embeddings, "
-            "but the server was started without one (ai=None). "
-            "Configure an AI provider in config.yaml to enable semantic search."
-        )
-    n = max(1, min(n_results, _MAX_SEARCH_RESULTS))
-    filters: dict = {}
-    if note_type:
-        filters["type"] = note_type
-    if domain:
-        filters["domain"] = domain
 
-    embedding = await _state.ai.embed(query)
-    scored = await _to_thread(
-        _state.index.search,
-        embedding,
-        n,
-        filters or None,
-        query,
+    from monocle.services.search import search_vault as _search_vault
+
+    scored = await _search_vault(
+        _state.index, _state.ai, query, n_results, note_type, domain,
     )
-
     return json.dumps(
         [
             {
@@ -260,14 +198,20 @@ async def search_vault(
 async def read_note(file_path: str) -> str:
     """Read a full note from the vault and return its metadata and body.
 
+    Canonical operation — see ``docs/tool-contracts.md § read_note``.
+
     Args:
         file_path: Vault-relative path to the note, e.g. 'people/alice.md'.
 
     Returns:
-        JSON object with file_path, title, type, domain, tags, people, and body.
+        JSON object with ``file_path``, ``title``, ``type``, ``domain``,
+        ``tags``, ``people``, and ``body``.
     """
     _state.assert_ready()
-    note = await _to_thread(_state.vault.read_note, file_path)
+
+    from monocle.services.notes import read_note as _read_note
+
+    note = await _read_note(_state.vault, file_path)
     return json.dumps(
         {
             "file_path": note.file_path,
@@ -284,54 +228,6 @@ async def read_note(file_path: str) -> str:
 #endregion
 
 # ---------------------------------------------------------------------------
-#region #*   Tool: browse_recent
-# ---------------------------------------------------------------------------
-
-
-@mcp.tool()
-async def browse_recent(
-    limit: int = 10,
-    note_type: str | None = None,
-    domain: str | None = None,
-) -> str:
-    """List the most recently updated notes in the vault.
-
-    Args:
-        limit: Maximum number of notes to return (1–50).
-        note_type: Optional note type filter, e.g. 'decision'.
-        domain: Optional domain filter, e.g. 'work'.
-
-    Returns:
-        JSON array of objects with file_path, title, type, domain, and updated fields.
-    """
-    _state.assert_ready()
-    n = max(1, min(limit, _MAX_LIST_RESULTS))
-    result = await _to_thread(
-        _state.vault.list_notes,
-        None,       # folder
-        note_type,  # type filter
-        domain,     # domain filter
-        "updated",  # sort key
-        n,          # limit
-        0,          # offset
-    )
-    return json.dumps(
-        [
-            {
-                "file_path": ref.file_path,
-                "title": ref.title,
-                "type": ref.type,
-                "domain": ref.domain,
-                "updated": ref.updated.isoformat() if ref.updated else None,
-            }
-            for ref in result.items
-        ]
-    )
-
-
-#endregion
-
-# ---------------------------------------------------------------------------
 #region #*   Tool: capture_thought
 # ---------------------------------------------------------------------------
 
@@ -339,6 +235,8 @@ async def browse_recent(
 @mcp.tool()
 async def capture_thought(content: str, source: str = "mcp") -> str:
     """Capture a raw text thought and run it through the full ingest pipeline.
+
+    Canonical operation — see ``docs/tool-contracts.md § capture_thought``.
 
     The pipeline routes the content, extracts metadata, scores confidence, and
     writes a new note to the vault.  The note may land in the review queue if
@@ -349,16 +247,14 @@ async def capture_thought(content: str, source: str = "mcp") -> str:
         source: Source identifier (default 'mcp').
 
     Returns:
-        JSON object with file_path, type, confidence, and review_status.
+        JSON object with ``file_path``, ``type``, ``confidence``, and
+        ``review_status``.
     """
     _state.assert_ready()
-    if len(content) > _MAX_BODY_LENGTH:
-        raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
 
-    from monocle.models import IngestRequest
+    from monocle.services.ingest import capture_thought as _capture_thought
 
-    req = IngestRequest(content=content, source=source)  # type: ignore[arg-type]
-    note, confidence = await _state.ingest_pipeline.run(req)
+    note, confidence = await _capture_thought(_state.ingest_pipeline, content, source)
     return json.dumps(
         {
             "file_path": note.file_path,
@@ -380,11 +276,13 @@ async def capture_thought(content: str, source: str = "mcp") -> str:
 async def create_note(
     title: str,
     body: str,
-    note_type: str = "other",
+    note_type: str = "observation",
     domain: str = "personal",
     tags: Annotated[list[str] | None, BeforeValidator(_normalize_tags)] = None,
 ) -> str:
     """Create a new note in the vault from a template.
+
+    Canonical operation — see ``docs/tool-contracts.md § create_note``.
 
     Notes created via MCP are placed in the review queue (review_status: pending).
 
@@ -396,104 +294,16 @@ async def create_note(
         tags: Optional list of topic tags.
 
     Returns:
-        JSON object with file_path, title, and status.
+        JSON object with ``file_path``, ``title``, and ``status``.
     """
     _state.assert_ready()
-    if len(body) > _MAX_BODY_LENGTH:
-        raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
 
-    from monocle.models import NoteMetadata
+    from monocle.services.notes import create_note as _create_note
 
-    metadata = NoteMetadata(
-        type=note_type,  # type: ignore[arg-type]
-        domain=domain,
-        tags=tags or [],
-        review_status="pending",
+    note = await _create_note(
+        _state.vault, _state.reindex_queue, title, body, note_type, domain, tags,
     )
-    note = await _to_thread(
-        _state.vault.create_from_template,
-        note_type,
-        {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
-        body,
-    )
-    await _to_thread(_state.vault.write_note, note.file_path, note)
-    if _state.reindex_queue is not None:
-        _state.reindex_queue.push(note.file_path)
     return json.dumps({"file_path": note.file_path, "title": note.title, "status": "created"})
-
-
-#endregion
-
-# ---------------------------------------------------------------------------
-#region #*   Helper: fetch and strip HTML from a URL
-# ---------------------------------------------------------------------------
-
-_MAX_FETCH_BYTES = 500_000  # 500 KB — cap before HTML stripping
-_MAX_TEXT_CHARS = 20_000    # chars fed to the LLM summariser
-
-_URL_SUMMARISE_PROMPT = """\
-You are a knowledge assistant. Summarise the following web page content into a concise Markdown reference note.
-
-Instructions:
-- Write 3–6 paragraphs covering the key ideas, arguments, and takeaways.
-- Use a short `## Summary` section at the top, then `## Key Points` as a bullet list.
-- Preserve any code examples, commands, or structured data verbatim in fenced code blocks.
-- Do NOT reproduce boilerplate navigation text, cookie banners, or unrelated sidebar content.
-- After the body, output a JSON block fenced with ```json containing:
-  {{"title": "<short descriptive title>", "tags": ["tag1", "tag2"], "domain": "<work|personal|technology|...>"}}
-
-Web page URL: {url}
-
-Content:
-{content}
-"""
-
-
-def _strip_html(raw: str) -> str:
-    """Remove HTML tags and decode entities, returning plain text."""
-    import html
-    import re
-
-    # Remove script/style blocks
-    raw = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", raw, flags=re.DOTALL | re.IGNORECASE)
-    # Remove all remaining tags
-    raw = re.sub(r"<[^>]+>", " ", raw)
-    # Decode HTML entities
-    raw = html.unescape(raw)
-    # Collapse whitespace
-    raw = re.sub(r"\s+", " ", raw).strip()
-    return raw
-
-
-async def _fetch_url_text(url: str) -> str:
-    """Fetch *url* via httpx and return stripped plain text.
-
-    Raises ``ValueError`` for disallowed schemes and ``RuntimeError`` for
-    network / HTTP errors so callers can return a user-friendly message.
-    """
-    import asyncio
-    from urllib.parse import urlparse
-
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise ValueError(f"Only http/https URLs are supported, got: {parsed.scheme!r}")
-
-    try:
-        import httpx
-
-        async with httpx.AsyncClient(follow_redirects=True, timeout=15.0) as client:
-            resp = await client.get(
-                url,
-                headers={"User-Agent": "Monocle-Reference-Bot/1.0"},
-            )
-            resp.raise_for_status()
-            raw = resp.content[:_MAX_FETCH_BYTES].decode("utf-8", errors="replace")
-    except httpx.HTTPStatusError as exc:
-        raise RuntimeError(f"HTTP {exc.response.status_code} fetching {url}") from exc
-    except httpx.RequestError as exc:
-        raise RuntimeError(f"Network error fetching {url}: {exc}") from exc
-
-    return _strip_html(raw)[:_MAX_TEXT_CHARS]
 
 
 #endregion
@@ -510,6 +320,8 @@ async def create_reference_from_url(
 ) -> str:
     """Fetch a web page, summarise it with AI, and create a reference note in the vault.
 
+    Canonical operation — see ``docs/tool-contracts.md § create_reference_from_url``.
+
     The tool fetches the URL, strips HTML, asks the configured AI provider to
     produce a structured Markdown summary, then creates a ``reference`` note
     tagged with ``source: web`` and placed in the review queue.
@@ -520,7 +332,7 @@ async def create_reference_from_url(
                        summariser (e.g. "focus on the security implications").
 
     Returns:
-        JSON object with file_path, title, url, and status.
+        JSON object with ``file_path``, ``title``, ``url``, and ``status``.
     """
     _state.assert_ready()
 
@@ -531,70 +343,11 @@ async def create_reference_from_url(
             "Configure an AI provider in config.yaml."
         )
 
-    # 1. Fetch and strip the page
-    page_text = await _fetch_url_text(url)
+    from monocle.services.references import create_reference_from_url as _create_ref
 
-    # 2. Build summarisation prompt
-    prompt_content = _URL_SUMMARISE_PROMPT.format(url=url, content=page_text)
-    if extra_context:
-        prompt_content += f"\n\nAdditional instructions: {extra_context}"
-
-    # 3. Ask AI to summarise
-    raw_response = await _state.ai.chat(
-        [{"role": "user", "content": prompt_content}],
-        stream=False,
+    note = await _create_ref(
+        _state.vault, _state.ai, _state.reindex_queue, url, extra_context,
     )
-    assert isinstance(raw_response, str)
-
-    # 4. Extract the embedded JSON metadata block (last ```json ... ``` fence)
-    # ----------
-    # Use finditer to get all matches, then take the LAST one to avoid picking
-    # up example JSON code that may appear earlier in the response.
-    import re as _re
-
-    json_matches = list(_re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, _re.DOTALL))
-    if json_matches:
-        json_match = json_matches[-1]  # Take the last match
-        try:
-            meta = json.loads(json_match.group(1))
-        except json.JSONDecodeError:
-            meta = {}
-        # Strip the JSON fence from the body text
-        body = raw_response[: json_match.start()].strip()
-    else:
-        meta = {}
-        body = raw_response.strip()
-
-    title = meta.get("title") or url
-    tags = _normalize_tags(meta.get("tags")) or []
-    domain = meta.get("domain") or "personal"
-
-    # Prepend source URL to body
-    body = f"> Source: {url}\n\n{body}"
-
-    if len(body) > _MAX_BODY_LENGTH:
-        body = body[:_MAX_BODY_LENGTH]
-
-    # 5. Create the note
-    from monocle.models import NoteMetadata
-
-    metadata = NoteMetadata(
-        type="reference",
-        domain=domain,
-        tags=["web-reference"] + tags,
-        review_status="pending",
-        source="web",
-    )
-    note = await _to_thread(
-        _state.vault.create_from_template,
-        "reference",
-        {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
-        body,
-    )
-    await _to_thread(_state.vault.write_note, note.file_path, note)
-    if _state.reindex_queue is not None:
-        _state.reindex_queue.push(note.file_path)
-
     return json.dumps(
         {"file_path": note.file_path, "title": note.title, "url": url, "status": "created"}
     )
@@ -609,25 +362,24 @@ async def create_reference_from_url(
 
 @mcp.tool()
 async def update_note(file_path: str, body: str) -> str:
-    """Overwrite the body of an existing note in the vault.
+    """Update the body of an EXISTING note in the vault.
+
+    Canonical operation — see ``docs/tool-contracts.md § update_note``.
+
+    Raises an error if the note does not exist. Use create_note to make new notes.
 
     Args:
-        file_path: Vault-relative path to the note to update.
+        file_path: Vault-relative path to the EXISTING note to update.
         body: New Markdown body content. The existing frontmatter is preserved.
 
     Returns:
-        JSON object with file_path and status.
+        JSON object with ``file_path`` and ``status``.
     """
     _state.assert_ready()
-    if len(body) > _MAX_BODY_LENGTH:
-        raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
 
-    note = await _to_thread(_state.vault.read_note, file_path)
-    note.body = body
-    note.metadata.updated = datetime.now(timezone.utc)
-    await _to_thread(_state.vault.write_note, file_path, note)
-    if _state.reindex_queue is not None:
-        _state.reindex_queue.push(note.file_path)
+    from monocle.services.notes import update_note as _update_note
+
+    await _update_note(_state.vault, _state.reindex_queue, file_path, body)
     return json.dumps({"file_path": file_path, "status": "updated"})
 
 
@@ -645,95 +397,22 @@ async def get_graph(
 ) -> str:
     """Return the knowledge graph centred on a focus entity.
 
+    Canonical operation — see ``docs/tool-contracts.md § get_graph``.
+
     Args:
         focus: Vault-relative path of the focus note (e.g. 'people/alice.md').
                If omitted, returns the full-vault graph.
         max_degree: BFS depth from the focus node (default 2).
 
     Returns:
-        JSON object with focus, nodes, and edges arrays.
+        JSON object with ``focus``, ``nodes``, and ``edges`` arrays.
     """
     _state.assert_ready()
-    import asyncio
 
-    graph_data = await asyncio.to_thread(
-        _state.graph_builder.build,
-        focus,
-        max_degree,
-        None,  # types filter
-        500,   # max nodes
-    )
+    from monocle.services.graph import get_graph as _get_graph
+
+    graph_data = await _get_graph(_state.graph_builder, focus, max_degree)
     return graph_data.model_dump_json()
-
-
-#endregion
-
-# ---------------------------------------------------------------------------
-#region #*   Tool: get_stats
-# ---------------------------------------------------------------------------
-
-
-async def _fetch_all_refs() -> tuple[list, int]:
-    """Fetch every NoteRef in the vault via paginated calls.
-
-    Returns a tuple of (all_items, vault_total).  ``vault_total`` comes from
-    the most-recent page's ``.total`` field so it reflects any notes added
-    during the iteration.  This prevents the pre-M12 bug where stats were
-    silently wrong for vaults with more than 1 000 notes.
-    """
-    _PAGE = 500
-    all_items: list = []
-    offset = 0
-    vault_total = 0
-    while True:
-        page = await _to_thread(
-            _state.vault.list_notes,
-            None,       # folder
-            None,       # type filter
-            None,       # domain filter
-            "updated",  # sort key
-            _PAGE,      # limit
-            offset,     # offset
-        )
-        vault_total = page.total
-        all_items.extend(page.items)
-        if offset + len(page.items) >= page.total or len(page.items) < _PAGE:
-            break
-        offset += _PAGE
-    return all_items, vault_total
-
-
-@mcp.tool()
-async def get_stats() -> str:
-    """Return a summary of vault statistics: counts, types, domains, and pending reviews.
-
-    Returns:
-        JSON object with total_notes, by_type, by_domain, pending_review,
-        index_chunks, and failed_ingests fields.
-    """
-    _state.assert_ready()
-    all_refs, vault_total = await _fetch_all_refs()
-    index_stats = await _to_thread(_state.index.get_stats)
-
-    by_type: dict[str, int] = {}
-    by_domain: dict[str, int] = {}
-    pending = 0
-    for ref in all_refs:
-        by_type[ref.type] = by_type.get(ref.type, 0) + 1
-        by_domain[ref.domain] = by_domain.get(ref.domain, 0) + 1
-        if ref.review_status == "pending":
-            pending += 1
-
-    return json.dumps(
-        {
-            "total_notes": vault_total,
-            "by_type": by_type,
-            "by_domain": by_domain,
-            "pending_review": pending,
-            "index_chunks": index_stats.total_chunks,
-            "index_backend": index_stats.backend,
-        }
-    )
 
 
 #endregion

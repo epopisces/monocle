@@ -179,3 +179,118 @@
   accent-color: var(--accent);
   cursor: pointer;
 }
+
+/* ── Model status ─────────────────────────────────────────────── */
+.model-status-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.model-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+}
+
+.model-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.model-status-dot--loaded {
+  background-color: var(--success);
+}
+
+.model-status-dot--available {
+  background-color: var(--warning);
+}
+
+.model-status-dot--unavailable {
+  background-color: var(--error);
+}
+
+.model-status-name {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-status-role {
+  font-size: var(--text-xs, 0.75rem);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+}
+
+.model-status-badge {
+  font-size: var(--text-xs, 0.75rem);
+  padding: 1px var(--space-2);
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.model-status-badge--loaded {
+  background-color: color-mix(in srgb, var(--success) 20%, transparent);
+  color: var(--success);
+}
+
+.model-status-badge--available {
+  background-color: color-mix(in srgb, var(--warning) 20%, transparent);
+  color: var(--warning);
+}
+
+.model-status-badge--unavailable {
+  background-color: color-mix(in srgb, var(--error) 20%, transparent);
+  color: var(--error);
+}
+
+.model-status-unreachable {
+  font-size: var(--text-sm);
+  color: var(--error);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.provider-status-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-sm);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.provider-status-label {
+  color: var(--text-secondary);
+}
+
+.provider-status-name {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+  flex: 1;
+}
+
+.provider-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.provider-status-dot--up {
+  background-color: var(--success);
+}
+
+.provider-status-dot--down {
+  background-color: var(--error);
+}

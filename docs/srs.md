@@ -1,15 +1,15 @@
 # Software Requirements Specification — Monocle
 
-**Version:** 2.1  
-**Date:** 2026-03-12  
-**Status:** Draft  
-**Supersedes:** v2.0
+**Version:** 2.3  
+**Date:** 2026-04-07  
+**Status:** Current  
+**Supersedes:** v2.2
 
 ---
 
 ## 1. System Overview
 
-Monocle is a personal AI-powered knowledge system with a React web frontend, a FastAPI backend, an Obsidian-compatible vault as its document store, a ChromaDB vector index, and a Microsoft Agent Framework orchestration layer. Multiple capture sources feed the vault; multiple AI client tools read from it via MCP.
+Monocle is a personal AI-powered knowledge system with a React web frontend, a FastAPI backend, an Obsidian-compatible vault as its document store, a ChromaDB vector index, and a Microsoft Agent Framework orchestration layer. Multiple capture sources feed the vault; multiple AI client tools read from it via MCP. All Monocle-owned data operations are implemented once in a shared services layer (`monocle/services/`); both the MCP server tools and the chat agent tools are thin wrappers that delegate to those shared services. MCP is the canonical tool contract for Monocle-owned operations.
 
 ### 1.1 Architecture
 
@@ -23,10 +23,14 @@ MCP capture_tool──MCP───►  ├─ Vault Router (CRUD, search)       
                            │  └─ File Watcher (watchdog)            │
                            │                                        ▼
                            ├─ Agent Router                   GET /mcp (Streamable HTTP)
-                           │  └─ Agent Framework             GET /search (REST)
-                           │     (Ollama|Foundry|Azure)      GET /notes (REST)
-                           │                                 GET /graph (REST)
-                           └─ MCP Server (FastMCP)
+                           │  └─ Chat Agent (tool wrappers)   GET /search (REST)
+                           │                                  GET /notes (REST)
+                           └─ MCP Server (canonical tools)   GET /graph (REST)
+
+                    ↓ both delegate to ↓
+          monocle/services/  (single implementation of all data operations)
+          ├─ search.py       ├─ notes.py     ├─ graph.py
+          ├─ references.py   └─ ingest.py
 
 Vault (filesystem .md files) ◄──► ChromaDB (embeddings + frontmatter metadata)
          ▲                                 ▲
@@ -332,7 +336,7 @@ links:
 **FR-WTCH-01:** The `InboxWatcher` SHALL run as an **async task integrated into the unified FastAPI process** (Phase 1). It monitors only `vault/inbox/` (configured via `vault.inbox_path`) and SHALL NOT watch the rest of the vault. Supported file types: `.md`, `.txt`, audio files (`.webm`, `.mp3`, `.wav`, `.m4a`). The integration point is `main.py`'s lifespan hook; the watcher runs in a thread-pool executor so file-system callbacks do not block the async event loop. *(Future: if performance bottlenecks emerge at scale, the watcher can be extracted as a standalone subprocess via `ProcessManager` without any change to the watcher's own API — see § FR-PROC.)*
 
 **FR-WTCH-02:** On new file detection in the inbox:
-1. The watcher reads the file and calls the ingest pipeline (either directly via `IngestPipeline` when running in-process for tests, or via `POST /api/ingest` when running as a standalone process)
+1. The watcher reads the file and calls the ingest pipeline directly via `IngestPipeline` (Phase 1 in-process) or via its internal API
 2. On success: the pipeline moves or records the file as processed; the watcher removes it from inbox if the pipeline does not
 3. On failure: the watcher writes a `.error.md` sidecar alongside the source file (see FR-ING-10) and leaves the source file in place for manual inspection
 
@@ -754,20 +758,21 @@ During a startup re-index (FR-WTCH-05), `status` SHALL be `"indexing"` and other
 
 **FR-MCP-02:** All requests to `/mcp` SHALL be authenticated via an access key provided in the `x-monocle-key` request header. The `?key=` query parameter MAY also be accepted for compatibility with MCP clients that do not support custom headers, but its use is discouraged — query parameters appear in server access logs and browser history. Requests without a valid key via either mechanism SHALL return `401 Unauthorized`.
 
-**FR-MCP-03:** The MCP server SHALL expose the following tools:
+**FR-MCP-03:** The MCP server SHALL expose the following tools. Each tool is a thin schema/transport wrapper over the corresponding `monocle/services/` function. No business logic lives in the tool handler itself.
 
-| Tool | Description | Parameters |
-|---|---|---|
-| `search_vault` | Semantic search; returns matching notes with similarity scores | `query: str`, `n: int = 5`, `threshold: float = 0.5`, `type: str = None` |
-| `read_note` | Load full note content by file path | `file_path: str` |
-| `browse_recent` | List most recently modified notes | `n: int = 10`, `type: str = None` |
-| `capture_thought` | Ingest unstructured text as a new note | `content: str`, `template_hint: str = None` |
-| `create_note` | Create a note using a specific template | `template: str`, `frontmatter: dict`, `body: str` |
-| `update_note` | Append or replace content in an existing note | `file_path: str`, `append: str = None`, `body: str = None` |
-| `get_graph` | Get person or topic graph data | `mode: str = "social"` |
-| `get_stats` | Return aggregate monocle statistics | _(none)_ |
+| Tool | Description | Parameters | Service function |
+|---|---|---|---|
+| `search_vault` | Semantic search; returns matching notes with similarity scores | `query: str`, `n_results: int = 5`, `note_type: str = None`, `domain: str = None` | `search_service.search_vault()` |
+| `read_note` | Load full note content by file path | `file_path: str` | `notes_service.read_note()` |
+| `capture_thought` | Ingest unstructured text via the full ingest pipeline | `content: str`, `source: str = "mcp"` | `ingest_service.capture_thought()` |
+| `create_note` | Create a new note using a template | `title: str`, `body: str`, `note_type: str = "observation"`, `domain: str = "personal"`, `tags: list[str] = None` | `notes_service.create_note()` |
+| `create_reference_from_url` | Fetch a web page, summarise it with AI, and create a reference note | `url: str`, `extra_context: str = None` | `reference_service.create_reference_from_url()` |
+| `update_note` | Update the body of an existing note | `file_path: str`, `body: str` | `notes_service.update_note()` |
+| `get_graph` | Get relationship graph data centred on a focus entity | `focus: str = None`, `max_degree: int = 2` | `graph_service.get_graph()` |
 
-**FR-MCP-04:** Tool return values SHALL be `list[dict]` or `dict`, serialized as structured JSON.
+**FR-MCP-03a (Canonical surface):** The MCP tool layer SHALL be the authoritative external contract for Monocle-owned data operations. The chat agent's internal tool names SHALL match the canonical MCP tool names for all Monocle-owned operations. Both converge on the same `monocle/services/` implementations.
+
+**FR-MCP-04:** Tool return values SHALL be `str` (JSON-serialized) or `dict` serializable via `model_dump_json()`.
 
 **FR-MCP-05:** `search_vault` SHALL embed the query, run ChromaDB similarity search, and return note metadata + matching chunk text. It SHALL NOT return full note bodies — the AI client uses `read_note` for that.
 
@@ -870,18 +875,24 @@ On page load, the frontend SHALL call `GET /api/settings` to initialise all sett
 - **Interactive:** User triggers agent via chat; agent streams response to the frontend via `POST /api/chat` (SSE streaming)
 - **Background:** APScheduler triggers agent task on a cron schedule; agent writes results to vault; completion event sent to connected frontend clients via SSE
 
-**FR-AGT-03:** All agents SHALL have access to a shared tool library implemented as Python functions decorated with the Agent Framework's tool decorator:
+**FR-AGT-03:** The chat agent's tool library SHALL be thin adapters over the shared service layer (`monocle/services/`). All Monocle-owned business logic lives in the service layer; tools only validate input format, call the corresponding service function, and serialize results. Canonical Monocle-owned tools:
+
+| Tool | Canonical name | Service function |
+|---|---|---|
+| Semantic search | `search_vault(query, n, threshold)` | `search_service.search_vault()` |
+| Load note | `read_note(file_path)` | `notes_service.read_note()` |
+| Unstructured capture | `capture_thought(content)` | `ingest_service.capture_thought()` |
+| Create note from template | `create_note(title, body, note_type, domain, tags)` | `notes_service.create_note()` |
+| Update note | `update_note(file_path, body)` | `notes_service.update_note()` |
+| Relationship graph | `get_graph(focus, max_degree)` | `graph_service.get_graph()` |
+| URL reference | `create_reference_from_url(url, extra_context)` | `reference_service.create_reference_from_url()` |
+
+Additional chat-only tools (no MCP equivalent; not Monocle data operations):
 
 | Tool | Description |
 |---|---|
-| `search_vault(query, n, threshold)` | Semantic search via `IndexLayer` |
-| `read_note(file_path)` | Load full note from `VaultLayer` |
-| `write_note(file_path, frontmatter, body)` | Write/update note via `VaultLayer` |
-| `create_note(template, frontmatter, body)` | Create note from template |
-| `get_stats()` | Return `BrainStats` |
-| `list_notes(folder, type)` | Browse vault notes |
-| `get_person_graph()` | Return social graph data |
-| `transcribe_audio(audio_bytes, mime_type)` | Transcribe audio bytes to plain text via `AIProvider.transcribe`; used by voice-capture flows initiated through chat |
+| `get_stats()` | Return `BrainStats` directly via `IndexLayer` |
+| `list_notes(folder, type)` | Browse vault note listing via `VaultLayer` |
 
 **FR-AGT-04:** The Weekly Summary agent SHALL:
 1. Retrieve all notes modified in the past 7 days via `VaultLayer`
@@ -900,7 +911,37 @@ If model-based clustering yields poor separation or the batch is too small, the 
 
 **FR-AGT-07:** When an agent tool call returns an error (e.g., `read_note` on a deleted file, `search_vault` when ChromaDB is unavailable), the framework SHALL deliver a structured error result to the agent — not raise an unhandled exception. The agent SHALL include the failure reason in its reasoning and either retry the call once with corrected parameters or surface a user-readable error message. The SSE stream SHALL emit a `tool_error` event (see FR-API-20).
 
-### 2.12 Microsoft Teams Integration (FR-TMS)
+---
+
+### 2.12 Shared Service Layer (FR-SVC)
+
+The shared service layer (`monocle/services/`) is the single authoritative implementation of all Monocle-owned data operations. It eliminates business-logic duplication between the MCP server tools and the chat agent tools.
+
+**FR-SVC-01:** A `monocle/services/` package SHALL be present with the following modules:
+
+| Module | Exported functions |
+|---|---|
+| `search.py` | `search_vault(vault, index, ai, query, n, threshold, filters) -> list[ScoredNote]` |
+| `notes.py` | `read_note(vault, file_path) -> Note`, `create_note(vault, index, ai, ...) -> Note`, `update_note(vault, index, ai, file_path, body) -> Note` |
+| `graph.py` | `get_graph(vault, focus, max_degree, types, n) -> GraphResult` |
+| `references.py` | `create_reference_from_url(vault, index, ai, url, extra_context) -> Note` |
+| `ingest.py` | `capture_thought(pipeline, content, source) -> IngestResponse` |
+
+**FR-SVC-02:** Service functions SHALL own all business logic: vault file I/O, embedding calls, reindex queue dispatch, review-status assignment, path-boundary validation, and result shaping. Tool wrappers SHALL NOT duplicate this logic.
+
+**FR-SVC-03:** Service functions SHALL be independently testable without requiring MCP transport or agent framework context. They accept injected dependencies (vault, index, ai provider, pipeline) and return well-typed Pydantic models.
+
+**FR-SVC-04:** All vault path validation (absolute path resolution, rejection of paths outside `vault.path` with `403`) SHALL be performed inside service functions, not in tool wrappers.
+
+**FR-SVC-05:** Reindex queue triggers (`ReindexQueue.push(file_path)`) SHALL be called by service functions after any write operation, not by tool wrappers.
+
+**FR-SVC-06:** Review-status semantics (setting `review_status: pending` on agent-created notes, `review_status: approved` on user-direct notes) SHALL be enforced by service functions.
+
+**FR-SVC-07:** MCP tool handlers and chat agent tool handlers SHALL each have corresponding service-level tests that assert shared behavior and result-field stability. Contract parity tests SHALL assert that both wrappers resolve to identical output for identical inputs.
+
+---
+
+### 2.13 Microsoft Teams Integration (FR-TMS)
 
 **FR-TMS-01:** The system SHALL expose a `POST /api/teams/messages` endpoint that accepts Bot Framework Activity objects from a Teams channel.
 
@@ -919,7 +960,7 @@ If model-based clustering yields poor separation or the batch is too small, the 
 
 **FR-TMS-05:** The Teams integration is Phase 1 in a limited form (webhook ingest + command replies). Full proactive messaging is Phase 2.
 
-### 2.13 Review Queue (FR-REV)
+### 2.14 Review Queue (FR-REV)
 
 **FR-REV-01:** Every note created by the ingest pipeline SHALL have two additional frontmatter fields written at creation time:
 
@@ -956,7 +997,7 @@ Composite score formula: `confidence = 0.35 * template_match + 0.30 * metadata_c
 
 ---
 
-### 2.14 Observability (FR-TEL)
+### 2.15 Observability (FR-TEL)
 
 **FR-TEL-01:** Monocle SHALL use **OpenTelemetry (OTel)** as the single, cross-cutting observability layer covering distributed tracing, metrics, and log correlation. All three signals SHALL be exported via OTLP. The default local sink is VS Code AI Toolkit (gRPC port 4317); any OTLP-compatible backend (Jaeger, Grafana, Honeycomb, Azure Monitor) can be substituted via `config.yaml` `telemetry.otlp_endpoint` and `telemetry.otlp_transport`.
 
@@ -1083,7 +1124,7 @@ These items are committed design directions deferred beyond Phase 2. Architectur
 | NFR-REL-01 | If metadata extraction fails, the note SHALL still be written with empty metadata rather than dropped |
 | NFR-REL-02 | If Ollama / Foundry Local is temporarily unreachable, `POST /api/ingest` SHALL return `503 Service Unavailable` with a descriptive message |
 | NFR-REL-03 | VaultLayer SHALL use atomic writes (write to temp file, then rename) to prevent partial writes |
-| NFR-REL-04 | If the file watcher process dies, the server startup SHALL detect a stale watcher and restart it |
+| NFR-REL-04 | If the inbox watcher async task exits unexpectedly (Phase 1 unified process), the lifespan exception handler SHALL log an error and potentially trigger server shutdown or auto-restart (depending on deployment environment). Phase 3+ (separate OS subprocess) allows independent watcher restart without server restart. |
 | NFR-REL-05 | The ChromaDB index MAY be rebuilt from scratch at any time by running `reindex --force`; this is the recovery procedure for index corruption |
 
 ---

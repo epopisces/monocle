@@ -21,6 +21,7 @@ from monocle.telemetry import get_meter, span, timed
 
 if TYPE_CHECKING:
     from monocle.ai.transcription import TranscriptionProvider
+    from monocle.models import ProviderModelsResponse
 
 logger = logging.getLogger(__name__)
 
@@ -118,6 +119,7 @@ class AzureOpenAIProvider(AIProvider):
         messages: list[dict],
         stream: bool = False,
         tools: list[dict] | None = None,
+        tool_choice: dict | str | None = None,
     ) -> str | AsyncIterator[str]:
         attrs = {"ai.provider": self._provider_name, "ai.model": self._chat_deployment}
         if not stream:
@@ -126,6 +128,8 @@ class AzureOpenAIProvider(AIProvider):
                     kwargs: dict = {"model": self._chat_deployment, "messages": messages, "stream": False}  # type: ignore[assignment]
                     if tools:
                         kwargs["tools"] = tools
+                    if tool_choice:
+                        kwargs["tool_choice"] = tool_choice
                     response = await self._client.chat.completions.create(**kwargs)
                     message = response.choices[0].message
                     if message.tool_calls:
@@ -144,9 +148,9 @@ class AzureOpenAIProvider(AIProvider):
                         })
                     return message.content or ""
         else:
-            return self._stream_chat(messages, tools)
+            return self._stream_chat(messages, tools, tool_choice)
 
-    async def _stream_chat(self, messages: list[dict], tools: list[dict] | None = None) -> AsyncIterator[str]:  # type: ignore[override]
+    async def _stream_chat(self, messages: list[dict], tools: list[dict] | None = None, tool_choice: dict | str | None = None) -> AsyncIterator[str]:  # type: ignore[override]
         # Use the synchronous OTel span directly — async context managers are not
         # compatible with async generator functions.
         with _open_span(
@@ -157,6 +161,8 @@ class AzureOpenAIProvider(AIProvider):
             create_kwargs: dict = {"model": self._chat_deployment, "messages": messages, "stream": True}  # type: ignore[assignment]
             if tools:
                 create_kwargs["tools"] = tools
+            if tool_choice:
+                create_kwargs["tool_choice"] = tool_choice
             stream = await self._client.chat.completions.create(**create_kwargs)
             accumulated: dict[int, dict] = {}
             async for chunk in stream:
@@ -189,3 +195,26 @@ class AzureOpenAIProvider(AIProvider):
 
     # transcribe() is inherited from AIProvider.transcribe() which delegates to
     # self._transcription_provider (NativeOpenAITranscriptionProvider by default).
+
+    async def get_model_status(self) -> "ProviderModelsResponse":  # type: ignore[override]
+        """Check Azure OpenAI reachability; deployments are always available when reachable."""
+        from monocle.models import ModelStatus, ProviderModelsResponse
+
+        # Use a lightweight embeddings ping to verify reachability
+        reachable = False
+        try:
+            await self.embed("ping")
+            reachable = True
+        except Exception as exc:
+            logger.debug("[AI] Azure reachability ping failed: %s", exc)
+
+        models = [
+            ModelStatus(name=self._chat_deployment, role="chat", available=reachable, loaded=reachable),
+            ModelStatus(name=self._embed_deployment, role="embed", available=reachable, loaded=reachable),
+            ModelStatus(name=self._transcribe_deployment, role="transcribe", available=reachable, loaded=reachable),
+        ]
+        return ProviderModelsResponse(
+            provider=self._provider_name,
+            provider_reachable=reachable,
+            models=models,
+        )

@@ -6,6 +6,7 @@ import {
   type SettingsResponse,
   type SettingsPatch,
 } from '../../api/settings'
+import { getModelStatus, type ProviderModelsResponse } from '../../api/health'
 import { useTheme, type Theme } from '../../hooks/useTheme'
 import './SettingsModal.css'
 
@@ -62,12 +63,19 @@ const INITIAL: State = {
 const PROVIDERS = ['ollama', 'foundry_local', 'azure']
 const TRANSCRIBE_BACKENDS = ['subprocess', 'whisper_cpp', 'native']
 
+function modelStateBadge(available: boolean, loaded: boolean): { cls: string; label: string } {
+  if (loaded) return { cls: 'loaded', label: 'loaded' }
+  if (available) return { cls: 'available', label: 'available' }
+  return { cls: 'unavailable', label: 'not found' }
+}
+
 export default function SettingsModal({ open, onClose }: Props) {
   const [state, dispatch] = useReducer(reducer, INITIAL)
   const overlayRef = useRef<HTMLDivElement>(null)
   const thresholdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draftQT, setDraftQT] = useState<number | null>(null)
   const [draftAAT, setDraftAAT] = useState<number | null>(null)
+  const [modelStatus, setModelStatus] = useState<ProviderModelsResponse | null>(null)
   const { theme, setTheme } = useTheme()
 
   // Load settings when opened; cancel any pending debounce when closed
@@ -80,9 +88,13 @@ export default function SettingsModal({ open, onClose }: Props) {
       return
     }
     dispatch({ type: 'RESET' })
+    setModelStatus(null)
     getSettings()
       .then(s => dispatch({ type: 'LOADED', payload: s }))
       .catch(e => dispatch({ type: 'LOAD_ERROR', payload: String(e) }))
+    getModelStatus()
+      .then(ms => setModelStatus(ms))
+      .catch(() => setModelStatus(null))
   }, [open])
 
   // Clear draft values when server data refreshes; cancel debounce timer on unmount
@@ -110,6 +122,9 @@ export default function SettingsModal({ open, onClose }: Props) {
     try {
       const s = await patchSettings(patch)
       dispatch({ type: 'SAVED', payload: s })
+      // Refresh model status after provider switch
+      setModelStatus(null)
+      getModelStatus().then(ms => setModelStatus(ms)).catch(() => setModelStatus(null))
     } catch (e) {
       dispatch({ type: 'SAVE_ERROR', payload: String(e) })
     }
@@ -204,6 +219,39 @@ export default function SettingsModal({ open, onClose }: Props) {
                   ))}
                 </select>
               </label>
+
+              {/* Model status panel */}
+              <div className="model-status-list" data-testid="model-status-panel">
+                {modelStatus === null ? (
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                    Checking models…
+                  </span>
+                ) : !modelStatus.provider_reachable ? (
+                  <span className="model-status-unreachable" data-testid="provider-unreachable">
+                    <span className="provider-status-dot provider-status-dot--down" />
+                    {modelStatus.provider} not reachable
+                  </span>
+                ) : (
+                  <>
+                    <div className="provider-status-row">
+                      <span className="provider-status-dot provider-status-dot--up" />
+                      <span className="provider-status-name">{modelStatus.provider}</span>
+                      <span className="provider-status-label">running</span>
+                    </div>
+                    {modelStatus.models.map(m => {
+                      const { cls, label } = modelStateBadge(m.available, m.loaded)
+                      return (
+                        <div key={m.role} className="model-status-row" data-testid={`model-status-${m.role}`}>
+                          <span className={`model-status-dot model-status-dot--${cls}`} />
+                          <span className="model-status-name" title={m.name}>{m.name}</span>
+                          <span className="model-status-role">{m.role}</span>
+                          <span className={`model-status-badge model-status-badge--${cls}`}>{label}</span>
+                        </div>
+                      )
+                    })}
+                  </>
+                )}
+              </div>
             </section>
 
             {/* Review thresholds */}

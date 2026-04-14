@@ -4,6 +4,142 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-09 (Session 2)
+
+### Claude Haiku 4.5
+- **Post-Completion Validation & Security Hardening (M29-M32)**
+  - Conducted comprehensive security audit and quality review of MCP-First milestones (M29-M32)
+  - **Issues Identified & Fixed:** 1 HIGH (SSRF in URL fetcher), 2 MEDIUM (exception disclosure in SSE, stale docs), 2 LOW (note discovery hard limit, invalid note_type), 3 coverage gaps
+  - **Security Fixes:** Added `_is_private_url()` function using `ipaddress` module for SSRF protection (blocks loopback, private ranges 10/172/192, link-local 169.254/fe80::/10, multicast); fixed exception handler in chat.py to return generic message instead of raw exception text; integrated SSRF check before httpx.get()
+  - **UX Fixes:** Refactored `update_note()` agent tool title scan to paginate through all notes (1000-item pages, was silently capped at 500); added note_type validation at service boundary in `create_note()`
+  - **Documentation:** Updated milestone tracker in build-plan.md for consistency
+  - **Test Coverage:** Added 13 new backend tests (9 SSRF boundaries, 2 note_type validation, 1 capture_thought(confidence=None), 1 MCP auth non-HTTP scope); all tests validate integration paths
+  - **Results:** 893 backend tests passing (baseline 881 → +12 new), 416 frontend tests passing, EXIT 0, no regressions
+  - **Files Modified:** monocle/services/references.py, monocle/routers/chat.py, monocle/agents/tools.py, monocle/services/notes.py, docs/build-plan.md, monocle/tests/test_services.py, monocle/tests/test_mcp.py
+
+### GPT-5.4
+- **Resolved follow-up review findings for M29-M32**
+  - Hardened `monocle/services/references.py` against hostname-resolution and redirect-based SSRF by validating resolved IPs and each redirect hop before fetch
+  - Unified no-AI search behavior in `monocle/services/search.py`, `monocle/mcp_server.py`, and `monocle/agents/tools.py` so MCP and chat both use MemoryIndex substring fallback consistently in test mode
+  - Normalized create-note template aliases in `monocle/services/notes.py` so `person`, `meeting`, and `blank` map cleanly to canonical metadata types
+  - Added disconnect-aware stream polling in `monocle/routers/chat.py` so `/api/chat` stops server-side work when the client disconnects
+  - Added regression tests in `monocle/tests/test_services.py`, `monocle/tests/test_agents.py`, and `monocle/tests/test_mcp.py` for DNS/redirect SSRF, alias handling, search parity, and disconnect cancellation
+  - Updated `docs/build-plan.md` session notes with actual completion date and latest backend result count
+  - Test results: 900 backend tests passing, 8 deselected, EXIT 0
+
+---
+
+## 2026-04-09
+
+### Claude Opus 4.6
+- **Completed M32: MCP-First: Chat Tool Adapter & Orchestration Cleanup**
+  - D1+D3: Renamed `fetch_and_summarize_url` → `create_reference_from_url` and `get_person_graph` → `get_graph` across tools.py, __init__.py, chat.py, test_agents.py (16+ occurrences)
+  - D2+D4: Verified VaultTools are thin adapters; confirmed chat-only orchestration lives exclusively in routers/chat.py
+  - D5: Added 6 adapter↔MCP output parity tests (`TestAdapterMCPOutputParity`) to test_contracts.py — read_note/create_note exact key match, update_note/get_graph superset validation, create_reference_from_url key match, agent tool name alignment
+  - D6: Removed 8 obsolete duplicate tests from TestVaultToolsExecution (now covered by contract parity + service tests)
+  - Updated docs: build-plan.md (M32 COMPLETE, active→M33), mcp-first-chat-refactor-plan.md (all deliverables checked), milestones.md (M32 archived)
+  - Test results: 881 backend, 416 frontend, 0 failures
+
+- **Completed M31: MCP-First: MCP Canonicalization**
+  - D1: Verified all 7 MCP tools are thin wrappers delegating to `monocle/services/` (confirmed from M30)
+  - D2: Froze return contracts in `docs/tool-contracts.md` — updated frontmatter to `status: frozen`, added frozen contract banner
+  - D3: Verified backward compatibility via `TestBackwardCompatibility` (4 tests) and `TestInputSchemas` (10 tests)
+  - D4: Created `monocle/tests/test_contracts.py` with 32 contract parity tests across 6 classes (TestToolRegistry, TestInputSchemas, TestOutputSchemas, TestServiceDelegation, TestBehavioralParity, TestBackwardCompatibility)
+  - D5: Updated `mcp_server.py` module docstring (authoritative/canonical status) and all 7 tool docstrings with canonical operation references to `docs/tool-contracts.md`
+  - Consolidated 3 duplicate `_normalize_tags` definitions into `monocle/services/tags.py`; all consumers now import from shared module
+  - Cleaned up unused `Any` imports in `mcp_server.py` and `services/references.py`
+  - Checked off all deliverables in `docs/mcp-first-chat-refactor-plan.md`
+  - Archived M31 details to `docs/milestones.md`, condensed build-plan entry
+  - **884 backend tests passing, 0 failures**
+
+## 2026-04-07
+
+### Claude Sonnet 4.6
+- **Merged `append_to_note` into `update_note` in agent tool layer** (`monocle/agents/tools.py`):
+  - `update_note` now accepts `body` (required) + `file_path` OR `query` (at least one required)
+  - When `file_path` is provided: resolves directly, always uses content-aware AI merge
+  - When only `query` is provided: resolves via wikilink → title scan → semantic search (0.6 threshold), then merges
+  - Removed `append_to_note` method entirely (was identical flow, different entry point)
+  - Updated `self.tools` list: 8 tools (was 9)
+- **Updated `monocle/agents/__init__.py`**: removed `append_to_note` from `_ALLOWED_TOOL_HINTS`, updated system prompt instructions to reference `update_note` with new signature
+- **Updated `monocle/tests/test_agents.py`**: renamed 9 `test_append_to_note_*` → `test_update_note_*` with new call signatures; updated `test_tools_list_has_9_entries` → `test_tools_list_has_8_entries`; updated prd.md tool list
+- **815 backend tests passing**, 112 agent/MCP tests passing
+
+### GitHub Copilot (GPT-5.4)
+- Added `docs/mcp-first-chat-refactor-plan.md` with a staged architecture plan to make MCP the canonical Monocle tool plane while preserving `/api/chat` as the orchestration and SSE UX layer
+- Documented target split of responsibilities across MCP tools, chat orchestration, and third-party MCP composition; included migration phases, risks, and testing strategy
+- Recommended phased migration: shared service extraction first, then MCP-first canonicalization, then chat-side adapter cleanup
+
+### Claude Opus 4.6
+- Broke MCP-first refactor plan into discrete milestones M29–M33 with deliverables and acceptance criteria in `docs/mcp-first-chat-refactor-plan.md`
+- Added M29–M33 to `docs/build-plan.md` milestone tracker table and milestone details section
+- Revised `docs/prd.md` (v2.4→v2.5): updated Section 5.4 tool library to canonical MCP names; added Section 5.6 Services Layer documenting `monocle/services/` and MCP-first canonical tool principle
+- Revised `docs/srs.md` (v2.2→v2.3): updated Section 1.1 architecture diagram to show services sublayer; updated FR-AGT-03 tool table to canonical names with service delegation; updated FR-MCP-03 to add service delegation column and FR-MCP-03a canonical surface requirement; added new Section 2.12 FR-SVC describing the shared service layer (7 requirements); renumbered Sections 2.12→2.13 (Teams), 2.13→2.14 (Review Queue), 2.14→2.15 (Observability)
+- Revised `docs/architecture.md` (date updated to 2026-04-07): added `SVC` canonical services subgraph to Diagram 1 (System Overview); updated Diagram 4 (Chat/Agent) to show VaultTools delegating through services; updated Diagram 9 (MCP Server) to show tools delegating to services subgraph; added new Diagram 13 (Canonical Tool Plane) showing MCP and chat converging on shared services
+
+---
+
+## 2026-04-09
+
+### Claude Opus 4.6
+- **Completed M30 — MCP-First: Shared Service Layer Extraction**
+  - Created `monocle/services/` package with 5 canonical service modules: `search.py`, `notes.py`, `graph.py`, `references.py`, `ingest.py`
+  - Refactored all 7 MCP tools (`mcp_server.py`) to thin wrappers delegating to services; removed ~150 lines of dead code
+  - Refactored all 6 agent tools (`agents/tools.py`) to delegate data operations to services; chat-only adapter logic preserved (query resolution, AI merge, MemoryIndex fallback, wikilink name resolution)
+  - Created `monocle/tests/test_services.py` with 24 service-level tests (search, notes, graph, references, ingest)
+  - Fixed test imports: `_MAX_SEARCH_RESULTS` → `services.search`, `_fetch_url_text` patches → `services.references.fetch_url_text` (6 occurrences)
+  - Updated `docs/build-plan.md`, `docs/mcp-first-chat-refactor-plan.md`, `docs/milestones.md`
+  - **852 backend tests passing, 0 failures**
+
+---
+
+## 2026-04-08
+
+### Claude Sonnet 4.6
+- **Completed M29 — MCP-First: Contract Freeze & Canonical Tool Schema** (docs-only)
+  - Audited all 6 `VaultTools` methods in `monocle/agents/tools.py` and all 7 MCP tools in `monocle/mcp_server.py`
+  - Created `docs/tool-contracts.md` as the single source of truth for all 7 canonical Monocle data operations: `search_vault`, `read_note`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `create_reference_from_url`
+  - Documented all behavioral divergences between agent and MCP surfaces (3 significant: `update_note` merge/overwrite split; `fetch_and_summarize_url` → `create_reference_from_url` rename; `get_person_graph` → `get_graph` consolidation)
+  - Recorded D3 decision: `fetch_and_summarize_url` fully replaced by `create_reference_from_url` in M32; prefetch orchestration stays in chat router
+  - Documented services layer preview (M30 targets) with function signatures and adapter responsibilities
+  - Marked M29 COMPLETE in `docs/build-plan.md` tracker and detail stub
+  - Marked all D1–D4 deliverable checkboxes in `docs/mcp-first-chat-refactor-plan.md`
+
+---
+
+## 2026-04-06
+
+### Claude Sonnet 4.6
+- **Implemented provider + model status feature (not a formal milestone; marked as M28)**
+  - **Goal:** Show which AI provider is configured, whether it is reachable, and per-model availability/load status — with visual cues in Topbar when models are loaded (green ✓) or cold-start (amber ⏳)
+  - **Session notes:** Three UI refinements applied: (1) Initial: cold-start warnings only (amber ⏳); (2) Added side-by-side chat + embed badges; (3) **Final (CSS updated):** Always show badges when model available, with conditional coloring based on load state
+  - **Backend:** `ModelStatus` + `ProviderModelsResponse` models; `get_model_status()` ABC method with provider implementations (Ollama: `list()` + `ps()` APIs; Foundry: `models.list()`; Azure: reachability ping); `GET /api/health/models` endpoint
+  - **Frontend:** Model status polling (15s), SettingsModal panel with provider reachability + per-model status rows; **Topbar badges:** conditionally render when provider reachable AND model available; className `.topbar-model-badge--loaded` (green ✓) or `.topbar-model-badge--cold` (amber ⏳)
+  - **CSS refinement (final):** Updated `frontend/src/components/layout/Topbar.css` — combined dual-state `.topbar-model-badge--loaded` + `.topbar-model-badge--cold` styles replacing single `.topbar-model-cold` amber-only style; `.topbar-models-status` container replaces `.topbar-models-cold`
+  - **Test coverage:** 807 backend tests passing (4 new unit tests in test_ai.py + 2 integration tests); 411 frontend tests passing (0 regressions from CSS changes); EXIT 0
+
+- **URL pills + parallel pre-fetch** 
+  - **Replaced** single "fetch & summarize?" banner (Yes/No) with per-URL pill strip
+  - `ChatInput.tsx`: global URL regex finds ALL unique URLs; `optedOutUrls` Set state; pills render opted-in (accent) by default; click toggling to opted-out (dim + strikethrough); `doSend()` passes `fetchUrls = detectedUrls − optedOut` as third arg; Enter key is now default-on (no extra click needed)
+  - `ChatInput.css`: removed banner/button styles, added `.chat-input__url-pills` + `.chat-input__url-pill` + `--opted-out` pill styles
+  - **Cascaded `fetchUrls?: string[]`** through `ChatScreen.handleSend` → `useChat.send` → `ChatRequest.fetch_urls`
+  - **Backend pre-fetch** (`routers/chat.py`): `fetch_urls` field on `ChatRequest`; capped at 5; filtered to http/https only; parallel `asyncio.gather` via `VaultTools.fetch_and_summarize_url`; emits `note_created` SSE per URL; injects context prefix into last user message before agent starts
+  - **Test coverage:** 814 backend tests (7 new `TestFetchUrlsPreFetch`), 416 frontend tests (16 new/updated URL pill tests), EXIT 0
+
+- **Tool format alignment review** (agent + MCP tools)
+  - Audited `monocle/agents/tools.py` and `monocle/mcp_server.py` for input/output format inconsistencies
+  - `get_stats()` in `tools.py`: renamed `notes_by_type`→`by_type`, `notes_by_domain`→`by_domain`, `total_chunks`→`index_chunks`; added `index_backend` field (now matches MCP server format)
+  - **Renamed agent tool `write_note` → `update_note`** for semantic clarity (matches MCP server naming; emphasizes it's for updating existing notes, not creating new ones)
+  - `update_note()`: added `note.metadata.updated = datetime.now(utc)` (now matches MCP server behaviour)
+  - `browse_recent()` in `mcp_server.py`: changed from raw `[...]` array to `{"total": ..., "items": [...]}` wrapper (now matches agent `list_notes` format)
+  - `create_note()` in `mcp_server.py`: changed default `note_type` from `"other"` (invalid template) to `"observation"` (now matches agent `create_note`)
+  - `fetch_and_summarize_url()` in `tools.py`: standardised `_MAX_TEXT_CHARS` from 12,000 to 20,000 (matches MCP `create_reference_from_url`)
+  - **Clarified semantics:** Updated vault-layer `write_note()` docstring to emphasize it's for "updating" (but creates if file doesn't exist); agent & MCP tool docstrings updated to stress "existing note" for `update_note` vs "new note" for `create_note`
+  - Updated tests: `test_agents.py` renamed 3 test methods (test_write_note→test_update_note) + updated assertions; `test_mcp.py` tests already used `update_note` naming
+  - **816 backend tests passing, EXIT 0**
+
+---
+
 ## 2026-04-02
 
 ### GitHub Copilot (Claude Haiku)
@@ -271,7 +407,7 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ### Claude Sonnet 4.6
 - Created `.github/copilot-instructions.md` — synthesized architecture, key abstractions, ingest pipeline, frontmatter schema, test commands, and conventions from build-plan, SRS, PRD, and UI Design docs
-- Created `GHI-ACTION-LOG.md` — seeded with 2026-03-14 entry from README; established as the canonical agent action log going forward
+- Created `GHC-ACTION-LOG.md` — seeded with 2026-03-14 entry from README; established as the canonical agent action log going forward
 - Standardized all Python/tool invocations in `docs/build-plan.md` and `.github/copilot-instructions.md` to use `uv run` (e.g., `uv run python -m pytest`, `uv run uvicorn`); updated M1 tasks.json deliverable from `pip install -e .[dev]` to `uv sync`; updated `pyproject.toml` note to use `requires-python` (uv standard)
 - **Executed M1 — Foundation & Project Skeleton (COMPLETE)**
   - Created `pyproject.toml` with 30+ backend dependencies, `[dependency-groups]` dev group, `[tool.uv] prerelease = "allow"` (required for agent-framework pre-release packages), `[tool.pytest.ini_options]`
@@ -861,6 +997,48 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - Created .github/workflows/ci.yml (backend + frontend + E2E jobs)
 - Rewrote README.md with prerequisites, quick start, MCP setup, keyboard shortcuts, CLI reference, and Obsidian compatibility
 - Added test: e2e and test: ci-full VS Code tasks; added E2E Tests (Playwright debug) launch config
+
+---
+
+## 2026-04-13
+
+### Claude Haiku 4.5
+- **Environment & Logging Optimization**
+  - Ran `uv sync` to initialize Python 3.14.0a7 environment (.venv created, 175 packages resolved, EXIT 0)
+  - **Fixed high-volume logging in chat streaming (`monocle/routers/chat.py`)**
+    - **Problem:** Per-update logs (`Update #N: ...`) and per-content logs (`Content[i]: ...`) at INFO level generate extremely high volume during token streaming, materially impacting performance and observability cost
+    - **Solution:** Moved per-update and per-content logs from `logger.info()` to `logger.debug()` (lines 243–244, 255, 257, 282, 289); kept session-level summaries (start, end, error) at INFO for visibility
+    - **Result:** Preserves debugging capability while eliminating production noise during token-by-token SSE emission
+  - **Fixed user message recording in telemetry (`monocle/routers/chat.py`)**
+    - **Problem:** `add_user_message_event()` was recording `body.messages[0].content` (first in request), but frontend sends full conversation history with the new user turn appended at the end, so oldest/irrelevant messages were being recorded instead of the actual user prompt
+    - **Solution:** Changed to iterate `reversed(body.messages)` and find the last user-role message; correctly captures the message that triggered the request
+    - **Result:** Conversation traces in AI Toolkit now show the actual user query, not stale context from prior turns
+  - Verified syntax with `uv run python -m py_compile monocle/routers/chat.py` (EXIT 0)
+
+- **Fixed SSE streaming issues in chat endpoint (`monocle/routers/chat.py`)**
+  - **Issue 1: Token event detection broken** — `stream_with_tracing()` used substring matching (`'"token"' in event_str`) instead of parsing SSE frame format (`event: token\ndata: {...}\n\n`); `assistant_tokens` were never accumulated and `add_assistant_message_event()` never fired
+    - **Fix:** Implemented proper SSE frame parsing — extract `event: token` line, check `event_type == 'token'`, then parse corresponding `data: {...}` JSON payload; accumulation now works correctly
+  - **Issue 2: Tool error payload mismatch** — `tool_error` SSE payload used `"message"` key but frontend `ChatEvent` type / `useChat` reducer expects `"error"` key; tool error details were silently dropped in UI
+    - **Fix:** Changed tool error SSE payload from `"message"` to `"error"` key (line 292) for frontend contract alignment
+  - **Issue 3: Missing SSE-friendly headers** — `StreamingResponse` didn't set `Cache-Control: no-cache` and `X-Accel-Buffering: no` headers; reverse proxies (esp. nginx) could buffer/cache responses, breaking real-time SSE delivery
+    - **Fix:** Added headers dict to `StreamingResponse` constructor with both required headers (lines 429–432)
+  - Verified all syntax changes with `uv run python -m py_compile monocle/routers/chat.py` (EXIT 0)
+
+- **Python 3.14a7 + Pydantic compatibility fix**
+  - **Root cause:** Pydantic 2.13.0b2 calls `typing._eval_type()` with `prefer_fwd_module=True` parameter; Python 3.14a7 removed this parameter, causing `TypeError` on model import
+  - **Solution:** Created `monocle/compat.py` with compatibility shim that wraps `typing._eval_type()` to handle both old and new signatures (introspects kwargs and re-calls without incompatible params on Python 3.14+)
+  - **Integration:** Imported `monocle.compat` at top of `monocle/models.py` (before Pydantic imports) to ensure patch is applied at module initialization time
+  - **Result:** Models can now be imported on Python 3.14a7 without downgrading to 3.13
+
+- **Fixed telemetry health-check filtering to cover all `/api/health/*` endpoints (`monocle/telemetry.py`)**
+  - **Problem:** `_HealthCheckFilterSpanProcessor` only dropped traces where `http.route == "/api/health"` (exact match); new `/api/health/models` polling endpoint would still generate traces and reintroduce noise
+  - **Solution:** Changed from exact match to `route.startswith("/api/health")` (line 50) so any `/api/health*` route is filtered
+  - **Result:** All health-check related traces are now filtered regardless of sub-path
+
+- **Hardened OpenTelemetry private API usage against version breakage (`monocle/telemetry.py`)**
+  - **Problem:** `configure_telemetry()` imported and used several underscore-prefixed private/experimental OTel APIs (`_events`, `_logs`, `_log_exporter`, etc.) with no error handling; future versions of OTel may move or remove these APIs, causing telemetry to crash
+  - **Solution:** Wrapped all private API initialization (lines 129–162) in a try/except that catches `ImportError` and `AttributeError`; on error, logs a clear warning and continues without AI Toolkit Input/Output event recording
+  - **Result:** Graceful degradation — if OTel APIs change, telemetry continues to function; operator sees a clear warning explaining the feature is unavailable
 - Updated .gitignore for root node_modules, playwright-report, test-results
 - Marked M21 COMPLETE in build-plan.md; archived details to milestones.md
 - 693 backend + 313 frontend tests passing; 25 E2E tests discovered
@@ -883,3 +1061,18 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - Added `_strip_html()`, `_fetch_url_text()` helpers and `_URL_SUMMARISE_PROMPT` constant
   - Added 8 new tests in `TestMCPTools` (creates note, pending review, web-reference tag, body contains URL, no AI raises, non-http raises, triggers reindex, extra_context forwarded); updated `test_mcp_has_8_tools` ? `test_mcp_has_9_tools`
   - **749 tests passing (+8 new), EXIT 0**
+
+---
+
+## 2026-04-13 (Session 3)
+
+### GitHub Copilot
+- **Frontend bundle size optimization: Lazy-load aframe dependency**
+  - **Problem:** Top-level `import 'aframe'` in `frontend/src/main.tsx` was loading the large aframe library (~300KB+) on every app route, even when the graph visualization UI was never accessed
+  - **Solution:** 
+    - Removed unconditional `import 'aframe'` from app entrypoint
+    - Added async `loadAFrame()` helper function in `GraphScreen.tsx` component
+    - Implemented `useEffect` hook to dynamically import aframe only when GraphScreen component mounts
+  - **Result:** Reduced initial bundle size and improved startup time; aframe now loaded only when user navigates to graph route
+  - **Impact:** Router entrypoint (Chat, Search, Docs, Stats, Settings, etc.) all now have faster initial load without unused dependencies
+  - **Testing:** Frontend type-check passed (TypeScript validation confirms no type errors in changes)

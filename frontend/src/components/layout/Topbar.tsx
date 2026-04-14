@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { getHealth, type HealthResponse } from '../../api/health'
+import { getHealth, getModelStatus, type HealthResponse, type ProviderModelsResponse } from '../../api/health'
 import OmniSearch from './OmniSearch'
 import './Topbar.css'
 
@@ -42,16 +42,23 @@ export default function Topbar({
 }: TopbarProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [status, setStatus] = useState<HealthStatus>('unknown')
+  const [modelStatus, setModelStatus] = useState<ProviderModelsResponse | null>(null)
 
   useEffect(() => {
     let cancelled = false
 
     async function poll() {
       try {
-        const h = await getHealth()
-        if (!cancelled) {
-          setHealth(h)
-          setStatus(healthToStatus(h))
+        const [h, ms] = await Promise.allSettled([getHealth(), getModelStatus()])
+        if (cancelled) return
+        if (h.status === 'fulfilled') {
+          setHealth(h.value)
+          setStatus(healthToStatus(h.value))
+        } else {
+          setStatus('error')
+        }
+        if (ms.status === 'fulfilled') {
+          setModelStatus(ms.value)
         }
       } catch {
         if (!cancelled) setStatus('error')
@@ -59,12 +66,29 @@ export default function Topbar({
     }
 
     poll()
-    const id = setInterval(poll, 10_000)
+    const id = setInterval(poll, 15_000)
     return () => {
       cancelled = true
       clearInterval(id)
     }
   }, [])
+
+  // Build detailed tooltip text for the health indicator
+  const chatModel = modelStatus?.models.find(m => m.role === 'chat')
+  const embedModel = modelStatus?.models.find(m => m.role === 'embed')
+  const chatNotLoaded = modelStatus?.provider_reachable && chatModel && !chatModel.loaded
+  const embedNotLoaded = modelStatus?.provider_reachable && embedModel && !embedModel.loaded
+  const modelTooltip = modelStatus
+    ? modelStatus.provider_reachable
+      ? modelStatus.models
+          .map(m => `${m.role}: ${m.name} (${m.loaded ? 'loaded' : m.available ? 'available' : 'not found'})`)
+          .join('\n')
+      : `${modelStatus.provider}: not reachable`
+    : ''
+  const healthTitle = [
+    health ? `${health.status} — index: ${health.index_status}` : 'Checking…',
+    modelTooltip,
+  ].filter(Boolean).join('\n')
 
   return (
     <header className="topbar" data-testid="topbar">
@@ -84,11 +108,43 @@ export default function Topbar({
       </div>
 
       <div className="topbar-right">
-        {/* Health dot — compact, no label */}
+        {/* Model status badges — show when models are available (green if loaded, amber if not) */}
+        {modelStatus?.provider_reachable && modelStatus.models.some(m => m.available) && (
+          <div className="topbar-models-status" data-testid="models-status-badges">
+            {chatModel?.available && (
+              <span
+                className={`topbar-model-badge ${chatModel.loaded ? 'topbar-model-badge--loaded' : 'topbar-model-badge--cold'}`}
+                title={
+                  chatModel.loaded
+                    ? `${chatModel.name} is loaded and ready`
+                    : `${chatModel.name} is not loaded — first chat response will be slower while the model initialises`
+                }
+                data-testid={`model-badge-chat-${chatModel.loaded ? 'loaded' : 'cold'}`}
+              >
+                {chatModel.loaded ? '✓' : '⏳'} chat
+              </span>
+            )}
+            {embedModel?.available && (
+              <span
+                className={`topbar-model-badge ${embedModel.loaded ? 'topbar-model-badge--loaded' : 'topbar-model-badge--cold'}`}
+                title={
+                  embedModel.loaded
+                    ? `${embedModel.name} is loaded and ready`
+                    : `${embedModel.name} is not loaded — search/embedding operations will be slower on first use`
+                }
+                data-testid={`model-badge-embed-${embedModel.loaded ? 'loaded' : 'cold'}`}
+              >
+                {embedModel.loaded ? '✓' : '⏳'} embed
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Health dot — compact, tooltip shows provider + model detail */}
         <span
           className="topbar-health-dot"
           data-testid="health-indicator"
-          title={health ? `${health.status} — index: ${health.index_status}` : 'Checking…'}
+          title={healthTitle}
         >
           <span
             className="health-dot"

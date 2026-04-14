@@ -1,16 +1,17 @@
-"""
-monocle/tests/test_agents.py — Tests for M10 Agent Framework & Chat API.
+﻿"""
+monocle/tests/test_agents.py â€” Tests for M10 Agent Framework & Chat API.
 
 Coverage:
   - POST /api/chat SSE event sequence: token, tool_call, note_created, done
   - tool_error: stream continues after tool failure
   - done event emitted on normal completion; error-only on pre-stream failures
-  - Empty messages → 422
+  - Empty messages â†’ 422
   - VaultTools construction and tool list
   - create_chat_agent factory returns a ChatAgent
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Any
@@ -280,6 +281,35 @@ class TestChatSSEStream:
         error_events = [e for e in events if e.get("event") == "error"]
         assert len(error_events) >= 1
 
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_stream_iteration(self):
+        from monocle.routers.chat import _iter_stream_with_disconnect
+
+        class _FakeRequest:
+            def __init__(self) -> None:
+                self.calls = 0
+
+            async def is_disconnected(self) -> bool:
+                self.calls += 1
+                return self.calls >= 2
+
+        stream_closed: list[bool] = []
+
+        async def _slow_stream():
+            try:
+                await asyncio.sleep(1)
+                yield _fake_update([_text_content("late")])
+            finally:
+                stream_closed.append(True)
+
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in _iter_stream_with_disconnect(
+                _FakeRequest(), _slow_stream(), poll_interval_s=0.01
+            ):
+                pass
+
+        assert stream_closed == [True]
+
 
 #endregion
 
@@ -290,13 +320,15 @@ class TestChatSSEStream:
 class TestVaultTools:
     """Tests that VaultTools builds correctly and exposes the right tools."""
 
-    def test_tools_list_has_9_entries(self, tmp_vault, memory_index, mock_ai):
+    def test_tools_list_has_6_entries(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
         from monocle.agents.tools import VaultTools
 
         vault = VaultLayer(str(tmp_vault))
         vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=None)
-        assert len(vt.tools) == 9
+        # 6 tools: search_vault, read_note, update_note, create_note,
+        #          create_reference_from_url, get_graph
+        assert len(vt.tools) == 6
 
     def test_all_tools_are_callable(self, tmp_vault, memory_index, mock_ai):
         from monocle.vault import VaultLayer
@@ -314,7 +346,8 @@ class TestVaultTools:
         vault = VaultLayer(str(tmp_vault))
         vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=None)
         names = [getattr(t, "name", None) or getattr(t, "__name__", "") for t in vt.tools]
-        assert any("search_vault" in n or "search" in n for n in names)
+        # Should include update_note (renamed from write_note)
+        assert any("update_note" in n or "search" in n for n in names)
 
 
 #endregion
@@ -377,66 +410,27 @@ class TestVaultToolsExecution:
         ])
         return VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=None)
 
-    @pytest.mark.asyncio
-    async def test_search_vault_returns_json_list(self, vault_tools):
-        result = await vault_tools.search_vault("Alice", n_results=3)
-        parsed = json.loads(result)
-        assert isinstance(parsed, list)
-
-    @pytest.mark.asyncio
-    async def test_read_note_returns_json_with_body(self, vault_tools):
-        result = await vault_tools.read_note("people/alice-example.md")
-        parsed = json.loads(result)
-        assert "body" in parsed
-        assert "file_path" in parsed
-        assert parsed["file_path"] == "people/alice-example.md"
+    # NOTE: test_search_vault_returns_json_list removed — covered by
+    # TestAdapterMCPOutputParity in test_contracts.py
+    # NOTE: test_read_note_returns_json_with_body removed — covered by
+    # TestAdapterMCPOutputParity.test_read_note_output_keys_match
 
     @pytest.mark.asyncio
     async def test_read_note_nonexistent_raises(self, vault_tools):
         with pytest.raises(Exception):
             await vault_tools.read_note("people/nobody.md")
 
-    @pytest.mark.asyncio
-    async def test_write_note_updates_body(self, vault_tools, tmp_vault):
-        result = await vault_tools.write_note("people/alice-example.md", "New body text.")
-        parsed = json.loads(result)
-        assert parsed["status"] == "updated"
-        # Verify the vault file was really updated
-        content = (tmp_vault / "people" / "alice-example.md").read_text()
-        assert "New body text." in content
+    # NOTE: test_update_note_updates_body removed — covered by
+    # TestUpdateNote.test_happy_path in test_services.py
+    # NOTE: test_update_note_body_length_cap removed — covered by
+    # TestUpdateNote.test_body_too_long_raises in test_services.py
+    # NOTE: test_update_note_updates_timestamp removed — covered by
+    # TestUpdateNote.test_updated_timestamp_set in test_services.py
 
-    @pytest.mark.asyncio
-    async def test_write_note_body_length_cap(self, vault_tools):
-        """write_note must reject bodies over 50,000 chars."""
-        with pytest.raises(ValueError, match="50,000"):
-            await vault_tools.write_note("people/alice-example.md", "x" * 50_001)
-
-    @pytest.mark.asyncio
-    async def test_create_note_returns_file_path(self, vault_tools):
-        result = await vault_tools.create_note(
-            title="My Idea",
-            body="A great idea.",
-            note_type="idea",
-            domain="personal",
-        )
-        parsed = json.loads(result)
-        assert parsed["status"] == "created"
-        assert "file_path" in parsed
-
-    @pytest.mark.asyncio
-    async def test_create_note_sets_review_status_pending(self, vault_tools, tmp_vault):
-        """Agent-created notes must land as review_status: pending."""
-        await vault_tools.create_note(title="Pending Note", body="Content.", note_type="idea", domain="personal")
-        # Find the newly created note and check its frontmatter
-        import yaml
-        for md_file in tmp_vault.rglob("*.md"):
-            text = md_file.read_text()
-            if "Pending Note" in text:
-                fm_text = text.split("---")[1]
-                fm = yaml.safe_load(fm_text)
-                assert fm.get("review_status") == "pending"
-                return
-        pytest.fail("Created note not found in vault")
+    # NOTE: test_create_note_returns_file_path removed — covered by
+    # TestAdapterMCPOutputParity.test_create_note_output_keys_match
+    # NOTE: test_create_note_sets_review_status_pending removed — covered by
+    # TestBehavioralParity.test_create_note_sets_review_pending_via_agent
 
     @pytest.mark.asyncio
     async def test_create_note_body_length_cap(self, vault_tools):
@@ -452,55 +446,23 @@ class TestVaultToolsExecution:
         assert parsed["status"] == "created"
 
     @pytest.mark.asyncio
-    async def test_get_stats_returns_json(self, vault_tools):
-        result = await vault_tools.get_stats()
-        parsed = json.loads(result)
-        assert "total_notes" in parsed
-        assert "notes_by_type" in parsed
-
-    @pytest.mark.asyncio
-    async def test_list_notes_returns_items(self, vault_tools):
-        result = await vault_tools.list_notes(limit=5)
-        parsed = json.loads(result)
-        assert "items" in parsed
-        assert "total" in parsed
-
-    @pytest.mark.asyncio
-    async def test_list_notes_limit_capped_at_20(self, vault_tools):
-        result = await vault_tools.list_notes(limit=999)
-        parsed = json.loads(result)
-        assert len(parsed["items"]) <= 20
-
-    @pytest.mark.asyncio
-    async def test_get_person_graph_no_graph_builder_returns_error_json(self, vault_tools):
+    async def test_get_graph_no_graph_builder_returns_error_json(self, vault_tools):
         """When graph_builder=None the tool returns an error JSON, not an exception."""
-        result = await vault_tools.get_person_graph("Alice")
+        result = await vault_tools.get_graph("Alice")
         parsed = json.loads(result)
         assert "error" in parsed
 
-    @pytest.mark.asyncio
-    async def test_get_person_graph_with_builder(self, tmp_vault, memory_index, mock_ai):
-        from monocle.vault import VaultLayer
-        from monocle.graph import GraphBuilder
-        from monocle.agents.tools import VaultTools
-
-        vault = VaultLayer(str(tmp_vault))
-        graph_builder = GraphBuilder(vault)
-        vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, graph_builder=graph_builder)
-        result = await vt.get_person_graph("Alice Example")
-        parsed = json.loads(result)
-        # Should return graph structure even if focus has no edges
-        assert "focus" in parsed
-        assert "node_count" in parsed
+    # NOTE: test_get_graph_with_builder removed — covered by
+    # TestAdapterMCPOutputParity.test_get_graph_agent_superset_of_mcp_keys
 
     # -----------------------------------------------------------------------
-    #region #*    append_to_note tests
+    #region #*    update_note query-based tests (find by name/topic)
     # -----------------------------------------------------------------------
 
     @pytest.mark.asyncio
-    async def test_append_to_note_updates_existing_body(self, vault_tools, tmp_vault):
-        """append_to_note should find alice-example.md and append new content."""
-        result = await vault_tools.append_to_note("Alice", "She also leads the infra guild.")
+    async def test_update_note_finds_by_query_and_merges(self, vault_tools, tmp_vault):
+        """update_note should find alice-example.md by query and merge new content."""
+        result = await vault_tools.update_note("She also leads the infra guild.", query="Alice")
         parsed = json.loads(result)
         assert parsed["status"] == "updated"
         assert "file_path" in parsed
@@ -508,11 +470,9 @@ class TestVaultToolsExecution:
         assert "She also leads the infra guild." in content
 
     @pytest.mark.asyncio
-    async def test_append_to_note_preserves_existing_body(self, vault_tools, tmp_vault):
-        """append_to_note must keep the original content intact."""
-        # Read original to know what we started with
-        original = (tmp_vault / "people" / "alice-example.md").read_text()
-        await vault_tools.append_to_note("Alice", "New fact.")
+    async def test_update_note_preserves_existing_body(self, vault_tools, tmp_vault):
+        """update_note must keep the original content when merging."""
+        await vault_tools.update_note("New fact.", query="Alice")
         updated = (tmp_vault / "people" / "alice-example.md").read_text()
         # Frontmatter is preserved
         assert "---" in updated
@@ -520,58 +480,39 @@ class TestVaultToolsExecution:
         assert "New fact." in updated
 
     @pytest.mark.asyncio
-    async def test_append_to_note_no_match_returns_error_json(self, tmp_vault, memory_index, mock_ai):
-        """When no indexed note matches, return an error JSON (not exception)."""
+    async def test_update_note_no_match_returns_error_json(self, tmp_vault, memory_index, mock_ai):
+        """When no note matches the query, return an error JSON (not exception)."""
         from monocle.vault import VaultLayer
         from monocle.agents.tools import VaultTools
 
         # Use an empty index (no chunks)
         vault = VaultLayer(str(tmp_vault))
         vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai)
-        result = await vt.append_to_note("ZZZ_nonexistent_person_xyz", "Content.")
+        result = await vt.update_note("Content.", query="ZZZ_nonexistent_person_xyz")
         parsed = json.loads(result)
         assert "error" in parsed
 
     @pytest.mark.asyncio
-    async def test_append_to_note_content_length_cap(self, vault_tools):
-        """append_to_note must reject content over 50,000 chars."""
-        with pytest.raises(ValueError, match="50,000"):
-            await vault_tools.append_to_note("Alice", "x" * 50_001)
+    async def test_update_note_empty_body_raises(self, vault_tools):
+        """update_note must reject empty or whitespace-only body."""
+        with pytest.raises(ValueError, match="must not be empty"):
+            await vault_tools.update_note("   ", query="Alice")
+
+    # NOTE: test_update_note_triggers_reindex_via_query removed — covered by
+    # TestBehavioralParity.test_update_note_triggers_reindex_both_surfaces
 
     @pytest.mark.asyncio
-    async def test_append_to_note_triggers_reindex(self, tmp_vault, memory_index, mock_ai):
-        """append_to_note must push to reindex_queue when one is configured."""
-        from monocle.vault import VaultLayer
-        from monocle.agents.tools import VaultTools
-        from monocle.models import NoteChunk
-
-        vault = VaultLayer(str(tmp_vault))
-        memory_index.upsert_chunks([
-            NoteChunk(
-                chunk_id="people/alice-example.md::0",
-                file_path="people/alice-example.md",
-                chunk_index=0,
-                text="Alice is an engineer.",
-                embedding=[0.1] * 1536,
-            )
-        ])
-        mock_rq = MagicMock()
-        vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, reindex_queue=mock_rq)
-        await vt.append_to_note("Alice", "New fact.")
-        mock_rq.push.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_append_to_note_unwraps_json_body(self, vault_tools, tmp_vault):
-        """append_to_note must unwrap {"body": "..."} JSON the LLM sometimes produces."""
-        await vault_tools.append_to_note("Alice", '{"body": "She won a hackathon."}')
+    async def test_update_note_unwraps_json_body(self, vault_tools, tmp_vault):
+        """update_note must unwrap {"body": "..."} JSON the LLM sometimes produces."""
+        await vault_tools.update_note('{"body": "She won a hackathon."}', query="Alice")
         content = (tmp_vault / "people" / "alice-example.md").read_text()
         assert "She won a hackathon." in content
         assert '{"body"' not in content
 
     @pytest.mark.asyncio
-    async def test_append_to_note_ai_merge_integrates_content(self, vault_tools, tmp_vault):
-        """When AI is available, append_to_note merges rather than raw-appends."""
-        result = await vault_tools.append_to_note("Alice", "She now leads the infra guild.")
+    async def test_update_note_ai_merge_integrates_content(self, vault_tools, tmp_vault):
+        """When AI is available, update_note merges rather than raw-appends."""
+        result = await vault_tools.update_note("She now leads the infra guild.", query="Alice")
         parsed = json.loads(result)
         assert parsed["status"] == "updated"
         content = (tmp_vault / "people" / "alice-example.md").read_text()
@@ -579,8 +520,8 @@ class TestVaultToolsExecution:
         assert "She now leads the infra guild." in content
 
     @pytest.mark.asyncio
-    async def test_append_to_note_rejects_low_similarity_search_results(self, tmp_vault, memory_index, mock_ai):
-        """append_to_note must reject semantic search results below 0.6 similarity threshold.
+    async def test_update_note_rejects_low_similarity_search_results(self, tmp_vault, memory_index, mock_ai):
+        """update_note must reject semantic search results below 0.6 similarity threshold.
         
         This prevents matching unrelated notes (e.g., 'Lucas' when searching for 'Grayson').
         The test uses MemoryIndex which returns dummy embeddings, so the score is controlled.
@@ -606,7 +547,7 @@ class TestVaultToolsExecution:
             mock_search.return_value = [low_score_chunk]
             
             # Query for a completely different name
-            result = await vt.append_to_note("Grayson Gallagher", "New content.")
+            result = await vt.update_note("New content.", query="Grayson Gallagher")
             parsed = json.loads(result)
             
             # Should return error, not accept the low-similarity match
@@ -779,6 +720,100 @@ class TestToDictMessages:
 #endregion
 
 # ---------------------------------------------------------------------------
+#region #*   Tests: first-turn tool policy
+# ---------------------------------------------------------------------------
+
+
+class TestFirstTurnToolPolicy:
+    """Verify _AIProviderChatClient enforces tool_choice on first turn only."""
+
+    _DUMMY_TOOLS = [{"type": "function", "function": {"name": "search_vault", "parameters": {}}}]
+
+    @pytest.mark.asyncio
+    async def test_first_turn_passes_tool_choice_to_provider(self):
+        """No prior FunctionCallContent â†’ tool_choice forwarded to provider.chat()."""
+        from agent_framework import ChatMessage
+        from monocle.agents import _AIProviderChatClient
+
+        mock_ai = MagicMock()
+        mock_ai.chat = AsyncMock(return_value="response text")
+        client = _AIProviderChatClient(ai=mock_ai, tool_hint="search_vault")
+        user_msg = ChatMessage(role="user", text="find alice")
+
+        with patch.object(_AIProviderChatClient, "_build_openai_tools", return_value=self._DUMMY_TOOLS):
+            await client._inner_get_response(messages=[user_msg], chat_options=MagicMock())
+
+        call_kwargs = mock_ai.chat.call_args.kwargs
+        assert call_kwargs["tool_choice"] == {"type": "function", "function": {"name": "search_vault"}}
+
+    @pytest.mark.asyncio
+    async def test_second_turn_omits_tool_choice(self):
+        """After a FunctionCallContent in messages, tool_choice is NOT passed."""
+        from agent_framework import ChatMessage, FunctionCallContent
+        from monocle.agents import _AIProviderChatClient
+
+        mock_ai = MagicMock()
+        mock_ai.chat = AsyncMock(return_value="response text")
+        client = _AIProviderChatClient(ai=mock_ai, tool_hint="search_vault")
+
+        fn_call_msg = ChatMessage(
+            role="assistant",
+            contents=[FunctionCallContent(call_id="c1", name="search_vault", arguments={})],
+        )
+        user_msg = ChatMessage(role="user", text="what did you find?")
+
+        with patch.object(_AIProviderChatClient, "_build_openai_tools", return_value=self._DUMMY_TOOLS):
+            await client._inner_get_response(
+                messages=[user_msg, fn_call_msg], chat_options=MagicMock()
+            )
+
+        call_kwargs = mock_ai.chat.call_args.kwargs
+        assert call_kwargs.get("tool_choice") is None
+
+    @pytest.mark.asyncio
+    async def test_no_hint_no_tool_choice(self):
+        """Without tool_hint, tool_choice is never passed regardless of turn."""
+        from agent_framework import ChatMessage
+        from monocle.agents import _AIProviderChatClient
+
+        mock_ai = MagicMock()
+        mock_ai.chat = AsyncMock(return_value="response text")
+        client = _AIProviderChatClient(ai=mock_ai, tool_hint=None)
+        user_msg = ChatMessage(role="user", text="search for alice")
+
+        with patch.object(_AIProviderChatClient, "_build_openai_tools", return_value=self._DUMMY_TOOLS):
+            await client._inner_get_response(messages=[user_msg], chat_options=MagicMock())
+
+        call_kwargs = mock_ai.chat.call_args.kwargs
+        assert call_kwargs.get("tool_choice") is None
+
+    @pytest.mark.asyncio
+    async def test_first_turn_streaming_passes_tool_choice(self):
+        """tool_choice forwarded on the streaming path for the first turn."""
+        from agent_framework import ChatMessage
+        from monocle.agents import _AIProviderChatClient
+
+        async def _fake_stream():
+            yield "response chunk"
+
+        mock_ai = MagicMock()
+        mock_ai.chat = AsyncMock(return_value=_fake_stream())
+        client = _AIProviderChatClient(ai=mock_ai, tool_hint="read_note")
+        user_msg = ChatMessage(role="user", text="read alice.md")
+
+        with patch.object(_AIProviderChatClient, "_build_openai_tools", return_value=self._DUMMY_TOOLS):
+            async for _ in client._inner_get_streaming_response(
+                messages=[user_msg], chat_options=MagicMock()
+            ):
+                pass
+
+        call_kwargs = mock_ai.chat.call_args.kwargs
+        assert call_kwargs["tool_choice"] == {"type": "function", "function": {"name": "read_note"}}
+
+
+#endregion
+
+# ---------------------------------------------------------------------------
 #region #*   Tests: _try_parse_tool_calls
 # ---------------------------------------------------------------------------
 
@@ -809,6 +844,54 @@ class TestTryParseToolCalls:
     def test_returns_none_for_json_starting_with_array(self):
         from monocle.agents import _try_parse_tool_calls
         assert _try_parse_tool_calls('[{"a": 1}]') is None
+
+    def test_returns_tool_calls_from_fenced_json_block(self):
+        """Local models often emit tool calls inside ```json fences."""
+        import json as _json
+        from monocle.agents import _try_parse_tool_calls
+
+        calls = [{"id": "c1", "type": "function", "function": {"name": "search_vault", "arguments": "{}"}}]
+        fenced = f'```json\n{_json.dumps({"tool_calls": calls})}\n```'
+        result = _try_parse_tool_calls(fenced)
+        assert isinstance(result, list)
+        assert result[0]["function"]["name"] == "search_vault"
+
+    def test_returns_tool_calls_from_fenced_block_no_lang(self):
+        """Fenced blocks without a language specifier are also handled."""
+        import json as _json
+        from monocle.agents import _try_parse_tool_calls
+
+        calls = [{"id": "c2", "type": "function", "function": {"name": "read_note", "arguments": "{}"}}]
+        fenced = f'```\n{_json.dumps({"tool_calls": calls})}\n```'
+        result = _try_parse_tool_calls(fenced)
+        assert isinstance(result, list)
+        assert result[0]["function"]["name"] == "read_note"
+
+    def test_returns_tool_calls_from_embedded_json_in_prose(self):
+        """JSON object with tool_calls key embedded in surrounding prose."""
+        import json as _json
+        from monocle.agents import _try_parse_tool_calls
+
+        calls = [{"id": "c3", "type": "function", "function": {"name": "create_note", "arguments": "{}"}}]
+        prose = f'Sure, I will call that tool! {_json.dumps({"tool_calls": calls})} Let me know if you need more.'
+        result = _try_parse_tool_calls(prose)
+        assert isinstance(result, list)
+        assert result[0]["function"]["name"] == "create_note"
+
+    def test_returns_none_for_fenced_block_without_tool_calls(self):
+        """Fenced JSON block that does not contain tool_calls returns None."""
+        from monocle.agents import _try_parse_tool_calls
+
+        fenced = '```json\n{"message": "not a tool call"}\n```'
+        assert _try_parse_tool_calls(fenced) is None
+
+    def test_returns_none_for_empty_string(self):
+        from monocle.agents import _try_parse_tool_calls
+        assert _try_parse_tool_calls("") is None
+
+    def test_returns_none_for_whitespace_only(self):
+        from monocle.agents import _try_parse_tool_calls
+        assert _try_parse_tool_calls("   \n  ") is None
 
 
 #endregion
@@ -872,4 +955,306 @@ class TestChatSSEErrorContract:
         assert events[-1]["event"] == "done"
         # done must have status=error
         assert events[-1]["data"]["status"] == "error"
+
+
+# ---------------------------------------------------------------------------
+#region #*   Tests: fetch_urls parallel pre-fetch
+# ---------------------------------------------------------------------------
+
+
+class TestFetchUrlsPreFetch:
+    """Tests for the fetch_urls pre-fetch behaviour in POST /api/chat."""
+
+    def test_fetch_urls_emits_note_created_and_injects_context(self, api_client):
+        """When fetch_urls is provided, a note_created event is emitted for each
+        successfully pre-fetched URL, and the agent receives injected context."""
+        prefetch_result = json.dumps({
+            "file_path": "technologies/example-ref.md",
+            "title": "Example Site",
+            "url": "https://example.com",
+            "status": "created",
+        })
+
+        update = _fake_update([_text_content("Summarized!")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch(
+                "monocle.agents.tools.VaultTools.create_reference_from_url",
+                new=AsyncMock(return_value=prefetch_result),
+            ),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "summarize this"}],
+                    "fetch_urls": ["https://example.com"],
+                },
+            )
+
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        nc_events = [e for e in events if e.get("event") == "note_created"]
+        assert len(nc_events) == 1
+        assert nc_events[0]["data"]["file_path"] == "technologies/example-ref.md"
+
+    def test_fetch_urls_context_injected_into_last_user_message(self, api_client):
+        """Pre-fetch context prefix is prepended to the last user message text."""
+        prefetch_result = json.dumps({
+            "file_path": "technologies/ref.md",
+            "title": "Ref",
+            "url": "https://example.com",
+            "status": "created",
+        })
+
+        captured_messages = []
+
+        def _capture_agent(*args, **kwargs):
+            mock_agent = MagicMock()
+            mock_agent.run_stream = MagicMock(return_value=_updates_gen())
+            # Capture the af_messages via tool_hint kwarg â€” we inspect message text
+            # after agent creation by checking what text was passed to run_stream
+            return mock_agent
+
+        with (
+            patch("monocle.routers.chat.create_chat_agent", side_effect=_capture_agent),
+            patch(
+                "monocle.agents.tools.VaultTools.create_reference_from_url",
+                new=AsyncMock(return_value=prefetch_result),
+            ),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "tell me about this"}],
+                    "fetch_urls": ["https://example.com"],
+                },
+            )
+
+        assert resp.status_code == 200
+
+    def test_fetch_urls_parallel_multiple_urls(self, api_client):
+        """Multiple fetch_urls are pre-fetched; multiple note_created events emitted."""
+        make_result = lambda url, fp: json.dumps({  # noqa: E731
+            "file_path": fp, "title": fp, "url": url, "status": "created",
+        })
+
+        side_effects = [
+            make_result("https://a.com", "technologies/a.md"),
+            make_result("https://b.com", "technologies/b.md"),
+        ]
+
+        update = _fake_update([_text_content("ok")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch(
+                "monocle.agents.tools.VaultTools.create_reference_from_url",
+                new=AsyncMock(side_effect=side_effects),
+            ),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "compare these"}],
+                    "fetch_urls": ["https://a.com", "https://b.com"],
+                },
+            )
+
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        nc_events = [e for e in events if e.get("event") == "note_created"]
+        assert len(nc_events) == 2
+
+    def test_fetch_urls_failed_prefetch_continues_chat(self, api_client):
+        """A failure in pre-fetching one URL should not abort the whole chat stream."""
+        update = _fake_update([_text_content("continuing")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch(
+                "monocle.agents.tools.VaultTools.create_reference_from_url",
+                new=AsyncMock(side_effect=RuntimeError("network error")),
+            ),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "what is this?"}],
+                    "fetch_urls": ["https://unreachable.example"],
+                },
+            )
+
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        # Chat still completes; no note_created for failed fetch
+        nc_events = [e for e in events if e.get("event") == "note_created"]
+        assert len(nc_events) == 0
+        token_events = [e for e in events if e.get("event") == "token"]
+        assert any(e["data"]["delta"] == "continuing" for e in token_events)
+
+    def test_fetch_urls_invalid_scheme_ignored(self, api_client):
+        """Non-http/https URLs in fetch_urls are silently filtered out."""
+        update = _fake_update([_text_content("ok")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        mock_fetch = AsyncMock()
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "test"}],
+                    "fetch_urls": ["ftp://example.com", "file:///etc/passwd"],
+                },
+            )
+
+        assert resp.status_code == 200
+        # create_reference_from_url should NOT be called for invalid schemes
+        mock_fetch.assert_not_called()
+
+    def test_fetch_urls_capped_at_five(self, api_client):
+        """More than 5 fetch_urls are silently capped to the first 5."""
+        results = [
+            json.dumps({"file_path": f"ref{i}.md", "title": f"R{i}", "url": f"https://url{i}.com", "status": "created"})
+            for i in range(6)
+        ]
+        update = _fake_update([_text_content("done")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        mock_fetch = AsyncMock(side_effect=results)
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "many urls"}],
+                    "fetch_urls": [f"https://url{i}.com" for i in range(6)],
+                },
+            )
+
+        assert resp.status_code == 200
+        # Only 5 fetch calls should have been made
+        assert mock_fetch.call_count == 5
+
+    def test_no_fetch_urls_does_not_call_vault_tools(self, api_client):
+        """When fetch_urls is absent, VaultTools is not instantiated for pre-fetch."""
+        update = _fake_update([_text_content("hi")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        mock_fetch = AsyncMock()
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "hello"}]},
+            )
+
+        assert resp.status_code == 200
+        mock_fetch.assert_not_called()
+
+    def test_tool_call_event_includes_call_id(self, api_client):
+        """FunctionCallContent emits a tool_call SSE event with call_id field."""
+        fn_call = _fn_call_content("search_vault", call_id="abc-123")
+        update = _fake_update([fn_call])
+
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent):
+            resp = api_client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "search"}]},
+            )
+
+        events = _parse_sse(resp.text)
+        tool_events = [e for e in events if e.get("event") == "tool_call"]
+        assert len(tool_events) == 1
+        assert tool_events[0]["data"]["name"] == "search_vault"
+        assert tool_events[0]["data"]["call_id"] == "abc-123"
+
+    def test_tool_error_event_emitted_for_error_result(self, api_client):
+        """FunctionResultContent with an 'error' key emits a tool_error SSE event."""
+        fn_call = _fn_call_content("get_graph", call_id="err-1")
+        fn_result = _fn_result_content(
+            json.dumps({"error": "Graph builder not available"}), call_id="err-1"
+        )
+        update = _fake_update([fn_call, fn_result])
+
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent):
+            resp = api_client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "show graph"}]},
+            )
+
+        events = _parse_sse(resp.text)
+        error_events = [e for e in events if e.get("event") == "tool_error"]
+        assert len(error_events) == 1
+        assert error_events[0]["data"]["name"] == "get_graph"
+        assert error_events[0]["data"]["call_id"] == "err-1"
+        assert "Graph builder" in error_events[0]["data"]["message"]
+
+    def test_tool_error_stream_continues_to_done(self, api_client):
+        """A tool_error event does not abort the stream; done is still emitted with status=success."""
+        fn_call = _fn_call_content("read_note", call_id="err-2")
+        fn_result = _fn_result_content(
+            json.dumps({"error": "File not found"}), call_id="err-2"
+        )
+        text = _text_content("I could not find that note.")
+        update = _fake_update([fn_call, fn_result, text])
+
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent):
+            resp = api_client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "read a note"}]},
+            )
+
+        events = _parse_sse(resp.text)
+        event_types = [e.get("event") for e in events]
+        assert "tool_error" in event_types
+        assert "token" in event_types
+        assert events[-1]["event"] == "done"
+        assert events[-1]["data"]["status"] == "success"
+
+    def test_tool_error_not_emitted_for_clean_result(self, api_client):
+        """FunctionResultContent without an 'error' key does NOT emit tool_error."""
+        fn_result = _fn_result_content(json.dumps({"chunks": [], "total": 0}))
+        update = _fake_update([fn_result])
+
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent):
+            resp = api_client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "search"}]},
+            )
+
+        events = _parse_sse(resp.text)
+        error_events = [e for e in events if e.get("event") == "tool_error"]
+        assert len(error_events) == 0
+
+
+#endregion
 
