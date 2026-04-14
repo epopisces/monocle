@@ -1,5 +1,5 @@
 """Tests for telemetry module, including health check span filtering."""
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -102,3 +102,15 @@ class TestHealthCheckFilterSpanProcessor:
         span = MagicMock()
         # Should not raise an error
         filter_processor._on_ending(span)
+
+    def test_filters_out_health_models_spans(self):
+        """/api/health/models spans should also be filtered out."""
+        wrapped = MagicMock()
+        filter_processor = _HealthCheckFilterSpanProcessor(wrapped)
+
+        health_models_span = MagicMock()
+        health_models_span.attributes = {"http.route": "/api/health/models"}
+
+        filter_processor.on_end(health_models_span)
+
+        wrapped.on_end.assert_not_called()
