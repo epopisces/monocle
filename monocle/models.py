@@ -6,6 +6,9 @@ pipeline, vault layer, index layer, and agent layer.  No business logic here.
 """
 from __future__ import annotations
 
+# Apply Python 3.14 compatibility patches BEFORE importing Pydantic
+import monocle.compat as _compat  # noqa: F401
+
 from datetime import datetime
 import base64 as _b64
 from typing import Annotated, Any, Generic, Literal, TypeVar

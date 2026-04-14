@@ -240,8 +240,8 @@ async def _stream_agent_response(
         logger.info("[CHAT] Starting agent stream: %d messages, session=%s", len(af_messages), chat_request.session_id)
 
         stream_iter = agent.run_stream(af_messages)
-        logger.info("[CHAT] run_stream() returned: %s", stream_iter)
-        logger.info("[CHAT] Entering async for loop to consume stream...")
+        logger.debug("[CHAT] run_stream() returned: %s", stream_iter)
+        logger.debug("[CHAT] Entering async for loop to consume stream...")
 
         try:
             # asyncio.timeout(300) wraps the streaming loop with a 5-minute timeout.
@@ -252,9 +252,9 @@ async def _stream_agent_response(
                 async for update in _iter_stream_with_disconnect(request, stream_iter):
                     update_count += 1
                     update: AgentRunResponseUpdate
-                    logger.info("[CHAT] Update #%d: %s (%d contents)", update_count, type(update).__name__, len(update.contents))
+                    logger.debug("[CHAT] Update #%d: %s (%d contents)", update_count, type(update).__name__, len(update.contents))
                     for i, content in enumerate(update.contents):
-                        logger.info("[CHAT]   Content[%d]: %s", i, type(content).__name__)
+                        logger.debug("[CHAT]   Content[%d]: %s", i, type(content).__name__)
                         if isinstance(content, TextContent) and content.text:
                             delta = content.text
                             total_tokens += len(delta.split())
@@ -274,13 +274,13 @@ async def _stream_agent_response(
                             tool_name = content.name or "unknown"
                             if call_id:
                                 _active_tool_calls[call_id] = tool_name
-                            logger.info("[CHAT]   → FunctionCallContent: name=%s, call_id=%s", tool_name, call_id)
+                            logger.debug("[CHAT]   → FunctionCallContent: name=%s, call_id=%s", tool_name, call_id)
                             yield _sse("tool_call", {"name": tool_name, "call_id": call_id})
 
                         elif isinstance(content, FunctionResultContent):
                             call_id = content.call_id or ""
                             tool_name = _active_tool_calls.get(call_id, "unknown")
-                            logger.info("[CHAT]   → FunctionResultContent: call_id=%s, tool=%s", call_id, tool_name)
+                            logger.debug("[CHAT]   → FunctionResultContent: call_id=%s, tool=%s", call_id, tool_name)
                             result = content.result
                             if isinstance(result, str):
                                 try:
@@ -290,7 +290,7 @@ async def _stream_agent_response(
                                             yield _sse("tool_error", {
                                                 "name": tool_name,
                                                 "call_id": call_id,
-                                                "message": str(parsed["error"]),
+                                                "error": str(parsed["error"]),
                                             })
                                         if parsed.get("status") == "created":
                                             yield _sse(
@@ -368,9 +368,17 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
     async def stream_with_tracing():
         """Wrap streaming response with OTel span for message event recording."""
         async with span("chat.stream", session_id=body.session_id or "unknown") as trace_span:
-            # Record user message at stream start
-            if body.messages and body.messages[0].content and trace_span:
-                add_user_message_event(trace_span, body.messages[0].content)
+            # Record the last user message (the one that triggered this request)
+            # Request includes full conversation history; new user turn is appended at the end
+            user_message = None
+            if body.messages and trace_span:
+                # Find the last user-role message
+                for msg in reversed(body.messages):
+                    if msg.role == "user" and msg.content:
+                        user_message = msg.content
+                        break
+                if user_message:
+                    add_user_message_event(trace_span, user_message)
             
             # Accumulate assistant tokens for final message event
             assistant_tokens = []
@@ -380,15 +388,28 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
                 yield event_str
                 
                 # Parse token events to accumulate assistant response
-                if trace_span and '"token"' in event_str and '"delta"' in event_str:
+                if trace_span:
                     try:
-                        # Extract JSON payload from SSE line (format: data: {...})
+                        # SSE frames are formatted as:
+                        # event: token
+                        # data: {"delta": "..."}
+                        # 
+                        # Check if this frame is a token event
                         lines = event_str.split('\n')
+                        event_type = None
                         for line in lines:
-                            if line.startswith('data: '):
-                                data = json.loads(line[6:])
-                                if isinstance(data, dict) and 'delta' in data:
-                                    assistant_tokens.append(data['delta'])
+                            if line.startswith('event: '):
+                                event_type = line[7:].strip()
+                                break
+                        
+                        if event_type == 'token':
+                            # Parse the data payload
+                            for line in lines:
+                                if line.startswith('data: '):
+                                    data = json.loads(line[6:])
+                                    if isinstance(data, dict) and 'delta' in data:
+                                        assistant_tokens.append(data['delta'])
+                                    break
                     except (json.JSONDecodeError, ValueError, IndexError):
                         pass  # Silently skip parse errors
             
@@ -400,6 +421,10 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
     return StreamingResponse(
         stream_with_tracing(),
         media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

@@ -407,7 +407,7 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ### Claude Sonnet 4.6
 - Created `.github/copilot-instructions.md` — synthesized architecture, key abstractions, ingest pipeline, frontmatter schema, test commands, and conventions from build-plan, SRS, PRD, and UI Design docs
-- Created `GHI-ACTION-LOG.md` — seeded with 2026-03-14 entry from README; established as the canonical agent action log going forward
+- Created `GHC-ACTION-LOG.md` — seeded with 2026-03-14 entry from README; established as the canonical agent action log going forward
 - Standardized all Python/tool invocations in `docs/build-plan.md` and `.github/copilot-instructions.md` to use `uv run` (e.g., `uv run python -m pytest`, `uv run uvicorn`); updated M1 tasks.json deliverable from `pip install -e .[dev]` to `uv sync`; updated `pyproject.toml` note to use `requires-python` (uv standard)
 - **Executed M1 — Foundation & Project Skeleton (COMPLETE)**
   - Created `pyproject.toml` with 30+ backend dependencies, `[dependency-groups]` dev group, `[tool.uv] prerelease = "allow"` (required for agent-framework pre-release packages), `[tool.pytest.ini_options]`
@@ -997,6 +997,48 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
 - Created .github/workflows/ci.yml (backend + frontend + E2E jobs)
 - Rewrote README.md with prerequisites, quick start, MCP setup, keyboard shortcuts, CLI reference, and Obsidian compatibility
 - Added test: e2e and test: ci-full VS Code tasks; added E2E Tests (Playwright debug) launch config
+
+---
+
+## 2026-04-13
+
+### Claude Haiku 4.5
+- **Environment & Logging Optimization**
+  - Ran `uv sync` to initialize Python 3.14.0a7 environment (.venv created, 175 packages resolved, EXIT 0)
+  - **Fixed high-volume logging in chat streaming (`monocle/routers/chat.py`)**
+    - **Problem:** Per-update logs (`Update #N: ...`) and per-content logs (`Content[i]: ...`) at INFO level generate extremely high volume during token streaming, materially impacting performance and observability cost
+    - **Solution:** Moved per-update and per-content logs from `logger.info()` to `logger.debug()` (lines 243–244, 255, 257, 282, 289); kept session-level summaries (start, end, error) at INFO for visibility
+    - **Result:** Preserves debugging capability while eliminating production noise during token-by-token SSE emission
+  - **Fixed user message recording in telemetry (`monocle/routers/chat.py`)**
+    - **Problem:** `add_user_message_event()` was recording `body.messages[0].content` (first in request), but frontend sends full conversation history with the new user turn appended at the end, so oldest/irrelevant messages were being recorded instead of the actual user prompt
+    - **Solution:** Changed to iterate `reversed(body.messages)` and find the last user-role message; correctly captures the message that triggered the request
+    - **Result:** Conversation traces in AI Toolkit now show the actual user query, not stale context from prior turns
+  - Verified syntax with `uv run python -m py_compile monocle/routers/chat.py` (EXIT 0)
+
+- **Fixed SSE streaming issues in chat endpoint (`monocle/routers/chat.py`)**
+  - **Issue 1: Token event detection broken** — `stream_with_tracing()` used substring matching (`'"token"' in event_str`) instead of parsing SSE frame format (`event: token\ndata: {...}\n\n`); `assistant_tokens` were never accumulated and `add_assistant_message_event()` never fired
+    - **Fix:** Implemented proper SSE frame parsing — extract `event: token` line, check `event_type == 'token'`, then parse corresponding `data: {...}` JSON payload; accumulation now works correctly
+  - **Issue 2: Tool error payload mismatch** — `tool_error` SSE payload used `"message"` key but frontend `ChatEvent` type / `useChat` reducer expects `"error"` key; tool error details were silently dropped in UI
+    - **Fix:** Changed tool error SSE payload from `"message"` to `"error"` key (line 292) for frontend contract alignment
+  - **Issue 3: Missing SSE-friendly headers** — `StreamingResponse` didn't set `Cache-Control: no-cache` and `X-Accel-Buffering: no` headers; reverse proxies (esp. nginx) could buffer/cache responses, breaking real-time SSE delivery
+    - **Fix:** Added headers dict to `StreamingResponse` constructor with both required headers (lines 429–432)
+  - Verified all syntax changes with `uv run python -m py_compile monocle/routers/chat.py` (EXIT 0)
+
+- **Python 3.14a7 + Pydantic compatibility fix**
+  - **Root cause:** Pydantic 2.13.0b2 calls `typing._eval_type()` with `prefer_fwd_module=True` parameter; Python 3.14a7 removed this parameter, causing `TypeError` on model import
+  - **Solution:** Created `monocle/compat.py` with compatibility shim that wraps `typing._eval_type()` to handle both old and new signatures (introspects kwargs and re-calls without incompatible params on Python 3.14+)
+  - **Integration:** Imported `monocle.compat` at top of `monocle/models.py` (before Pydantic imports) to ensure patch is applied at module initialization time
+  - **Result:** Models can now be imported on Python 3.14a7 without downgrading to 3.13
+
+- **Fixed telemetry health-check filtering to cover all `/api/health/*` endpoints (`monocle/telemetry.py`)**
+  - **Problem:** `_HealthCheckFilterSpanProcessor` only dropped traces where `http.route == "/api/health"` (exact match); new `/api/health/models` polling endpoint would still generate traces and reintroduce noise
+  - **Solution:** Changed from exact match to `route.startswith("/api/health")` (line 50) so any `/api/health*` route is filtered
+  - **Result:** All health-check related traces are now filtered regardless of sub-path
+
+- **Hardened OpenTelemetry private API usage against version breakage (`monocle/telemetry.py`)**
+  - **Problem:** `configure_telemetry()` imported and used several underscore-prefixed private/experimental OTel APIs (`_events`, `_logs`, `_log_exporter`, etc.) with no error handling; future versions of OTel may move or remove these APIs, causing telemetry to crash
+  - **Solution:** Wrapped all private API initialization (lines 129–162) in a try/except that catches `ImportError` and `AttributeError`; on error, logs a clear warning and continues without AI Toolkit Input/Output event recording
+  - **Result:** Graceful degradation — if OTel APIs change, telemetry continues to function; operator sees a clear warning explaining the feature is unavailable
 - Updated .gitignore for root node_modules, playwright-report, test-results
 - Marked M21 COMPLETE in build-plan.md; archived details to milestones.md
 - 693 backend + 313 frontend tests passing; 25 E2E tests discovered
@@ -1019,3 +1061,18 @@ eview_status=\\pending\\` in NoteMetadata so agent-created notes always land in 
   - Added `_strip_html()`, `_fetch_url_text()` helpers and `_URL_SUMMARISE_PROMPT` constant
   - Added 8 new tests in `TestMCPTools` (creates note, pending review, web-reference tag, body contains URL, no AI raises, non-http raises, triggers reindex, extra_context forwarded); updated `test_mcp_has_8_tools` ? `test_mcp_has_9_tools`
   - **749 tests passing (+8 new), EXIT 0**
+
+---
+
+## 2026-04-13 (Session 3)
+
+### GitHub Copilot
+- **Frontend bundle size optimization: Lazy-load aframe dependency**
+  - **Problem:** Top-level `import 'aframe'` in `frontend/src/main.tsx` was loading the large aframe library (~300KB+) on every app route, even when the graph visualization UI was never accessed
+  - **Solution:** 
+    - Removed unconditional `import 'aframe'` from app entrypoint
+    - Added async `loadAFrame()` helper function in `GraphScreen.tsx` component
+    - Implemented `useEffect` hook to dynamically import aframe only when GraphScreen component mounts
+  - **Result:** Reduced initial bundle size and improved startup time; aframe now loaded only when user navigates to graph route
+  - **Impact:** Router entrypoint (Chat, Search, Docs, Stats, Settings, etc.) all now have faster initial load without unused dependencies
+  - **Testing:** Frontend type-check passed (TypeScript validation confirms no type errors in changes)

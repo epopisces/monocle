@@ -46,8 +46,9 @@ class _HealthCheckFilterSpanProcessor:
         self.wrapped_processor.on_start(span, parent_context)
 
     def on_end(self, span: Any) -> None:
-        # Filter: skip health check spans
-        if span.attributes.get("http.route") == "/api/health":
+        # Filter: skip health check spans (including /api/health/* endpoints like /api/health/models)
+        route = span.attributes.get("http.route", "")
+        if route.startswith("/api/health"):
             return
         self.wrapped_processor.on_end(span)
 
@@ -123,28 +124,39 @@ def configure_telemetry(settings: "Settings") -> None:
         metrics.set_meter_provider(meter_provider)
 
         # --- Logs/Events exporter (for AI Toolkit Input/Output columns) ---
-        from opentelemetry import _events, _logs
-        from opentelemetry.sdk._events import EventLoggerProvider
-        from opentelemetry.sdk._logs import LoggerProvider
-        from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
+        # Note: These are private/experimental APIs (_events, _logs, _log_exporter)
+        # and may break across OTel releases. Wrapped in try/except for graceful degradation.
+        try:
+            from opentelemetry import _events, _logs
+            from opentelemetry.sdk._events import EventLoggerProvider
+            from opentelemetry.sdk._logs import LoggerProvider
+            from opentelemetry.sdk._logs.export import BatchLogRecordProcessor
 
-        if settings.telemetry.otlp_transport == "grpc":
-            from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
+            if settings.telemetry.otlp_transport == "grpc":
+                from opentelemetry.exporter.otlp.proto.grpc._log_exporter import OTLPLogExporter as GrpcLogExporter
 
-            log_exporter = GrpcLogExporter(endpoint=settings.telemetry.otlp_endpoint)
-        else:
-            from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
+                log_exporter = GrpcLogExporter(endpoint=settings.telemetry.otlp_endpoint)
+            else:
+                from opentelemetry.exporter.otlp.proto.http._log_exporter import OTLPLogExporter
 
-            log_exporter = OTLPLogExporter(
-                endpoint=f"{settings.telemetry.otlp_endpoint}/v1/logs"
+                log_exporter = OTLPLogExporter(
+                    endpoint=f"{settings.telemetry.otlp_endpoint}/v1/logs"
+                )
+
+            log_provider = LoggerProvider(resource=resource)
+            log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
+            _logs.set_logger_provider(log_provider)
+
+            event_logger_provider = EventLoggerProvider()
+            _events.set_event_logger_provider(event_logger_provider)
+        except (ImportError, AttributeError) as e:
+            # Private APIs may not be available in all OTel versions
+            logger.warning(
+                "OpenTelemetry private logs/events APIs unavailable (%s) — "
+                "AI Toolkit Input/Output columns will not be populated. "
+                "This is expected if OTel has moved these to public APIs or removed them.",
+                type(e).__name__,
             )
-
-        log_provider = LoggerProvider(resource=resource)
-        log_provider.add_log_record_processor(BatchLogRecordProcessor(log_exporter))
-        _logs.set_logger_provider(log_provider)
-
-        event_logger_provider = EventLoggerProvider()
-        _events.set_event_logger_provider(event_logger_provider)
 
         # --- Auto-instrumentations ---
         LoggingInstrumentor().instrument(set_logging_format=True)

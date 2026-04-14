@@ -22,11 +22,11 @@
    - Similarly, archive resolved spike details to the `## Resolved Spikes` section of `docs/milestones.md` and replace in `docs/build-plan.md` with condensed pointer
    - **Rationale:** Keeps `docs/build-plan.md` lean (navigable in one session) while preserving full historical details for future reference
 
-3. **Append to `GHI-ACTION-LOG.md`** (project root) — under a `## YYYY-MM-DD – <Model Name>` heading, summarize meaningful action taken (files created/modified, decisions made, milestones completed). Use a new heading per calendar day and subheading per model.  Like actions on the same day by the same model can be summarized together. Example:
+3. **Append to `GHC-ACTION-LOG.md`** (project root) — under a `## YYYY-MM-DD – <Model Name>` heading, summarize meaningful action taken (files created/modified, decisions made, milestones completed). Use a new heading per calendar day and subheading per model.  Like actions on the same day by the same model can be summarized together. Example:
    ```markdown
    ## 2026-03-15 
    ### Claude Sonnet 4.6
-   - Created `.github/copilot-instructions.md` and `GHI-ACTION-LOG.md`
+   - Created `.github/copilot-instructions.md` and `GHC-ACTION-LOG.md`
    - Updated `docs/build-plan.md` Current Status
    ```
 
