@@ -184,7 +184,7 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - **ReviewQueue mouseover preview ReactMarkdown children type fix (FINAL)**
 - **Created `docs/architecture.md`**: 12 Mermaid diagrams covering system overview (layers + technologies), 8-step ingest pipeline flow, re-index sequence, chat/agent SSE streaming, weekly summary agent process, frontend component hierarchy, data model ER diagram, process topology (unified vs separate), MCP auth + tool routing, AI provider selection + transcription sub-abstraction, confidence scoring formula, and vault file layout
 - **Fixed agent tool selection bug (append_to_note vs create_note)**:
-  - Root cause: `append_to_note` was accepting low-similarity semantic search results (e.g., "Lucas Gallagher" when searching for "Grayson Gallagher"), then failing when the found note didn't exist
+  - Root cause: `append_to_note` was accepting low-similarity semantic search results (e.g., "James Gallagher" when searching for "Jeff Gallagher"), then failing when the found note didn't exist
   - Changes: 
     - Added 0.6 similarity threshold in `append_to_note` semantic search fallback — low scores now rejected
     - Rewrote `append_to_note` docstring to emphasize it's for APPENDING to EXISTING notes only
