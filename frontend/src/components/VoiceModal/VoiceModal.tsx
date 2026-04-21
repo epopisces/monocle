@@ -1,3 +1,24 @@
+/**
+ * VoiceModal — Voice capture with two recording paths:
+ *
+ * 1. Web Speech API (voiceBackend='web_speech' + SpeechRecognition available)
+ *    Real-time interim transcript is shown during recording.
+ *    Cross-browser notes:
+ *    - Chrome/Edge: full support; continuous + interimResults both work.
+ *    - Safari 16.4+: SpeechRecognition available but stops mid-sentence;
+ *      continuous mode is technically supported but auto-stops on silence.
+ *    - Safari < 16.4 / iOS: webkitSpeechRecognition only; no reliable
+ *      continuous mode on iOS; tends to auto-stop after a short pause.
+ *    - Firefox: no SpeechRecognition — always falls back to MediaRecorder.
+ *    - Android Chrome: full support (matches desktop Chrome).
+ *
+ * 2. MediaRecorder + Whisper (voiceBackend='whisper' or SpeechRecognition absent)
+ *    Universal fallback — works in all browsers. Audio is uploaded to
+ *    POST /api/transcribe after recording stops. No real-time transcript.
+ *    When voiceBackend='web_speech' but SpeechRecognition is unavailable,
+ *    a `fallback-hint` element is shown so the user knows why there's no
+ *    live transcript.
+ */
 import React, { useCallback, useEffect, useReducer, useRef } from 'react'
 import { ingest } from '../../api/ingest'
 import { transcribeAudio } from '../../api/transcribe'
@@ -13,6 +34,9 @@ interface State {
   interimTranscript: string
   template: string
   error: string | null
+  /** True when voiceBackend='web_speech' was requested but SpeechRecognition was unavailable
+   *  and the MediaRecorder fallback path was used instead. Used to show a hint to the user. */
+  usedFallback: boolean
 }
 
 type Action =
@@ -26,6 +50,7 @@ type Action =
   | { type: 'SAVE_ERROR'; message: string }
   | { type: 'IDLE_ERROR'; message: string }
   | { type: 'RESET' }
+  | { type: 'MARK_FALLBACK' }
 
 const INITIAL: State = {
   recordingState: 'idle',
@@ -33,12 +58,13 @@ const INITIAL: State = {
   interimTranscript: '',
   template: 'idea',
   error: null,
+  usedFallback: false,
 }
 
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'START_RECORDING':
-      return { ...state, recordingState: 'recording', transcript: '', interimTranscript: '', error: null }
+      return { ...state, recordingState: 'recording', transcript: '', interimTranscript: '', error: null, usedFallback: false }
     case 'INTERIM':
       return { ...state, interimTranscript: action.text }
     case 'TO_REVIEW':
@@ -57,6 +83,8 @@ function reducer(state: State, action: Action): State {
       return { ...INITIAL, error: action.message }
     case 'RESET':
       return INITIAL
+    case 'MARK_FALLBACK':
+      return { ...state, usedFallback: true }
     default:
       return state
   }
@@ -218,6 +246,12 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
       recognition.start()
     } else {
       // ── MediaRecorder (Whisper fallback) path ────────────────────────────
+      // When web_speech was requested but SpeechRecognition is unavailable (Firefox,
+      // older Safari, mobile WebView), fall back silently and notify the user via
+      // the fallback hint in the recording UI.
+      if (voiceBackend === 'web_speech') {
+        dispatch({ type: 'MARK_FALLBACK' })
+      }
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
         streamRef.current = stream
@@ -305,7 +339,7 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
 
   if (!open) return null
 
-  const { recordingState, transcript, interimTranscript, template, error } = state
+  const { recordingState, transcript, interimTranscript, template, error, usedFallback } = state
   const isReview = recordingState === 'review' || recordingState === 'saving'
 
   return (
@@ -358,6 +392,12 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
             <div className="voice-modal__recording">
               <div className="voice-modal__pulse" aria-hidden="true" />
               <p className="voice-modal__recording-label">Recording…</p>
+              {/* Shown when Web Speech API was requested but is not supported in this browser */}
+              {usedFallback && (
+                <p className="voice-modal__fallback-hint" data-testid="fallback-hint">
+                  Live transcription not available in this browser — using audio recording instead.
+                </p>
+              )}
               {(transcript || interimTranscript) && (
                 <div className="voice-modal__live-transcript" data-testid="live-transcript">
                   {transcript && (

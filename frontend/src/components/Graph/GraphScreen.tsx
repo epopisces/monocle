@@ -1,17 +1,68 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, Suspense, lazy } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ForceGraph2D } from 'react-force-graph'
 import { getGraph, type GraphData, type GraphNode, type GraphEdge } from '../../api/graph'
 import { listNotes, type NoteRef } from '../../api/notes'
 import './GraphScreen.css'
 
-// ── Lazy-load aframe on component mount to reduce initial bundle size ────
-const loadAFrame = async () => {
-  try {
-    await import('aframe')
-  } catch (err) {
-    console.warn('Failed to load aframe:', err)
-  }
+// ── Lazy-load aframe and force-graph on component mount ────────────────
+// We must load aframe BEFORE importing react-force-graph, because react-force-graph
+// internally depends on aframe-extras which requires the global AFRAME object.
+// We use a promise-based approach to ensure aframe is loaded before any rendering
+// of ForceGraph2D occurs.
+
+let forceGraphModule: typeof import('react-force-graph') | null = null
+let aframeLoadPromise: Promise<void> | null = null
+
+const loadAFrameAndForceGraph = async () => {
+  if (aframeLoadPromise) return aframeLoadPromise
+
+  aframeLoadPromise = (async () => {
+    try {
+      // Load aframe and aframe-extras before importing react-force-graph
+      await import('aframe')
+      await import('aframe-extras')
+      // Now safely import ForceGraph2D
+      forceGraphModule = await import('react-force-graph')
+    } catch (err) {
+      console.warn('Failed to load aframe or react-force-graph:', err)
+      throw err
+    }
+  })()
+
+  return aframeLoadPromise
+}
+
+// ── Lazy ForceGraph2D wrapper component ─────────────────────────────────
+// This component only renders after aframe is loaded, preventing the
+// "AFRAME is not defined" error that occurs when react-force-graph tries
+// to access the global AFRAME object.
+
+const LazyForceGraph2D = lazy(async () => {
+  await loadAFrameAndForceGraph()
+  return { default: forceGraphModule!.ForceGraph2D }
+})
+
+interface ForceGraph2DProps {
+  graphData: any
+  nodeId: string
+  nodeLabel: (node: any) => string
+  nodeColor: (node: any) => string
+  nodeVal: (node: any) => number
+  linkColor: (link: any) => string
+  linkLabel: (link: any) => string
+  onNodeClick: (node: any) => void
+  onNodeDragEnd: (node: any) => void
+  width: number
+  height: number
+  backgroundColor: string
+}
+
+function ForceGraphWrapper(props: ForceGraph2DProps) {
+  return (
+    <Suspense fallback={<div style={{ width: props.width, height: props.height }}>Loading graph...</div>}>
+      <LazyForceGraph2D {...props} />
+    </Suspense>
+  )
 }
 
 // ── Constants ──────────────────────────────────────────────────────
@@ -115,6 +166,8 @@ export default function GraphScreen() {
   const [graphData, setGraphData] = useState<GraphData | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [aframeReady, setAframeReady] = useState(false)
+  const [aframeError, setAframeError] = useState<string | null>(null)
 
   const [focusInput, setFocusInput] = useState('')
   const [focus, setFocus] = useState<string | undefined>(undefined)
@@ -160,9 +213,14 @@ export default function GraphScreen() {
     }
   }, [])
 
-  // Lazy-load aframe when component mounts
+  // Lazy-load aframe and force-graph when component mounts
   useEffect(() => {
-    loadAFrame()
+    loadAFrameAndForceGraph()
+      .then(() => setAframeReady(true))
+      .catch((err) => {
+        console.error('Failed to load aframe/force-graph:', err)
+        setAframeError('Failed to load graph visualization. Please refresh the page.')
+      })
   }, [])
 
   // Initial load
@@ -441,13 +499,24 @@ export default function GraphScreen() {
               {error}
             </div>
           )}
+          {aframeError && (
+            <div className="graph-screen__overlay graph-screen__overlay--error" data-testid="graph-aframe-error">
+              {aframeError}
+            </div>
+          )}
+          {!aframeReady && !aframeError && !loading && (
+            <div className="graph-screen__overlay" data-testid="graph-initializing">
+              <div className="graph-screen__spinner" />
+              <span>Initializing graph…</span>
+            </div>
+          )}
           {!loading && !error && nodeCount === 0 && graphData !== null && (
             <div className="graph-screen__overlay graph-screen__overlay--empty" data-testid="graph-empty">
               No nodes found. Adjust filters or check your vault.
             </div>
           )}
-          {showGraph && (
-            <ForceGraph2D
+          {aframeReady && showGraph && (
+            <ForceGraphWrapper
               graphData={fgData}
               nodeId="id"
               nodeLabel={(node: unknown) => (node as GraphNode).label}
