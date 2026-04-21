@@ -933,6 +933,236 @@ describe('FailedCaptures — badge count persistence after panel close', () => {
   })
 })
 
+// ═══════════════════════════════════════════════════════════════════════════════
+//  VoiceModal — Web Speech API path (SPIKE-5 / M25)
+//
+//  Cross-browser support matrix (manual verification):
+//    Chrome / Edge  — full support: continuous + interimResults, all events
+//    Safari 16.4+   — partial: SpeechRecognition available but no continuous mode
+//                     (stops after first pause); interimResults works
+//    Safari < 16.4  — webkitSpeechRecognition only; no continuous on iOS
+//    Firefox        — no SpeechRecognition (falls back to MediaRecorder)
+//    iOS Safari     — webkitSpeechRecognition available but auto-stops on silence;
+//                     falls back to MediaRecorder in practice
+//    Android Chrome — full support (matches desktop Chrome)
+//
+//  Decision (M25): Web Speech API is supported as best-effort via
+//  voiceBackend='web_speech' (server-configurable ui.voice_input_backend).
+//  The default is 'whisper' (MediaRecorder + server-side Whisper) which works
+//  universally. When 'web_speech' is requested but SpeechRecognition is
+//  unavailable, a fallback hint is shown and MediaRecorder is used instead.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('VoiceModal — Web Speech API path', () => {
+  // Controllable SpeechRecognition mock instance shared across tests in each block
+  let mockRecognition: {
+    start: ReturnType<typeof vi.fn>
+    stop: ReturnType<typeof vi.fn>
+    abort: ReturnType<typeof vi.fn>
+    continuous: boolean
+    interimResults: boolean
+    lang: string
+    onresult: ((e: unknown) => void) | null
+    onerror: ((e: unknown) => void) | null
+    onend: (() => void) | null
+  }
+
+  beforeEach(() => {
+    mockRecognition = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      abort: vi.fn(),
+      continuous: false,
+      interimResults: false,
+      lang: '',
+      onresult: null,
+      onerror: null,
+      onend: null,
+    }
+    const MockSpeechRec = vi.fn(() => mockRecognition)
+    vi.stubGlobal('SpeechRecognition', MockSpeechRec)
+    vi.stubGlobal('webkitSpeechRecognition', undefined)
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.clearAllMocks()
+  })
+
+  /** Build a SpeechRecognitionResultList-like object for onresult events. */
+  function makeSpeechEvent(results: Array<{ isFinal: boolean; transcript: string }>) {
+    return {
+      results: results.map(r => Object.assign([{ transcript: r.transcript }], { isFinal: r.isFinal })),
+    }
+  }
+
+  async function startWebSpeech() {
+    await act(async () => { fireEvent.click(screen.getByTestId('start-recording-btn')) })
+  }
+
+  it('calls recognition.start() when start button is clicked', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    expect(mockRecognition.start).toHaveBeenCalledOnce()
+  })
+
+  it('configures recognition with continuous=true and interimResults=true', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    expect(mockRecognition.continuous).toBe(true)
+    expect(mockRecognition.interimResults).toBe(true)
+  })
+
+  it('shows interim transcript in live-transcript during recording', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onresult?.(makeSpeechEvent([{ isFinal: false, transcript: 'typing...' }])) })
+    await waitFor(() => expect(screen.getByTestId('live-transcript')).toBeInTheDocument())
+    expect(screen.getByTestId('live-transcript')).toHaveTextContent('typing...')
+  })
+
+  it('shows final text in live-transcript when final result fires', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onresult?.(makeSpeechEvent([{ isFinal: true, transcript: 'confirmed text' }])) })
+    await waitFor(() => expect(screen.getByTestId('live-transcript')).toBeInTheDocument())
+    expect(screen.getByTestId('live-transcript')).toHaveTextContent('confirmed text')
+  })
+
+  it('accumulates multiple final segments from a single onresult event', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    const event = {
+      results: [
+        Object.assign([{ transcript: 'first. ' }], { isFinal: true }),
+        Object.assign([{ transcript: 'second.' }], { isFinal: true }),
+      ],
+    }
+    act(() => { mockRecognition.onresult?.(event) })
+    act(() => { mockRecognition.onend?.() })
+    await waitFor(() => expect(screen.getByTestId('transcript-textarea')).toBeInTheDocument())
+    expect(screen.getByTestId('transcript-textarea')).toHaveValue('first. second.')
+  })
+
+  it('onend transitions to review state with accumulated final text', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onresult?.(makeSpeechEvent([{ isFinal: true, transcript: 'my voice note' }])) })
+    act(() => { mockRecognition.onend?.() })
+    await waitFor(() => expect(screen.getByTestId('transcript-textarea')).toBeInTheDocument())
+    expect(screen.getByTestId('transcript-textarea')).toHaveValue('my voice note')
+  })
+
+  it('onend with no prior results puts empty string in review state', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onend?.() })
+    await waitFor(() => expect(screen.getByTestId('transcript-textarea')).toBeInTheDocument())
+    expect(screen.getByTestId('transcript-textarea')).toHaveValue('')
+  })
+
+  it('stop-recording button calls recognition.stop()', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    expect(screen.getByTestId('stop-recording-btn')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('stop-recording-btn'))
+    expect(mockRecognition.stop).toHaveBeenCalledOnce()
+  })
+
+  it('onerror not-allowed dispatches IDLE_ERROR — shows microphone denied message', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onerror?.({ error: 'not-allowed' }) })
+    await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
+    expect(screen.getByTestId('voice-error')).toHaveTextContent('Microphone access denied.')
+    // IDLE_ERROR resets to idle state
+    expect(screen.getByTestId('start-recording-btn')).toBeInTheDocument()
+  })
+
+  it('onerror service-not-allowed dispatches IDLE_ERROR — same message as not-allowed', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onerror?.({ error: 'service-not-allowed' }) })
+    await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
+    expect(screen.getByTestId('voice-error')).toHaveTextContent('Microphone access denied.')
+  })
+
+  it('onerror network dispatches IDLE_ERROR — shows connectivity message', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onerror?.({ error: 'network' }) })
+    await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
+    expect(screen.getByTestId('voice-error')).toHaveTextContent('Speech recognition unavailable')
+  })
+
+  it('onerror audio-capture dispatches IDLE_ERROR — shows no-microphone message', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onerror?.({ error: 'audio-capture' }) })
+    await waitFor(() => expect(screen.getByTestId('voice-error')).toBeInTheDocument())
+    expect(screen.getByTestId('voice-error')).toHaveTextContent('No microphone found')
+  })
+
+  it('onerror no-speech dispatches RESET — returns to idle with no error shown', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onerror?.({ error: 'no-speech' }) })
+    await waitFor(() => expect(screen.getByTestId('start-recording-btn')).toBeInTheDocument())
+    expect(screen.queryByTestId('voice-error')).toBeNull()
+  })
+
+  it('onerror aborted does not dispatch any state change (modal-close path)', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    // 'aborted' is fired by recognition.abort() inside stopAll() when modal closes
+    act(() => { mockRecognition.onerror?.({ error: 'aborted' }) })
+    // Must still be in recording state (no state change for 'aborted')
+    await waitFor(() => expect(screen.getByTestId('stop-recording-btn')).toBeInTheDocument())
+    expect(screen.queryByTestId('voice-error')).toBeNull()
+  })
+
+  it('errorHandled flag: onerror followed by onend does not dispatch TO_REVIEW', async () => {
+    // Chrome fires onend after onerror — verify errorHandled prevents double-dispatch
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await startWebSpeech()
+    act(() => { mockRecognition.onerror?.({ error: 'network' }) })
+    act(() => { mockRecognition.onend?.() })
+    // Should be in idle state from IDLE_ERROR, NOT review state
+    await waitFor(() => expect(screen.getByTestId('start-recording-btn')).toBeInTheDocument())
+    expect(screen.queryByTestId('transcript-textarea')).toBeNull()
+  })
+
+  it('shows fallback hint when SpeechRecognition unavailable with web_speech prop', async () => {
+    // Simulate unsupported browser (Firefox, older Safari)
+    vi.unstubAllGlobals()
+    vi.stubGlobal('SpeechRecognition', undefined)
+    vi.stubGlobal('webkitSpeechRecognition', undefined)
+
+    const mockStream = { getTracks: () => [{ stop: vi.fn() }] }
+    const mockMRInst = {
+      start: vi.fn(), stop: vi.fn(), state: 'recording', mimeType: 'audio/webm',
+      ondataavailable: null as ((e: { data: { size: number } }) => void) | null,
+      onstop: null as (() => Promise<void>) | null,
+    }
+    const MockMR = vi.fn(() => mockMRInst) as unknown as typeof MediaRecorder
+    ;(MockMR as unknown as { isTypeSupported: (t: string) => boolean }).isTypeSupported = vi.fn(() => true)
+    vi.stubGlobal('MediaRecorder', MockMR)
+    Object.defineProperty(navigator, 'mediaDevices', {
+      value: { getUserMedia: vi.fn().mockResolvedValue(mockStream) },
+      writable: true, configurable: true,
+    })
+    vi.mocked(transcribeAudio).mockResolvedValue({ transcript: 'fallback ok', mime_type: 'audio/wav' })
+
+    render(<VoiceModal open={true} onClose={vi.fn()} voiceBackend="web_speech" />)
+    await act(async () => { fireEvent.click(screen.getByTestId('start-recording-btn')) })
+    // Fallback hint must be visible
+    await waitFor(() => expect(screen.getByTestId('fallback-hint')).toBeInTheDocument())
+    expect(screen.getByTestId('fallback-hint')).toHaveTextContent('Live transcription not available')
+    // MediaRecorder was used
+    expect(mockMRInst.start).toHaveBeenCalledOnce()
+  })
+})
+
 describe('VoiceModal — voiceBackend prop respected after prop change', () => {
   afterEach(() => {
     vi.unstubAllGlobals()

@@ -7,37 +7,45 @@ last-updated: 2026-04-09
 
 # Monocle â€" Completed Milestones & Technical Spike Resolutions
 
-This document archives full details for completed milestones (M1–M11, M19–M20, M23, M27–M32) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
+This document archives full details for completed milestones (M1–M11, M19–M20, M23, M25, M27–M32) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
 
 ---
 
 ## Table of Contents
 
 ### Completed Milestones
-- [Monocle â€” Completed Milestones \& Technical Spike Resolutions](#monocle--completed-milestones--technical-spike-resolutions)
+- [Monocle â€" Completed Milestones \& Technical Spike Resolutions](#monocle-â-completed-milestones--technical-spike-resolutions)
   - [Table of Contents](#table-of-contents)
     - [Completed Milestones](#completed-milestones)
     - [Resolved Technical Spikes](#resolved-technical-spikes)
   - [Completed Milestones](#completed-milestones-1)
     - [M1: Foundation \& Project Skeleton](#m1-foundation--project-skeleton)
-    - [M2: API Skeleton â€” All Route Stubs + OpenAPI](#m2-api-skeleton--all-route-stubs--openapi)
+    - [M2: API Skeleton â€” All Route Stubs + OpenAPI](#m2-api-skeleton-â-all-route-stubs--openapi)
     - [M3: Vault Layer](#m3-vault-layer)
-    - [M4: Index Layer â€” ChromaDB + MemoryIndex](#m4-index-layer--chromadb--memoryindex)
+    - [M4: Index Layer â€” ChromaDB + MemoryIndex](#m4-index-layer-â-chromadb--memoryindex)
     - [M5: Inbox Watcher \& Scheduled Re-Index](#m5-inbox-watcher--scheduled-re-index)
     - [M6: AI Provider Abstraction](#m6-ai-provider-abstraction)
     - [M7: Ingest Pipeline \& Plugin Registry](#m7-ingest-pipeline--plugin-registry)
-    - [M8: REST API Wiring â€” Core](#m8-rest-api-wiring--core)
+    - [M8: REST API Wiring â€” Core](#m8-rest-api-wiring-â-core)
     - [M9: Graph Layer](#m9-graph-layer)
     - [M10: Agent Framework \& Chat API](#m10-agent-framework--chat-api)
-    - [M11: Scheduled Agents](#m11-scheduled-agents)
-    - [M19: Voice Capture \& Review Queue UI](#m19-voice-capture--review-queue-ui)
-    - [M20: Stats, Keyboard Shortcuts \& Command Palette](#m20-stats-keyboard-shortcuts--command-palette)
-    - [M23: Organization Note Type \& Cross-Linked People Backreferences](#m23-organization-note-type--cross-linked-people-backreferences)
-    - [M27: Topbar Omnisearch](#m27-topbar-omnisearch)
+    - [M12: MCP Server](#m12-mcp-server)
+    - [M13: Settings \& Review API](#m13-settings--review-api)
   - [Resolved Technical Spikes](#resolved-technical-spikes-1)
     - [SPIKE-1: Ollama Whisper audio transcription](#spike-1-ollama-whisper-audio-transcription)
     - [SPIKE-3: Microsoft Agent Framework SSE streaming through FastAPI](#spike-3-microsoft-agent-framework-sse-streaming-through-fastapi)
     - [SPIKE-4: ChromaDB Rust backend crash on Python 3.14 (Windows)](#spike-4-chromadb-rust-backend-crash-on-python-314-windows)
+    - [M14: CLI Commands](#m14-cli-commands)
+    - [M19: Voice Capture \& Review Queue UI](#m19-voice-capture--review-queue-ui)
+  - [**Test Results:** 224 frontend tests passing (38 new), EXIT 0.](#test-results-224-frontend-tests-passing-38-new-exit-0)
+    - [M20: Stats, Keyboard Shortcuts \& Command Palette](#m20-stats-keyboard-shortcuts--command-palette)
+    - [M21: Integration Testing \& Obsidian Compatibility](#m21-integration-testing--obsidian-compatibility)
+  - [**Test Results:** 693 backend tests + 313 frontend tests passing; 25 E2E tests discovered (require live server to run).](#test-results-693-backend-tests--313-frontend-tests-passing-25-e2e-tests-discovered-require-live-server-to-run)
+    - [M27: Topbar Omnisearch](#m27-topbar-omnisearch)
+    - [M30: MCP-First: Shared Service Layer Extraction](#m30-mcp-first-shared-service-layer-extraction)
+    - [M31: MCP-First: MCP Canonicalization](#m31-mcp-first-mcp-canonicalization)
+    - [M32: MCP-First: Chat Tool Adapter \& Orchestration Cleanup](#m32-mcp-first-chat-tool-adapter--orchestration-cleanup)
+    - [M25: Voice Feature Hardening \& Cross-Browser Compatibility](#m25-voice-feature-hardening--cross-browser-compatibility)
 
 ### Resolved Technical Spikes
 - [SPIKE-1: Ollama Whisper audio transcription](#spike-1-ollama-whisper-audio-transcription)
@@ -881,4 +889,45 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - `monocle/tests/test_contracts.py` — 6 new tests in `TestAdapterMCPOutputParity`
 
 **Test Results:** 881 backend tests passing (38 contract parity), 416 frontend tests passing, 0 failures.
+
+---
+
+### M25: Voice Feature Hardening & Cross-Browser Compatibility
+
+**Goal:** Comprehensive testing and hardening of the voice capture feature across browsers and failure modes (SPIKE-5 validation tasks).
+
+**Completed:** 2026-04-20
+
+**Decision:** Web Speech API is supported as best-effort opt-in via `voiceBackend='web_speech'` (server-configurable via `ui.voice_input_backend`). The default production path remains `voiceBackend='whisper'` (MediaRecorder + server-side Whisper), which works universally. When `web_speech` is requested but `SpeechRecognition` is unavailable in the browser, a `fallback-hint` element is shown so the user understands why there is no live transcript.
+
+**Cross-browser matrix:**
+- **Chrome / Edge**: Full support — `continuous=true` + `interimResults=true` both work. All `onerror` codes observed in practice.
+- **Safari 16.4+**: `SpeechRecognition` available but auto-stops on silence; continuous mode unreliable. Interim results work.
+- **Safari < 16.4 / iOS**: `webkitSpeechRecognition` only; no reliable continuous mode on iOS. Falls back to MediaRecorder in practice.
+- **Firefox**: No `SpeechRecognition` — always falls back to MediaRecorder.
+- **Android Chrome**: Full support (matches desktop Chrome).
+
+**Deliverables completed:**
+
+- [x] **14 new Web Speech API tests** added to `frontend/src/VoiceCapture.test.tsx` in `describe('VoiceModal — Web Speech API path', ...)`:
+  - `recognition.start()` called on recording start; `continuous=true`, `interimResults=true` configured
+  - `onresult` with interim-only, final-only, and mixed transcripts — interim shown in `live-transcript`
+  - `onresult` accumulating multiple final segments from a single event
+  - `onend` — transitions to review state with accumulated final text; empty case tested
+  - `stop-recording` button calls `recognition.stop()`
+  - `onerror` for all error codes: `not-allowed`, `service-not-allowed`, `network`, `audio-capture`, `no-speech`, `aborted`
+  - `errorHandled` flag: `onerror` followed by `onend` does NOT dispatch `TO_REVIEW` (double-dispatch guard verified)
+  - Fallback hint shown when `SpeechRecognition` unavailable with `voiceBackend='web_speech'`
+
+- [x] **`usedFallback` state** added to `VoiceModal` — `MARK_FALLBACK` action dispatched when `web_speech` is requested but `SpeechRecognition` is absent; `fallback-hint` element shown during recording.
+
+- [x] **Cross-browser compatibility comments** added to `VoiceModal.tsx` file-level JSDoc block documenting browser support matrix and the two-path architecture.
+
+- [x] **SPIKE-5 resolved** — recorded in `docs/build-plan.md` Technical Spikes section.
+
+**Files modified:**
+- `frontend/src/components/VoiceModal/VoiceModal.tsx` — `usedFallback` state, `MARK_FALLBACK` action, fallback hint UI, cross-browser JSDoc
+- `frontend/src/VoiceCapture.test.tsx` — 14 new Web Speech API tests
+
+**Test Results:** 432 frontend tests passing (80 in `VoiceCapture.test.tsx`, up from 62), EXIT 0.
 

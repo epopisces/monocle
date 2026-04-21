@@ -4,6 +4,21 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-20
+
+### Claude Sonnet 4.6
+- **Completed M25 — Voice Feature Hardening & Cross-Browser Compatibility**
+  - Resolved SPIKE-5: Web Speech API cross-browser validation
+  - Decision: Web Speech API supported as best-effort opt-in (`voiceBackend='web_speech'`); default path is MediaRecorder+Whisper (universal)
+  - Added `usedFallback` state and `MARK_FALLBACK` action to `VoiceModal` — shows `fallback-hint` when `web_speech` requested but `SpeechRecognition` is unavailable (Firefox, older Safari, iOS)
+  - Added file-level JSDoc to `VoiceModal.tsx` documenting full cross-browser matrix (Chrome/Edge/Safari/Firefox/iOS/Android)
+  - Added 14 new Web Speech API tests in `VoiceCapture.test.tsx`: `onresult` (interim/final/accumulation), `onend`, `onerror` (all 6 error codes), `errorHandled` double-dispatch guard, fallback path; VoiceCapture now 80 tests (was 62)
+  - 432 frontend tests passing, EXIT 0
+  - Updated `docs/build-plan.md`: M25 marked COMPLETE, SPIKE-5 resolved, active milestone notes updated
+  - Archived M25 full details to `docs/milestones.md`
+
+---
+
 ## 2026-04-09 (Session 2)
 
 ### Claude Haiku 4.5

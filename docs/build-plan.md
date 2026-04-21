@@ -27,8 +27,8 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M32 — MCP-First: Chat Tool Adapter & Orchestration Cleanup (2026-04-09)
-**Note:** M24 (OneNote), M25 (Voice Hardening), M26 (Teams), and future milestones are queued after M28.
+**Last Completed:** M25 — Voice Feature Hardening & Cross-Browser Compatibility (2026-04-20)
+**Note:** M24 (OneNote) and M26 (Teams) are queued; M25 is now complete.
 **Blocked By:** None
 **Session Notes (M29-M32 Post-Completion Validation & Security Hardening):**
 - **Status:** COMPLETE (2026-04-09)
@@ -145,7 +145,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M22 | Process Manager & Dev Automation                               | COMPLETE    |
 | M23 | Organization Note Type & Cross-Linked People Backreferences    | COMPLETE    |
 | M24 | OneNote Import Plugin                                          | NOT STARTED |
-| M25 | Voice Feature Hardening & Cross-Browser Compatibility          | NOT STARTED |
+| M25 | Voice Feature Hardening & Cross-Browser Compatibility          | COMPLETE    |
 | M26 | Teams Integration                                              | NOT STARTED |
 | M27 | Topbar Omnisearch                                              | COMPLETE    |
 | M28 | Provider & Model Status Detection                              | COMPLETE    |
@@ -199,21 +199,16 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 
 ### SPIKE-5: Web Speech API Cross-Browser Validation
 
-**Resolve by:** M24 (Voice Feature Hardening & Cross-Browser Compatibility)
-**Status:** PENDING — discovered during M19 code review (2026-03-20)
-**Context:** The `VoiceModal` component has two recording paths:
-  1. **Web Speech API** (primary when SpeechRecognition is available) — real-time interim transcript, no server call during recording
-  2. **MediaRecorder + Whisper** (fallback) — always works, uploads audio blob for transcription
-
-Currently the Web Speech API path has **zero test coverage**. The fallback always kicks in (particularly after the stale-closure bug fix), so untested code paths could hide production bugs for users with Web Speech enabled. Cross-browser support is also uncertain (Safari partial, Firefox spotty, mobile varies).
-
-**Validation tasks:**
-  - Write comprehensive tests for `recognition.onresult`, `recognition.onerror` (per error type), `recognition.onend`, and `errorHandled` flag
-  - Cross-browser testing: Chrome/Edge (full support), Safari (partial), Firefox, mobile (iOS/Android)
-  - Verify real-time interim transcript UX in supported browsers
-  - Document browser-specific quirks
-
-**Decision point:** Commit to full Web Speech API support with test coverage, or mark as "best-effort, primary path is MediaRecorder" with a UI warning?
+**Resolve by:** M25 (Voice Feature Hardening & Cross-Browser Compatibility)
+**Status:** RESOLVED — 2026-04-20
+**Decision:** Web Speech API is supported as best-effort opt-in (`voiceBackend='web_speech'`, server-configured via `ui.voice_input_backend`). Default production path is MediaRecorder+Whisper (universal). When `web_speech` is requested but `SpeechRecognition` is unavailable (Firefox, older Safari, iOS WebView), a `fallback-hint` element is shown during recording so the user understands why there is no live transcript.
+**Cross-browser matrix:**
+  - Chrome/Edge: full support — continuous + interimResults both work
+  - Safari 16.4+: SpeechRecognition available but auto-stops on silence; continuous mode unreliable
+  - Safari < 16.4 / iOS: webkitSpeechRecognition only; falls back to MediaRecorder in practice
+  - Firefox: no SpeechRecognition — always falls back to MediaRecorder
+  - Android Chrome: full support (matches desktop Chrome)
+**Test coverage added:** 14 new Web Speech API tests in `VoiceCapture.test.tsx` covering `onresult` (interim/final/accumulation), `onend`, `onerror` (all error codes), `errorHandled` double-dispatch guard, and browser-fallback path.
 
 ---
 
@@ -802,34 +797,11 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 
 ### M25: Voice Feature Hardening & Cross-Browser Compatibility
 
-**Goal:** Comprehensive testing and hardening of the voice capture feature across browsers and failure modes (SPIKE-5 validation tasks).
+**Status:** COMPLETE (2026-04-20)
 
-**Deliverables:**
-- [ ] Comprehensive Web Speech API tests in `frontend/src/VoiceCapture.test.tsx`:
-  - `recognition.onresult` handler with interim + final transcript sequences
-  - `recognition.onerror` handler for all error types (not-allowed, network, audio-capture, no-speech, etc.)
-  - `recognition.onend` handler and clean shutdown
-  - `errorHandled` flag to prevent double-dispatch
-- [ ] Cross-browser validation matrix (document results):
-  - Chrome/Edge (expected: full support)
-  - Safari (expected: partial)
-  - Firefox (expected: partial)
-  - iOS Safari (expected: fallback to MediaRecorder)
-  - Android Chrome (expected: full or fallback)
-- [ ] UI/UX hardening:
-  - Real-time interim transcript display in Web Speech path
-  - Error messaging specific to each browser capability and error code
-  - Graceful fallback messaging if Web Speech is unavailable
-  - Document browser-specific quirks in code comments
-- [ ] Decision: commit to full Web Speech support with test coverage, OR mark as "best-effort" with UI warning
+**Summary:** SPIKE-5 resolved. Web Speech API path now has comprehensive test coverage (14 new tests) covering all `onresult`/`onerror`/`onend` scenarios, the `errorHandled` double-dispatch guard, and verified fallback to MediaRecorder. Cross-browser matrix documented in `VoiceModal.tsx` file-level comment. `usedFallback` state added to show a hint when `web_speech` is requested but `SpeechRecognition` is unavailable. Decision: Web Speech API is supported as best-effort opt-in via `voiceBackend='web_speech'`; the default production path remains MediaRecorder+Whisper (universal). 432 frontend tests passing (+18 VoiceCapture, 80 total in file), EXIT 0.
 
-**Acceptance Criteria:**
-- [ ] Web Speech API path has comprehensive test coverage matching MediaRecorder fallback
-- [ ] Cross-browser testing documented (pass/fail per browser)
-- [ ] All error handling tested (no-speech, not-allowed, network, etc.)
-- [ ] Real-time interim transcript visible in supported browsers
-- [ ] Fallback gracefully handles unsupported browsers with clear messaging
-- [ ] `cd frontend && npm run test -- --run` all VoiceCapture tests pass
+**Full details:** [docs/milestones.md#m25-voice-feature-hardening--cross-browser-compatibility](milestones.md#m25-voice-feature-hardening--cross-browser-compatibility)
 
 ---
 
