@@ -4,6 +4,20 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-21
+
+### Claude Haiku 4.5
+- **Restructured build-plan.md: Moved M15, M16, M23 verbose content to milestones.md**
+  - Per copilot-instructions architecture, `docs/build-plan.md` should be concise (active reference only) and `docs/milestones.md` should be comprehensive archive
+  - Added full M15 section to `docs/milestones.md` — React app scaffold, typed API layer, design tokens, theme management, 224 frontend tests passing
+  - Added full M16 section to `docs/milestones.md` — Chat UI, streaming, starters, sessions, theme toggle, 313 frontend tests passing
+  - Added full M23 section to `docs/milestones.md` — Organization note type, person↔org linking, graph backreferences, 786 backend tests passing
+  - Replaced M15 verbose deliverables in `docs/build-plan.md` with status + 3-line summary + link to milestones.md matching M17–M22 pattern
+  - Replaced M16 verbose deliverables in `docs/build-plan.md` with status + 3-line summary + link to milestones.md
+  - Replaced M23 verbose deliverables in `docs/build-plan.md` with status + 3-line summary + link to milestones.md
+  - `docs/build-plan.md` now noticeably more concise; full milestone details preserved in `docs/milestones.md` for future reference
+  - Updated GHC-ACTION-LOG.md with this session's work
+
 ## 2026-04-20
 
 ### Claude Sonnet 4.6

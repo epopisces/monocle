@@ -38,8 +38,8 @@ const loadAFrameAndForceGraph = async () => {
 // to access the global AFRAME object.
 
 const LazyForceGraph2D = lazy(async () => {
-  const module = await import('react-force-graph')
-  return { default: module.ForceGraph2D }
+  await loadAFrameAndForceGraph()
+  return { default: forceGraphModule!.ForceGraph2D }
 })
 
 interface ForceGraph2DProps {
@@ -504,7 +504,7 @@ export default function GraphScreen() {
               {aframeError}
             </div>
           )}
-          {!aframeReady && !aframeError && (
+          {!aframeReady && !aframeError && !loading && (
             <div className="graph-screen__overlay" data-testid="graph-initializing">
               <div className="graph-screen__spinner" />
               <span>Initializing graph…</span>

@@ -587,58 +587,21 @@ tests/e2e/            Playwright tests (require running server)
 
 ### M15: Frontend Scaffold & Typed API Wrappers
 
-**Goal:** React app skeleton with all routes and a typed API layer generated from the committed OpenAPI spec.
+**Status:** COMPLETE (2026-03-19)
 
-**Deliverables:**
-- [x] `npx openapi-typescript http://localhost:8000/openapi.json -o frontend/src/api/schema.d.ts` (requires running M8 server)
-- [x] `frontend/src/api/client.ts` — typed `fetch` wrapper: handles JSON, SSE streams, 4xx/5xx errors; uses `schema.d.ts` types
-- [x] `frontend/src/api/` — individual typed functions for all documented frontend-consumed endpoints generated from the committed OpenAPI spec (no uncovered endpoint families)
-- [x] `frontend/src/App.tsx` — React Router routes: `/` (Chat), `/docs` (Document Browser), `/search`, `/graph`, `/stats`
-- [x] `frontend/src/components/layout/` — `AppShell`, `Topbar` (polls `GET /api/health` every 10s; shows green/amber/red indicator per status field), `LeftNav` (collapses at ≤1200px viewport)
-- [x] `frontend/src/components/SettingsModal/` — wired to `GET/PATCH /api/settings`, key rotation — functional but minimal styling
-- [x] `frontend/src/styles/tokens.css` — all CSS custom property tokens from UI Design doc §3 (colors, typography, spacing, border-radius, shadows)
-- [x] `frontend/src/hooks/useTheme.ts` — theme state management: detect system preference via `prefers-color-scheme` media query; persist selection to `localStorage`; provide context hook for all components to subscribe to theme changes
-- [x] `frontend/tests/api.test.ts` — mock fetch; assert type-safe API calls
-- [x] `frontend/tests/App.test.tsx` — renders without crash, nav links present
-- [x] Add `openapi-typescript` as a `devDependency` and as a `package.json` script: `"gen-api": "openapi-typescript http://localhost:8000/openapi.json -o src/api/schema.d.ts"`
-- [x] Extend `.vscode/tasks.json`:
-  - `frontend: dev` — `npm run dev` (cwd: `frontend/`; runs Vite dev server)
-  - `frontend: type-check` — `npx tsc --noEmit` (cwd: `frontend/`)
-  - `frontend: gen-api` — `npm run gen-api` (cwd: `frontend/`; regenerates `schema.d.ts`; requires server running at `:8000`)
-- [x] Extend `.vscode/launch.json`:
-  - `Frontend Dev Server` — runs `frontend: dev` task and opens `http://localhost:5173` in the browser
-  - `Full Stack (debug)` — compound configuration: `Dev Server (debug)` + `Frontend Dev Server`; the **default developer launch** once both tiers are functional
+React app skeleton with typed API layer from OpenAPI spec, all routes, theme management, design tokens, and health polling. 224 frontend tests passing.
 
-**Acceptance Criteria:**
-- [x] `cd frontend && npm run dev` serves `http://localhost:5173` with no console errors
-- [x] All CSS tokens defined and applied to at least the layout shell
-- [x] Topbar health indicator reflects live `GET /api/health` response
-- [x] `cd frontend && npx tsc --noEmit` exits 0 (no TypeScript errors)
-- [x] `cd frontend && npm run test -- --run` passes
-- [x] `Full Stack (debug)` compound launch config starts both backend (with debugger) and frontend dev server; `http://localhost:5173` loads in the browser
+**Full details:** [docs/milestones.md#m15-frontend-scaffold--typed-api-wrappers](milestones.md#m15-frontend-scaffold--typed-api-wrappers)
 
 ---
 
 ### M16: Chat UI
 
-**Goal:** Fully functional chat screen — streaming, chat starters, session history, settings modal.
+**Status:** COMPLETE (2026-03-19)
 
-**Deliverables:**
-- [x] `frontend/src/components/Chat/ChatScreen.tsx` — message thread, 6 chat starter tiles (2×3 grid), session picker dropdown (last 10 sessions from localStorage)
-- [x] `frontend/src/components/Chat/ChatInput.tsx` — multiline textarea; `Enter` sends; `Shift+Enter` newlines; microphone button (opens VoiceModal); send button
-- [x] `frontend/src/components/Chat/ChatMessage.tsx` — Markdown rendering; tool call disclosure (collapsible); inline note card for `note_created` events
-- [x] `frontend/src/hooks/useChat.ts` — `EventSource`-based SSE streaming; session management (localStorage, last 10 sessions)
-- [x] Settings modal: fully wired to API — backend selector, threshold slider, key rotation, and theme toggle (wired to `useTheme()` hook from M15)
-- [x] Theme switching: Settings modal adds a **Theme** section with radio buttons [● Dark ○ Light ○ System]. Integrates with `useTheme()` hook created in M15. Selection persisted to localStorage. Changes take effect immediately across the app.
-- [x] `frontend/tests/Chat.test.tsx`
+Fully functional chat screen with streaming, 6 chat starters, session history, theme toggle, and settings integration. 313 frontend tests passing.
 
-**Acceptance Criteria:**
-- [x] Clicking a chat starter sends a pre-filled message that streams a response
-- [x] Tool call renders as collapsible: "Used `search_vault` — 4 results"
-- [x] Session picker shows ≤10 sessions; switching sessions restores thread
-- [x] Settings modal shows masked key; Rotate calls `POST /api/settings/rotate-mcp-key` and updates display
-- [x] Theme toggle in Settings modal immediately applies dark or light mode; selection persists across page reloads
-- [x] `cd frontend && npm run test -- --run` passes
+**Full details:** [docs/milestones.md#m16-chat-ui](milestones.md#m16-chat-ui)
 
 ---
 
@@ -696,73 +659,11 @@ Implemented optional process separation: `ProcessManager` + `SubprocessHandle` w
 
 ### M23: Organization Note Type & Cross-Linked People Backreferences
 
-**Goal:** Create an `organization` note type with structured membership data, enable cross-linking from person notes to organizations, and implement backreferences (graph-based inverse links showing all people associated with an organization).
+**Status:** COMPLETE (2026-03-25)
 
-**Prerequisite:** M9 (Graph Layer) complete; person template already created in M8 post-review sessions with support for `organizations` nested field.
+Organization note type with structured membership data, person↔org cross-linking, graph-based backreferences, and 5 new org-linking tests. 786 backend tests passing.
 
-**Design Rationale (Option 3 from Phase 9):**
-- **Frontmatter:** Store stable high-level org metadata (name, founded_year, location, domain, type [company/nonprofit/govt/academic/other]).
-- **Body:** Narrative details (mission, description, notable events).
-- **Links field:** Structured relationships via person notes' `links` field pointing to org notes (relation: "works-at", "founded", "manages", carrying temporal metadata like `join_date`, `leave_date`, `current`).
-- **Backreferences:** Graph layer computes inverse links — `GET /api/graph?focus=organizations/acme-corp.md` returns all people connected via any `works-at`/`founded`/`manages` relation.
-
-**Deliverables:**
-- [x] `monocle/vault/templates/organization.yaml` — 15-25 fields organized in sections:
-  - Identity & Contact: `name`, `short_name`, `url`, `location`, `domain`
-  - Structure: `org_type` (company|nonprofit|govt|academic|other), `parent_org` (wikilink to parent if applicable), `founded_year`, `industry` (enum or free text)
-  - Size & Scope: `employee_count`, `description` (100–500 chars)
-  - Status: `active` (boolean), `status_reason` (if inactive), lifecycle fields
-  - Metadata: `tags`, `domain` (work|personal), `source`
-- [x] `vault/.templates/organization.md` — User-facing markdown body template with sections:
-  - Header (name, short_name, url, org_type as metadata)
-  - About (mission/description, founded_year)
-  - Contact (location, website, social handles)
-  - Key Dates (founded, IPO/acquisition, milestones)
-  - Leadership & Structure (table of notable leaders or teams, links to person notes)
-  - Notable People / Alumni (table with name, role, tenure)
-  - Notes (narrative details, history, partnerships)
-- [x] Extend person template's `organizations` field example and prompt in `prompts/extract.md`:
-  - Document format: `organizations: [{name: "...", role: "...", join_date: "YYYY-MM", leave_date: "YYYY-MM", current: boolean}]`
-  - Include instruction: "If a person has worked at multiple organizations, extract each as a separate entry. Use YYYY-MM format for partial dates."
-  - Wire extraction prompt to pull org names and dates during person note metadata extraction.
-- [x] Wiring: when person note is created with `organizations` field, automatically generate/update `links` entries pointing to matching organization notes:
-  - For each org in `organizations`, attempt `resolve_wikilink("organizations/" + slugify(org.name))`.
-  - If org note exists, create a link: `{target: "organizations/...", relation: "works-at", join_date: org.join_date, leave_date: org.leave_date, current: org.current}`.
-  - If org note does not exist, optionally auto-create a stub org note via `VaultLayer.create_from_template("organization", {name: org.name, domain: person.domain}, metadata)` — set `review_status: "pending"`.
-  - Update person note's `links` field via `patch_frontmatter()`.
-- [x] Graph layer backreferences:
-  - `GET /api/graph?focus=organizations/acme-corp.md&types=person` returns all person notes with incoming `works-at` links.
-  - Graph edge includes `relation: "works-at"`, `metadata: {join_date, leave_date, current}` — reused from person links field.
-  - Backlinks panel on organization note shows all people (sorted by who worked there most recently).
-- [x] Routing/sentence starters for organization notes:
-  - Add to `organization.yaml`: `sentence_starters: ["This is a company", "This organization", "The company was founded", "We hired from", "Working at"]`
-  - If routing confidence < 0.6 and routing suggests `person` but content mentions org names, consider routing to `organization` instead (optional heuristic).
-- [x] Test coverage in `monocle/tests/`:
-  - `test_vault.py`: add tests for `create_from_template("organization", ...)` and `patch_frontmatter` with linked person notes
-  - `test_graph.py`: add tests for backreferences — `GET /api/graph?focus=org_note` returns only person nodes with `works-at` edges
-  - `test_ingest.py`: add tests for multi-org extraction during person ingest; stub org creation scenario
-  - New file `monocle/tests/test_org_linking.py` (3–5 tests):
-    - `test_person_ingest_creates_org_stub_if_missing`
-    - `test_person_ingest_links_to_existing_org`
-    - `test_org_backlinks_people_with_works_at_relation`
-    - `test_org_graph_filters_by_relation_type`
-- [x] Frontend display (optional M23a follow-up):
-  - Person notes show inline org badges (clickable → org note / graph view)
-  - Organization notes show "People" panel listing all associated people (generated from backreferences)
-  - Person's work history table in document viewer shows org name, role, dates (from `organizations` frontmatter + computed via `links`)
-- [x] Extend `.vscode/tasks.json`:
-  - `test: org-linking` — `python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q`
-
-**Acceptance Criteria:**
-- [x] `monocle/vault/templates/organization.yaml` has 15+ fields; `sentence_starters` includes org-specific phrases
-- [x] `vault/.templates/organization.md` has 5+ sections with guidance for user-facing template; table examples for leaders/alumni
-- [x] `prompts/extract.md` documents multi-org extraction with example JSON format and partial date guidance
-- [x] A new person note with `organizations: [{name: "Acme Corp", role: "VP", join_date: "2020-01", current: true}]` triggers creation of a stub `organizations/acme-corp.md` or links to existing org
-- [x] Person note's `links` field includes a `{target: "organizations/acme-corp.md", relation: "works-at", join_date: "2020-01", current: true}` entry
-- [x] `GET /api/graph?focus=organizations/acme-corp.md` returns only person nodes in the ego-graph
-- [x] Backlinks panel on org note lists all associated people sorted by recency
-- [x] `uv run python -m pytest monocle/tests/test_org_linking.py -x --tb=short -q` passes (3–5 green tests)
-- [x] Full test suite: **786 backend tests passing, EXIT 0**
+**Full details:** [docs/milestones.md#m23-organization-note-type--cross-linked-people-backreferences](milestones.md#m23-organization-note-type--cross-linked-people-backreferences)
 
 ---
 
