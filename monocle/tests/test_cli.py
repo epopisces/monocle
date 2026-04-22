@@ -82,7 +82,7 @@ def _mock_settings(vault_path: str):
     s = MagicMock(spec=Settings)
     s.vault = VaultConfig(path=vault_path, inbox_path=str(Path(vault_path) / "inbox"))
     s.index = IndexConfig(backend="chroma", chroma_persist_path="./data/chroma_test")
-    s.ai = AIConfig(provider="ollama", chat_model="llama3.2", embed_model="nomic-embed-text")
+    s.ai = AIConfig()  # defaults: llama3.2 chat on ollama, nomic-embed on ollama
     s.review = ReviewConfig()
     s.server = ServerConfig()
     s.telemetry = TelemetryConfig(enabled=True, otlp_endpoint="http://localhost:4317", log_level="DEBUG", log_format="text")
@@ -391,9 +391,19 @@ class TestStats:
 
 class TestPullModels:
     def test_pull_models_non_ollama_exits_cleanly(self, tmp_path: Path):
+        from monocle.config import AIConfig, ModelEntry
+
         vault = _make_vault(tmp_path)
         settings = _mock_settings(str(vault))
-        settings.ai.provider = "foundry_local"
+        # Switch chat model to foundry_local
+        settings.ai = AIConfig(
+            chat_model_key="fl-chat",
+            embed_model_key="nomic-embed",
+            models=[
+                ModelEntry(key="fl-chat", name="llama3.2", role="chat", provider="foundry_local"),
+                ModelEntry(key="nomic-embed", name="nomic-embed-text", role="embed", provider="ollama"),
+            ],
+        )
 
         with patch("monocle.cli._load_settings", return_value=settings):
             result = runner.invoke(app, ["pull-models"])
@@ -404,7 +414,7 @@ class TestPullModels:
     def test_pull_models_ollama_missing_package(self, tmp_path: Path):
         vault = _make_vault(tmp_path)
         settings = _mock_settings(str(vault))
-        settings.ai.provider = "ollama"
+        # Default settings already have ollama provider
 
         with (
             patch("monocle.cli._load_settings", return_value=settings),

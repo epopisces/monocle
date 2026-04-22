@@ -29,12 +29,37 @@ from monocle.models import NoteMetadata
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_AI_CFG: dict = {
+    "chat_model_key": "llama3.2",
+    "embed_model_key": "nomic-embed",
+    "models": [
+        {"key": "llama3.2", "name": "llama3.2", "role": "chat", "provider": "ollama"},
+        {"key": "nomic-embed", "name": "nomic-embed-text", "role": "embed", "provider": "ollama"},
+    ],
+}
+
+# AI config where the chat model uses foundry_local (supports native transcription)
+_FL_AI_NATIVE: dict = {
+    "chat_model_key": "fl-chat",
+    "embed_model_key": "nomic-embed",
+    "models": [
+        {"key": "fl-chat", "name": "phi4", "role": "chat", "provider": "foundry_local"},
+        {"key": "nomic-embed", "name": "nomic-embed-text", "role": "embed", "provider": "ollama"},
+    ],
+    "transcribe_backend": "native",
+}
+
+
 def _make_settings(**overrides) -> Settings:
     """Return a minimal Settings object (no config.yaml required)."""
     defaults: dict = {
-        "ai": {"provider": "ollama"},
+        "ai": dict(_DEFAULT_AI_CFG),
         "vault": {"path": "/tmp/vault", "watch": False},
     }
+    # Deep-merge overrides so callers can pass ai sub-keys
+    if "ai" in overrides:
+        merged_ai = {**dict(_DEFAULT_AI_CFG), **overrides.pop("ai")}
+        defaults["ai"] = merged_ai
     defaults.update(overrides)
     with patch("monocle.config._find_config_file", return_value=__import__("pathlib").Path("/nonexistent")):
         with patch("monocle.config._load_yaml", return_value=defaults):
@@ -480,7 +505,15 @@ class TestAzureOpenAIProvider:
 class TestGetProviderFactory:
     @staticmethod
     def _settings(provider: str, extra: dict | None = None) -> Settings:
-        ai_cfg: dict = {"provider": provider}
+        models = [
+            {"key": "chat-model", "name": "llama3.2", "role": "chat", "provider": provider},
+            {"key": "embed-model", "name": "nomic-embed-text", "role": "embed", "provider": provider},
+        ]
+        ai_cfg: dict = {
+            "chat_model_key": "chat-model",
+            "embed_model_key": "embed-model",
+            "models": models,
+        }
         if extra:
             ai_cfg.update(extra)
         cfg = {"ai": ai_cfg, "vault": {"path": "/tmp/vault", "watch": False}}
@@ -523,8 +556,9 @@ class TestGetProviderFactory:
         from monocle.ai import get_provider
 
         settings = self._settings("ollama")
-        settings.ai.provider = "nonexistent"  # type: ignore[assignment]
-        with pytest.raises(ValueError, match="Unknown ai.provider"):
+        # Directly mutate the ModelEntry provider to an invalid value (bypasses Pydantic)
+        settings.ai.get_chat_model().provider = "nonexistent"  # type: ignore[assignment]
+        with pytest.raises(ValueError, match="Unknown provider"):
             get_provider(settings)
 
 
@@ -1082,7 +1116,7 @@ class TestAIConfigValidation:
 
     def test_foundry_local_native_valid(self):
         """provider=foundry_local with transcribe_backend=native is allowed."""
-        settings = _make_settings(ai={"provider": "foundry_local", "transcribe_backend": "native"})
+        settings = _make_settings(ai=_FL_AI_NATIVE)
         assert settings.ai.transcribe_backend == "native"
 
     def test_ollama_whisper_cpp_valid(self):
@@ -1101,7 +1135,7 @@ class TestGetTranscriptionProvider:
         from monocle.ai.transcription import get_transcription_provider
 
         # "native" is valid with foundry_local / azure (they have a built-in endpoint).
-        settings = _make_settings(ai={"provider": "foundry_local", "transcribe_backend": "native"})
+        settings = _make_settings(ai=_FL_AI_NATIVE)
         result = get_transcription_provider(settings)
         assert result is None
 
@@ -1137,9 +1171,7 @@ class TestGetTranscriptionProvider:
     def test_unknown_backend_raises(self):
         from monocle.ai.transcription import get_transcription_provider
 
-        settings = _make_settings(
-            ai={"provider": "foundry_local", "transcribe_backend": "native"}
-        )
+        settings = _make_settings(ai=_FL_AI_NATIVE)
         # Monkeypatch the backend value to an unknown string
         settings.ai.transcribe_backend = "invalid_backend"  # type: ignore[assignment]
         with pytest.raises(ValueError, match="invalid_backend"):

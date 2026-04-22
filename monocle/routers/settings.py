@@ -30,24 +30,43 @@ class ReviewPatch(BaseModel):
     auto_approve_threshold_pct: int | None = Field(None, ge=0, le=100)
 
 
-class AIPatch(BaseModel):
+class ModelEntryPatch(BaseModel):
+    """A model entry supplied in a PATCH request.  All fields except *key* are optional."""
+
+    key: str
+    name: str | None = None
+    role: Literal["chat", "embed", "stt"] | None = None
     provider: Literal["ollama", "foundry_local", "azure"] | None = None
-    embed_model: str | None = None
-    chat_model: str | None = None
-    transcribe_model: str | None = None
+    base_url: str | None = None
+
+
+class AIPatch(BaseModel):
+    # Active model selection
+    chat_model_key: str | None = None
+    embed_model_key: str | None = None
+    stt_key: str | None = None
+    # Transcription settings
     transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] | None = None
     transcribe_url: str | None = None
+    # Provider connection settings
     ollama_base_url: str | None = None
+    # Full models-list replacement (optional; replaces entire list when provided)
+    models: list[ModelEntryPatch] | None = None
 
 
 class UIPatch(BaseModel):
     voice_input_backend: Literal["whisper", "web_speech"] | None = None
 
 
+class TelemetryPatch(BaseModel):
+    trace_filters: list[str] | None = None
+
+
 class SettingsPatch(BaseModel):
     review: ReviewPatch | None = None
     ai: AIPatch | None = None
     ui: UIPatch | None = None
+    telemetry: TelemetryPatch | None = None
 
 
 #endregion
@@ -173,11 +192,12 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
                 # Reconstruct via constructor to run validators (including cross-field checks)
                 ai_data = settings.ai.model_dump()
                 ai_data.update(ai_updates)
-                old_provider = settings.ai.provider
                 new_ai = AIConfig(**ai_data)
                 settings = settings.model_copy(update={"ai": new_ai})
                 config_patch["ai"] = ai_updates
-                if ai_updates.get("provider") and ai_updates["provider"] != old_provider:
+                # Hot-reload required when the active model selection or models list changes
+                _RELOAD_KEYS = {"chat_model_key", "embed_model_key", "stt_key", "models"}
+                if any(k in ai_updates for k in _RELOAD_KEYS):
                     ai_provider_changed = True
             except ValidationError as exc:
                 from fastapi import HTTPException
@@ -200,12 +220,34 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
 
                 raise HTTPException(status_code=422, detail=str(exc))
 
+    if patch.telemetry is not None and patch.telemetry.trace_filters is not None:
+        from monocle.config import TelemetryConfig
+
+        try:
+            telem_data = settings.telemetry.model_dump()
+            telem_data["trace_filters"] = patch.telemetry.trace_filters
+            new_telem = TelemetryConfig(**telem_data)
+            settings = settings.model_copy(update={"telemetry": new_telem})
+            config_patch["telemetry"] = {"trace_filters": patch.telemetry.trace_filters}
+            # Hot-update the live span processor so changes take effect immediately
+            route_filter_processor = getattr(request.app.state, "route_filter_processor", None)
+            if route_filter_processor is not None:
+                route_filter_processor.set_filters(patch.telemetry.trace_filters)
+        except ValidationError as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail=str(exc))
+
     # If AI provider is changing, attempt hot-reload BEFORE persisting.
     # This ensures all changes (disk + app state) are atomic.
     if ai_provider_changed:
         try:
             new_ai_provider = await asyncio.to_thread(get_provider, settings)
-            logger.info("[API] AI provider hot-reload succeeded: %s", settings.ai.provider)
+            logger.info(
+                "[API] AI provider hot-reload succeeded: chat=%s embed=%s",
+                settings.ai.chat_model_key,
+                settings.ai.embed_model_key,
+            )
         except Exception as exc:
             from fastapi import HTTPException
 

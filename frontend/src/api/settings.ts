@@ -1,16 +1,26 @@
 import { apiGet, apiPatch, apiPost } from './client'
 
+/** A model entry in the ai.models registry. */
+export interface ModelEntry {
+  key: string
+  name: string
+  role: 'chat' | 'embed' | 'stt'
+  provider: 'ollama' | 'foundry_local' | 'azure'
+  base_url: string | null
+}
+
 /** Settings response shape (mirrors SettingsResponse model in Python). */
 export interface SettingsResponse {
   ai: {
-    provider: string
-    model: string
-    embed_model: string
+    chat_model_key: string
+    embed_model_key: string
+    stt_key: string | null
+    embed_dimensions: number | null
     transcribe_backend: string
-    transcribe_url: string | null
-    transcribe_model: string
-    embed_dimensions: number
-    base_url: string | null
+    transcribe_url: string
+    ollama_base_url: string
+    foundry_local_base_url: string
+    models: ModelEntry[]
   }
   vault: {
     path: string
@@ -42,6 +52,7 @@ export interface SettingsResponse {
     otlp_endpoint: string
     log_level: string
     log_format: string
+    trace_filters: string[]
   }
   ui: {
     chat_session_history_limit: number
@@ -50,15 +61,22 @@ export interface SettingsResponse {
   mcp_key_last4: string | null
 }
 
-export interface AIPatch {
-  provider?: string
-  model?: string
-  embed_model?: string
-  transcribe_backend?: string
-  transcribe_url?: string | null
-  transcribe_model?: string
-  embed_dimensions?: number
+export interface ModelEntryInput {
+  key: string
+  name?: string
+  role?: 'chat' | 'embed' | 'stt'
+  provider?: 'ollama' | 'foundry_local' | 'azure'
   base_url?: string | null
+}
+
+export interface AIPatch {
+  chat_model_key?: string
+  embed_model_key?: string
+  stt_key?: string | null
+  transcribe_backend?: string
+  transcribe_url?: string
+  ollama_base_url?: string
+  models?: ModelEntryInput[]
 }
 
 export interface ReviewPatch {
@@ -70,10 +88,15 @@ export interface UIPatch {
   voice_input_backend?: 'whisper' | 'web_speech'
 }
 
+export interface TelemetryPatch {
+  trace_filters?: string[]
+}
+
 export interface SettingsPatch {
   ai?: AIPatch
   review?: ReviewPatch
   ui?: UIPatch
+  telemetry?: TelemetryPatch
 }
 
 export interface RotateMcpKeyResponse {

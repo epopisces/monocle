@@ -262,6 +262,7 @@ def api_client(tmp_path: Path, mock_ai):
         app.state.failed_registry = failed_reg
         app.state.watcher = None
         app.state._review_pending_count = None  # lazy count cache; see review.py
+        app.state.route_filter_processor = None  # no OTel in tests
 
         from monocle.graph import GraphBuilder
         app.state.graph_builder = GraphBuilder(vault)

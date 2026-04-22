@@ -24,49 +24,138 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class ModelEntry(BaseModel):
+    """A single model entry in the ai.models registry.
+
+    Each entry describes one model available to the application.  The *key*
+    is the short unique identifier used in ``chat_model_key`` / ``embed_model_key``
+    / ``stt_key``; *name* is the actual model name forwarded to the provider
+    API; *role* describes the model's intended use; *provider* says which
+    backend hosts it; *base_url* optionally overrides the provider-level URL.
+    """
+
+    key: str
+    name: str
+    role: Literal["chat", "embed", "stt"]
+    provider: Literal["ollama", "foundry_local", "azure"]
+    base_url: str | None = None
+
+
+def _default_models() -> list[ModelEntry]:
+    return [
+        ModelEntry(key="llama3.2", name="llama3.2", role="chat", provider="ollama"),
+        ModelEntry(key="nomic-embed", name="nomic-embed-text", role="embed", provider="ollama"),
+    ]
+
+
 class AIConfig(BaseModel):
-    provider: Literal["ollama", "foundry_local", "azure"] = "ollama"
-    embed_model: str = "nomic-embed-text"
+    # Active model selection keys — reference entries in the models list.
+    chat_model_key: str = "llama3.2"
+    embed_model_key: str = "nomic-embed"
+    stt_key: str | None = None  # optional; None = fall back to transcribe_backend
+
     embed_dimensions: int | None = None  # None = auto-detect from first embedding
-    chat_model: str = "llama3.2"
-    transcribe_model: str = "whisper"
+
     # Transcription back-end — pluggable at config time:
-    #   "native"      providers with built-in transcription (e.g. Foundry, Azure) use their
-    #                 own API. Ollama does not support "native" and requires an explicit
-    #                 backend like "whisper_cpp" or "subprocess".
-    #   "whisper_cpp" all providers delegate to a local whisper.cpp HTTP server.
-    #   "subprocess"  all providers call the openai-whisper CLI as a subprocess.
-    transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] = "native"
+    #   "native"      providers with built-in transcription (Foundry, Azure) use their own API.
+    #   "whisper_cpp" delegates to a local whisper.cpp HTTP server.
+    #   "subprocess"  calls the openai-whisper CLI as a subprocess.
+    transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] = "subprocess"
     transcribe_url: str = "http://localhost:9000"  # whisper_cpp server URL
+
+    # Provider-level connection settings (used as defaults when a model entry has no base_url).
     ollama_base_url: str = "http://localhost:11434"
     foundry_local_base_url: str = "http://localhost:5272"
 
-    @model_validator(mode="before")
-    @classmethod
-    def default_transcribe_backend_for_ollama(cls, data: object) -> object:
-        """Set transcribe_backend to 'subprocess' when provider is 'ollama' and
-        transcribe_backend was not explicitly supplied.
+    # Model registry — all models known to this installation.
+    models: list[ModelEntry] = Field(default_factory=_default_models)
 
-        This prevents the default config (ollama + native) from being silently
-        invalid.  Users who explicitly set transcribe_backend='native' with
-        provider='ollama' will get a clear error from the after-validator below.
-        """
-        if isinstance(data, dict):
-            if data.get("provider", "ollama") == "ollama" and "transcribe_backend" not in data:
-                data = {**data, "transcribe_backend": "subprocess"}
-        return data
+    # ------------------------------------------------------------------
+    # Model-registry helpers
+    # ------------------------------------------------------------------
+
+    def get_model(self, key: str) -> ModelEntry:
+        """Return the ``ModelEntry`` with the given *key*, or raise ``ValueError``."""
+        for m in self.models:
+            if m.key == key:
+                return m
+        raise ValueError(f"Model key {key!r} not found in ai.models")
+
+    def get_chat_model(self) -> ModelEntry:
+        """Return the active chat ``ModelEntry``."""
+        return self.get_model(self.chat_model_key)
+
+    def get_embed_model(self) -> ModelEntry:
+        """Return the active embed ``ModelEntry``."""
+        return self.get_model(self.embed_model_key)
+
+    def get_stt_model(self) -> ModelEntry | None:
+        """Return the active STT ``ModelEntry``, or ``None`` if not configured."""
+        if self.stt_key:
+            return self.get_model(self.stt_key)
+        return None
+
+    # ------------------------------------------------------------------
+    # Backward-compatible computed properties
+    # These let existing code (cli.py, health.py, index/chroma.py, etc.)
+    # continue reading settings.ai.provider / .chat_model / .embed_model
+    # without changes, while model_dump() returns the new schema.
+    # ------------------------------------------------------------------
+
+    @property
+    def provider(self) -> str:
+        """Provider of the active chat model (backward compat)."""
+        return self.get_chat_model().provider
+
+    @property
+    def chat_model(self) -> str:
+        """Name of the active chat model (backward compat)."""
+        return self.get_chat_model().name
+
+    @property
+    def embed_model(self) -> str:
+        """Name of the active embed model (backward compat)."""
+        return self.get_embed_model().name
+
+    @property
+    def transcribe_model(self) -> str:
+        """Name of the active STT model, falling back to 'whisper' (backward compat)."""
+        stt = self.get_stt_model()
+        return stt.name if stt else "whisper"
+
+    # ------------------------------------------------------------------
+    # Validators
+    # ------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def validate_model_keys_exist(self) -> "AIConfig":
+        """Ensure all key references resolve to entries in models."""
+        keys = {m.key for m in self.models}
+        if self.chat_model_key not in keys:
+            raise ValueError(
+                f"ai.chat_model_key {self.chat_model_key!r} references a key not in ai.models. "
+                f"Available keys: {sorted(keys)}"
+            )
+        if self.embed_model_key not in keys:
+            raise ValueError(
+                f"ai.embed_model_key {self.embed_model_key!r} references a key not in ai.models. "
+                f"Available keys: {sorted(keys)}"
+            )
+        if self.stt_key and self.stt_key not in keys:
+            raise ValueError(
+                f"ai.stt_key {self.stt_key!r} references a key not in ai.models. "
+                f"Available keys: {sorted(keys)}"
+            )
+        return self
 
     @model_validator(mode="after")
     def validate_transcribe_backend(self) -> "AIConfig":
-        """Reject native transcription when provider is Ollama.
-
-        Ollama has no built-in audio-transcription API.  Catching this at
-        config-load time gives a clear error rather than a cryptic RuntimeError
-        at the first transcription call.
-        """
-        if self.provider == "ollama" and self.transcribe_backend == "native":
+        """Reject native transcription when the effective STT provider is Ollama."""
+        stt = self.get_stt_model()
+        effective_provider = stt.provider if stt else self.get_chat_model().provider
+        if effective_provider == "ollama" and self.transcribe_backend == "native":
             raise ValueError(
-                "ai.transcribe_backend='native' is not supported with ai.provider='ollama'. "
+                "ai.transcribe_backend='native' is not supported with provider='ollama'. "
                 "Ollama has no built-in transcription API. "
                 "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess' in config.yaml."
             )
@@ -142,6 +231,9 @@ class TelemetryConfig(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
     enable_sensitive_data: bool = True
+    # Route prefixes whose spans are dropped before export.
+    # Useful for suppressing noisy polling routes (e.g. /api/review/count).
+    trace_filters: list[str] = Field(default_factory=lambda: ["/api/health"])
 
 
 class UIConfig(BaseModel):

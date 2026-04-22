@@ -1,5 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { getHealth, getModelStatus, type HealthResponse, type ProviderModelsResponse } from '../../api/health'
+import { getSettings, patchSettings, type ModelEntry } from '../../api/settings'
 import OmniSearch from './OmniSearch'
 import './Topbar.css'
 
@@ -44,6 +45,14 @@ export default function Topbar({
   const [status, setStatus] = useState<HealthStatus>('unknown')
   const [modelStatus, setModelStatus] = useState<ProviderModelsResponse | null>(null)
 
+  // Model selector state
+  const [activeSelector, setActiveSelector] = useState<'chat' | 'embed' | null>(null)
+  const [selectorModels, setSelectorModels] = useState<ModelEntry[]>([])
+  const [selectorLoading, setSelectorLoading] = useState(false)
+  const [activeChatKey, setActiveChatKey] = useState<string | null>(null)
+  const [activeEmbedKey, setActiveEmbedKey] = useState<string | null>(null)
+  const selectorRef = useRef<HTMLDivElement>(null)
+
   useEffect(() => {
     let cancelled = false
 
@@ -72,6 +81,50 @@ export default function Topbar({
       clearInterval(id)
     }
   }, [])
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    if (!activeSelector) return
+    function handleClickOutside(e: MouseEvent) {
+      if (selectorRef.current && !selectorRef.current.contains(e.target as Node)) {
+        setActiveSelector(null)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [activeSelector])
+
+  async function openModelSelector(role: 'chat' | 'embed') {
+    if (activeSelector === role) {
+      setActiveSelector(null)
+      return
+    }
+    setActiveSelector(role)
+    setSelectorLoading(true)
+    try {
+      const settings = await getSettings()
+      setSelectorModels(settings.ai.models.filter(m => m.role === role))
+      setActiveChatKey(settings.ai.chat_model_key)
+      setActiveEmbedKey(settings.ai.embed_model_key)
+    } catch {
+      setActiveSelector(null)
+    } finally {
+      setSelectorLoading(false)
+    }
+  }
+
+  async function handleModelSelect(role: 'chat' | 'embed', key: string) {
+    setActiveSelector(null)
+    try {
+      await patchSettings({
+        ai: role === 'chat' ? { chat_model_key: key } : { embed_model_key: key },
+      })
+      const ms = await getModelStatus()
+      setModelStatus(ms)
+    } catch {
+      // silent; next poll will correct state
+    }
+  }
 
   // Build detailed tooltip text for the health indicator
   const chatModel = modelStatus?.models.find(m => m.role === 'chat')
@@ -108,34 +161,90 @@ export default function Topbar({
       </div>
 
       <div className="topbar-right">
-        {/* Model status badges — show when models are available (green if loaded, amber if not) */}
+        {/* Model status badges — clickable to switch active model */}
         {modelStatus?.provider_reachable && modelStatus.models.some(m => m.available) && (
-          <div className="topbar-models-status" data-testid="models-status-badges">
+          <div className="topbar-models-status" ref={selectorRef} data-testid="models-status-badges">
             {chatModel?.available && (
-              <span
-                className={`topbar-model-badge ${chatModel.loaded ? 'topbar-model-badge--loaded' : 'topbar-model-badge--cold'}`}
-                title={
-                  chatModel.loaded
-                    ? `${chatModel.name} is loaded and ready`
-                    : `${chatModel.name} is not loaded — first chat response will be slower while the model initialises`
-                }
-                data-testid={`model-badge-chat-${chatModel.loaded ? 'loaded' : 'cold'}`}
-              >
-                {chatModel.loaded ? '✓' : '⏳'} chat
-              </span>
+              <div className="topbar-model-selector-wrap">
+                <button
+                  className={`topbar-model-badge topbar-model-badge--clickable ${chatModel.loaded ? 'topbar-model-badge--loaded' : 'topbar-model-badge--cold'}`}
+                  onClick={() => openModelSelector('chat')}
+                  title={
+                    chatModel.loaded
+                      ? `${chatModel.name} is loaded and ready\nClick to change chat model`
+                      : `${chatModel.name} is not loaded — first chat response will be slower\nClick to change chat model`
+                  }
+                  data-testid={`model-badge-chat-${chatModel.loaded ? 'loaded' : 'cold'}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={activeSelector === 'chat'}
+                >
+                  {chatModel.loaded ? '✓' : '⏳'} chat: {chatModel.name}
+                </button>
+                {activeSelector === 'chat' && (
+                  <div className="topbar-model-dropdown" role="listbox" aria-label="Select chat model">
+                    {selectorLoading ? (
+                      <div className="topbar-model-dropdown__status">Loading…</div>
+                    ) : selectorModels.length === 0 ? (
+                      <div className="topbar-model-dropdown__status">No models configured</div>
+                    ) : (
+                      selectorModels.map(m => (
+                        <button
+                          key={m.key}
+                          className={`topbar-model-dropdown__item${m.key === activeChatKey ? ' topbar-model-dropdown__item--active' : ''}`}
+                          onClick={() => handleModelSelect('chat', m.key)}
+                          role="option"
+                          aria-selected={m.key === activeChatKey}
+                        >
+                          <span className="topbar-model-dropdown__name">{m.name}</span>
+                          <span className="topbar-model-dropdown__provider">{m.provider}</span>
+                          {m.key === activeChatKey && <span className="topbar-model-dropdown__check">✓</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             )}
             {embedModel?.available && (
-              <span
-                className={`topbar-model-badge ${embedModel.loaded ? 'topbar-model-badge--loaded' : 'topbar-model-badge--cold'}`}
-                title={
-                  embedModel.loaded
-                    ? `${embedModel.name} is loaded and ready`
-                    : `${embedModel.name} is not loaded — search/embedding operations will be slower on first use`
-                }
-                data-testid={`model-badge-embed-${embedModel.loaded ? 'loaded' : 'cold'}`}
-              >
-                {embedModel.loaded ? '✓' : '⏳'} embed
-              </span>
+              <div className="topbar-model-selector-wrap">
+                <button
+                  className={`topbar-model-badge topbar-model-badge--clickable ${embedModel.loaded ? 'topbar-model-badge--loaded' : 'topbar-model-badge--cold'}`}
+                  onClick={() => openModelSelector('embed')}
+                  title={
+                    embedModel.loaded
+                      ? `${embedModel.name} is loaded and ready\nClick to change embed model`
+                      : `${embedModel.name} is not loaded — search/embedding operations will be slower\nClick to change embed model`
+                  }
+                  data-testid={`model-badge-embed-${embedModel.loaded ? 'loaded' : 'cold'}`}
+                  aria-haspopup="listbox"
+                  aria-expanded={activeSelector === 'embed'}
+                >
+                  {embedModel.loaded ? '✓' : '⏳'} embed: {embedModel.name}
+                </button>
+                {activeSelector === 'embed' && (
+                  <div className="topbar-model-dropdown" role="listbox" aria-label="Select embed model">
+                    {selectorLoading ? (
+                      <div className="topbar-model-dropdown__status">Loading…</div>
+                    ) : selectorModels.length === 0 ? (
+                      <div className="topbar-model-dropdown__status">No models configured</div>
+                    ) : (
+                      selectorModels.map(m => (
+                        <button
+                          key={m.key}
+                          className={`topbar-model-dropdown__item${m.key === activeEmbedKey ? ' topbar-model-dropdown__item--active' : ''}`}
+                          onClick={() => handleModelSelect('embed', m.key)}
+                          role="option"
+                          aria-selected={m.key === activeEmbedKey}
+                        >
+                          <span className="topbar-model-dropdown__name">{m.name}</span>
+                          <span className="topbar-model-dropdown__provider">{m.provider}</span>
+                          {m.key === activeEmbedKey && <span className="topbar-model-dropdown__check">✓</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             )}
           </div>
         )}

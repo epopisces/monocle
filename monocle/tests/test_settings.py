@@ -120,12 +120,11 @@ class TestPatchSettings:
         assert "queue_threshold" in content
         assert "0.55" in content
 
-    def test_patch_ai_provider_no_crash(self, api_client: TestClient) -> None:
-        """Patching ai.chat_model should succeed without hot-reloading the provider
-        (provider field unchanged)."""
-        r = api_client.patch("/api/settings", json={"ai": {"chat_model": "llama3.3"}})
+    def test_patch_ai_transcribe_backend_no_crash(self, api_client: TestClient) -> None:
+        """Patching ai.transcribe_backend should succeed without hot-reloading the provider."""
+        r = api_client.patch("/api/settings", json={"ai": {"transcribe_backend": "whisper_cpp"}})
         assert r.status_code == 200
-        assert r.json()["ai"]["chat_model"] == "llama3.3"
+        assert r.json()["ai"]["transcribe_backend"] == "whisper_cpp"
 
     def test_patch_preserves_other_review_fields(self, api_client: TestClient) -> None:
         """Patching review.queue_threshold must not affect auto_approve_threshold_pct."""
@@ -210,11 +209,6 @@ class TestRotateMcpKey:
 
 
 class TestInputValidation:
-    def test_patch_invalid_provider_returns_422(self, api_client: TestClient) -> None:
-        """AIPatch.provider must be a Literal — arbitrary strings return 422 (B1)."""
-        r = api_client.patch("/api/settings", json={"ai": {"provider": "bad_provider"}})
-        assert r.status_code == 422
-
     def test_patch_invalid_transcribe_backend_returns_422(self, api_client: TestClient) -> None:
         """AIPatch.transcribe_backend must be a Literal — arbitrary strings return 422 (B1)."""
         r = api_client.patch("/api/settings", json={"ai": {"transcribe_backend": "ftp"}})
@@ -249,33 +243,22 @@ class TestInputValidation:
         assert r.status_code == 200
 
     def test_patch_ollama_with_native_transcribe_returns_422(self, api_client: TestClient) -> None:
-        """Patching provider='ollama' + transcribe_backend='native' must fail (invalid combo).
-        
-        Ollama has no built-in transcription API. Validators should reject this.
+        """Patching transcribe_backend='native' must fail when chat model is on ollama.
+
+        Default config has chat model on ollama.  Validators should reject
+        native transcription since Ollama has no built-in audio API.
         """
         r = api_client.patch(
             "/api/settings",
-            json={
-                "ai": {
-                    "provider": "ollama",
-                    "transcribe_backend": "native",
-                }
-            },
+            json={"ai": {"transcribe_backend": "native"}},
         )
-        assert r.status_code == 422, "Invalid ollama+native combo should be rejected"
+        assert r.status_code == 422, "native transcribe_backend must be rejected for ollama models"
 
-    def test_patch_to_ollama_preserves_valid_transcribe_backend(
+    def test_default_transcribe_backend_is_safe_for_ollama(
         self, api_client: TestClient
     ) -> None:
-        """Patching provider='ollama' alone should auto-adjust transcribe_backend if needed."""
-        # First ensure we start with a non-ollama provider
-        api_client.patch("/api/settings", json={"ai": {"provider": "foundry_local"}})
-        
-        # Patch to ollama (no transcribe_backend specified)
-        r = api_client.patch("/api/settings", json={"ai": {"provider": "ollama"}})
-        assert r.status_code == 200
-        body = r.json()
-        # transcribe_backend should be set to subprocess (default for ollama)
+        """Default transcribe_backend must be subprocess or whisper_cpp (safe for ollama)."""
+        body = api_client.get("/api/settings").json()
         assert body["ai"]["transcribe_backend"] in ["subprocess", "whisper_cpp"]
 
 
@@ -285,33 +268,43 @@ class TestInputValidation:
 
 
 class TestAIProviderHotReload:
-    def test_patch_ai_provider_triggers_hot_reload(self, api_client: TestClient) -> None:
-        """Changing ai.provider must call get_provider and update app.state.ai (B3)."""
+    # Default models list for tests that need multiple chat models
+    _EXTRA_MODELS = [
+        {"key": "llama3.2", "name": "llama3.2", "role": "chat", "provider": "ollama"},
+        {"key": "qwen3", "name": "qwen3:8b", "role": "chat", "provider": "ollama"},
+        {"key": "nomic-embed", "name": "nomic-embed-text", "role": "embed", "provider": "ollama"},
+    ]
+
+    def test_patch_ai_chat_model_key_triggers_hot_reload(self, api_client: TestClient) -> None:
+        """Changing chat_model_key must call get_provider and update app.state.ai (B3)."""
         from unittest.mock import MagicMock, patch
 
         mock_new_ai = MagicMock()
         with patch("monocle.ai.get_provider", return_value=mock_new_ai) as mock_get:
-            r = api_client.patch("/api/settings", json={"ai": {"provider": "foundry_local"}})
+            r = api_client.patch(
+                "/api/settings",
+                json={"ai": {"chat_model_key": "qwen3", "models": self._EXTRA_MODELS}},
+            )
         assert r.status_code == 200
-        assert r.json()["ai"]["provider"] == "foundry_local"
-        assert mock_get.call_count == 1, "get_provider must be called on provider change"
+        assert r.json()["ai"]["chat_model_key"] == "qwen3"
+        assert mock_get.call_count == 1, "get_provider must be called on model-key change"
 
-    def test_patch_ai_model_only_does_not_trigger_hot_reload(
+    def test_patch_transcribe_backend_does_not_trigger_hot_reload(
         self, api_client: TestClient
     ) -> None:
-        """Changing ai.chat_model (no provider change) must NOT re-initialise the provider."""
+        """Patching transcribe_backend alone must NOT re-initialise the provider."""
         from unittest.mock import patch
 
         with patch("monocle.ai.get_provider") as mock_get:
-            r = api_client.patch("/api/settings", json={"ai": {"chat_model": "mistral"}})
+            r = api_client.patch("/api/settings", json={"ai": {"transcribe_backend": "whisper_cpp"}})
         assert r.status_code == 200
         mock_get.assert_not_called()
 
-    def test_patch_ai_provider_hot_reload_failure_rejects_entire_patch(
+    def test_patch_ai_hot_reload_failure_rejects_entire_patch(
         self, api_client: TestClient, _temp_config: Path
     ) -> None:
         """If hot-reload fails, the entire patch must be rejected (no partial state).
-        
+
         Config file must not be updated, and app.state must not be changed.
         """
         from unittest.mock import patch
@@ -319,13 +312,13 @@ class TestAIProviderHotReload:
 
         # Record initial config state
         initial_config = _load_yaml(_temp_config)
-        initial_chat_model = api_client.get("/api/settings").json()["ai"]["chat_model"]
+        initial_key = api_client.get("/api/settings").json()["ai"]["chat_model_key"]
 
-        # Attempt patch with provider change, but mock get_provider to fail
+        # Attempt patch with model key change, but mock get_provider to fail
         with patch("monocle.ai.get_provider", side_effect=RuntimeError("Provider init failed")):
             r = api_client.patch(
                 "/api/settings",
-                json={"ai": {"provider": "foundry_local", "chat_model": "meta-llama"}},
+                json={"ai": {"chat_model_key": "qwen3", "models": self._EXTRA_MODELS}},
             )
 
         # Must return 500 due to hot-reload failure
@@ -336,31 +329,26 @@ class TestAIProviderHotReload:
         assert current_config == initial_config, "Config should not be written on hot-reload failure"
 
         # app.state.settings must NOT have been updated
-        current_chat_model = api_client.get("/api/settings").json()["ai"]["chat_model"]
-        assert (
-            current_chat_model == initial_chat_model
-        ), "Settings should not be persisted on hot-reload failure"
+        current_key = api_client.get("/api/settings").json()["ai"]["chat_model_key"]
+        assert current_key == initial_key, "Settings should not be persisted on hot-reload failure"
 
-    def test_patch_ai_provider_success_updates_app_state_consistently(
+    def test_patch_ai_model_key_success_updates_app_state_consistently(
         self, api_client: TestClient
     ) -> None:
-        """On successful provider change, app.state.ai and returned provider must match."""
+        """On successful model-key change, app state and response must be consistent."""
         from unittest.mock import MagicMock, patch
 
         mock_new_ai = MagicMock()
         with patch("monocle.ai.get_provider", return_value=mock_new_ai):
             r = api_client.patch(
-                "/api/settings", json={"ai": {"provider": "foundry_local"}}
+                "/api/settings",
+                json={"ai": {"chat_model_key": "qwen3", "models": self._EXTRA_MODELS}},
             )
 
         assert r.status_code == 200
-        response_provider = r.json()["ai"]["provider"]
-
-        # Get current settings from a subsequent request
-        state_provider = api_client.get("/api/settings").json()["ai"]["provider"]
-
-        # Response and app state must be consistent
-        assert response_provider == state_provider == "foundry_local"
+        response_key = r.json()["ai"]["chat_model_key"]
+        state_key = api_client.get("/api/settings").json()["ai"]["chat_model_key"]
+        assert response_key == state_key == "qwen3"
 
 
 # ===========================================================================
@@ -494,3 +482,63 @@ review:
         assert config["ai"]["chat_model"] == "mistral"
         assert "azure_openai_api_key" not in config["ai"]
         assert "foundry_local_base_url" not in config["ai"]
+
+
+# ===========================================================================
+# PATCH /api/settings — telemetry.trace_filters (runtime filter update)
+# ===========================================================================
+
+
+class TestPatchTelemetryTraceFilters:
+    """Tests for patching telemetry.trace_filters via the settings API."""
+
+    def test_patch_trace_filters_returns_200(self, api_client: TestClient) -> None:
+        """PATCH telemetry.trace_filters must return 200."""
+        r = api_client.patch(
+            "/api/settings",
+            json={"telemetry": {"trace_filters": ["/api/health", "/api/review/count"]}},
+        )
+        assert r.status_code == 200
+
+    def test_patch_trace_filters_reflected_in_response(self, api_client: TestClient) -> None:
+        """Updated trace_filters must appear in response body."""
+        new_filters = ["/api/health", "/api/ingest/failures"]
+        r = api_client.patch(
+            "/api/settings",
+            json={"telemetry": {"trace_filters": new_filters}},
+        )
+        body = r.json()
+        assert body["telemetry"]["trace_filters"] == new_filters
+
+    def test_patch_trace_filters_updates_app_state(self, api_client: TestClient) -> None:
+        """Updated trace_filters must be visible on subsequent GET."""
+        new_filters = ["/api/review/count"]
+        api_client.patch(
+            "/api/settings",
+            json={"telemetry": {"trace_filters": new_filters}},
+        )
+        got = api_client.get("/api/settings").json()
+        assert got["telemetry"]["trace_filters"] == new_filters
+
+    def test_patch_trace_filters_updates_live_processor(self, api_client: TestClient) -> None:
+        """Patching trace_filters must call set_filters() on the live route_filter_processor."""
+        from unittest.mock import MagicMock
+
+        mock_processor = MagicMock()
+        api_client.app.state.route_filter_processor = mock_processor
+        api_client.patch(
+            "/api/settings",
+            json={"telemetry": {"trace_filters": ["/api/health", "/api/review/count"]}},
+        )
+        mock_processor.set_filters.assert_called_once_with(
+            ["/api/health", "/api/review/count"]
+        )
+
+    def test_patch_empty_trace_filters_list_accepted(self, api_client: TestClient) -> None:
+        """An empty list disables all filtering — must be accepted."""
+        r = api_client.patch(
+            "/api/settings",
+            json={"telemetry": {"trace_filters": []}},
+        )
+        assert r.status_code == 200
+        assert r.json()["telemetry"]["trace_filters"] == []

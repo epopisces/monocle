@@ -60,8 +60,14 @@ const INITIAL: State = {
   lastKeyHint: null,
 }
 
-const PROVIDERS = ['ollama', 'foundry_local', 'azure']
 const TRANSCRIBE_BACKENDS = ['subprocess', 'whisper_cpp', 'native']
+
+/** Well-known noisy routes surfaced as checkboxes in the Tracing Filters panel. */
+const KNOWN_FILTERS = [
+  { route: '/api/health', label: 'Health checks (/api/health)' },
+  { route: '/api/review/count', label: 'Review count polling (/api/review/count)' },
+  { route: '/api/ingest/failures', label: 'Ingest failures polling (/api/ingest/failures)' },
+]
 
 function modelStateBadge(available: boolean, loaded: boolean): { cls: string; label: string } {
   if (loaded) return { cls: 'loaded', label: 'loaded' }
@@ -116,15 +122,25 @@ export default function SettingsModal({ open, onClose }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
-  const handleProviderChange = async (provider: string) => {
-    const patch: SettingsPatch = { ai: { provider } }
+  const handleChatModelChange = async (key: string) => {
+    const patch: SettingsPatch = { ai: { chat_model_key: key } }
     dispatch({ type: 'SAVING' })
     try {
       const s = await patchSettings(patch)
       dispatch({ type: 'SAVED', payload: s })
-      // Refresh model status after provider switch
       setModelStatus(null)
       getModelStatus().then(ms => setModelStatus(ms)).catch(() => setModelStatus(null))
+    } catch (e) {
+      dispatch({ type: 'SAVE_ERROR', payload: String(e) })
+    }
+  }
+
+  const handleEmbedModelChange = async (key: string) => {
+    const patch: SettingsPatch = { ai: { embed_model_key: key } }
+    dispatch({ type: 'SAVING' })
+    try {
+      const s = await patchSettings(patch)
+      dispatch({ type: 'SAVED', payload: s })
     } catch (e) {
       dispatch({ type: 'SAVE_ERROR', payload: String(e) })
     }
@@ -151,6 +167,19 @@ export default function SettingsModal({ open, onClose }: Props) {
     } catch (e) {
       dispatch({ type: 'KEY_ERROR', payload: String(e) })
     }
+  }
+
+  const handleTraceFilterToggle = async (route: string, checked: boolean) => {
+    if (!settings) return
+    const current = settings.telemetry.trace_filters ?? []
+    const next = checked
+      ? [...new Set([...current, route])]
+      : current.filter(f => f !== route)
+    const patch: SettingsPatch = { telemetry: { trace_filters: next } }
+    dispatch({ type: 'SAVING' })
+    patchSettings(patch)
+      .then(s => dispatch({ type: 'SAVED', payload: s }))
+      .catch(e => dispatch({ type: 'SAVE_ERROR', payload: String(e) }))
   }
 
   if (!open) return null
@@ -182,21 +211,45 @@ export default function SettingsModal({ open, onClose }: Props) {
           <div className="settings-modal__body">
             {error && <div data-testid="settings-error" className="settings-modal__error">{error}</div>}
 
-            {/* AI Provider */}
+            {/* AI Models */}
             <section className="settings-section">
-              <h3 className="settings-section__title">AI Provider</h3>
+              <h3 className="settings-section__title">AI Models</h3>
+
               <label className="settings-field">
-                <span className="settings-field__label">Backend</span>
+                <span className="settings-field__label">Chat model</span>
                 <select
-                  value={settings.ai.provider}
-                  onChange={e => handleProviderChange(e.target.value)}
+                  value={settings.ai.chat_model_key}
+                  onChange={e => handleChatModelChange(e.target.value)}
                   disabled={status === 'saving'}
                   className="settings-select"
-                  data-testid="ai-provider-select"
+                  data-testid="chat-model-select"
                 >
-                  {PROVIDERS.map(p => (
-                    <option key={p} value={p}>{p}</option>
-                  ))}
+                  {settings.ai.models
+                    .filter(m => m.role === 'chat')
+                    .map(m => (
+                      <option key={m.key} value={m.key}>
+                        {m.name} ({m.provider})
+                      </option>
+                    ))}
+                </select>
+              </label>
+
+              <label className="settings-field">
+                <span className="settings-field__label">Embed model</span>
+                <select
+                  value={settings.ai.embed_model_key}
+                  onChange={e => handleEmbedModelChange(e.target.value)}
+                  disabled={status === 'saving'}
+                  className="settings-select"
+                  data-testid="embed-model-select"
+                >
+                  {settings.ai.models
+                    .filter(m => m.role === 'embed')
+                    .map(m => (
+                      <option key={m.key} value={m.key}>
+                        {m.name} ({m.provider})
+                      </option>
+                    ))}
                 </select>
               </label>
 
@@ -288,6 +341,28 @@ export default function SettingsModal({ open, onClose }: Props) {
                   className="settings-range"
                 />
               </label>
+            </section>
+
+            {/* Tracing Filters */}
+            <section className="settings-section">
+              <h3 className="settings-section__title">Tracing Filters</h3>
+              <p className="settings-section__description">
+                Routes checked below are suppressed from OTel traces. Uncheck to debug those paths.
+              </p>
+              {KNOWN_FILTERS.map(({ route, label }) => {
+                const active = (settings.telemetry.trace_filters ?? []).includes(route)
+                return (
+                  <label key={route} className="settings-field settings-field--checkbox" data-testid={`trace-filter-${route.replace(/\//g, '-').replace(/^-/, '')}`}>
+                    <input
+                      type="checkbox"
+                      checked={active}
+                      onChange={e => handleTraceFilterToggle(route, e.target.checked)}
+                      disabled={status === 'saving'}
+                    />
+                    <span className="settings-field__label">{label}</span>
+                  </label>
+                )
+              })}
             </section>
 
             {/* MCP Key */}
