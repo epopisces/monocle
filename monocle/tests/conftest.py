@@ -12,6 +12,9 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# Disable rate limiting for tests (must be set before app import)
+os.environ.setdefault("MONOCLE_DISABLE_RATE_LIMIT", "1")
+
 from monocle.models import Note, NoteMetadata
 
 

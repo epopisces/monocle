@@ -37,7 +37,7 @@ const mockSettings = {
     stt_key: null,
     embed_dimensions: null,
     transcribe_backend: 'subprocess',
-    transcribe_url: null,
+    transcribe_url: 'http://localhost:9000',
     ollama_base_url: 'http://localhost:11434',
     foundry_local_base_url: 'http://localhost:5272',
     models: [

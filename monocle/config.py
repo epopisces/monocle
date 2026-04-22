@@ -129,36 +129,125 @@ class AIConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_model_keys_exist(self) -> "AIConfig":
-        """Ensure all key references resolve to entries in models."""
-        keys = {m.key for m in self.models}
-        if self.chat_model_key not in keys:
+        """Ensure all key references resolve to entries in models, with correct roles.
+
+        Validates:
+        1. All model keys are unique (no duplicates in models list)
+        2. chat_model_key references entry with role='chat'
+        3. embed_model_key references entry with role='embed'
+        4. stt_key (if set) references entry with role='stt'
+        """
+        # Check for duplicate keys
+        keys = [m.key for m in self.models]
+        unique_keys = set(keys)
+        if len(keys) != len(unique_keys):
+            duplicates = [k for k in unique_keys if keys.count(k) > 1]
+            raise ValueError(
+                f"ai.models contains duplicate keys: {duplicates}. "
+                f"All keys must be unique."
+            )
+
+        # Build a dict for role lookup
+        key_to_model = {m.key: m for m in self.models}
+
+        # Validate chat_model_key
+        if self.chat_model_key not in key_to_model:
             raise ValueError(
                 f"ai.chat_model_key {self.chat_model_key!r} references a key not in ai.models. "
-                f"Available keys: {sorted(keys)}"
+                f"Available keys: {sorted(unique_keys)}"
             )
-        if self.embed_model_key not in keys:
+        chat_model = key_to_model[self.chat_model_key]
+        if chat_model.role != "chat":
+            raise ValueError(
+                f"ai.chat_model_key {self.chat_model_key!r} points to model with role={chat_model.role!r}, "
+                f"but role='chat' is required. "
+                f"Model: {chat_model.model_dump()}"
+            )
+
+        # Validate embed_model_key
+        if self.embed_model_key not in key_to_model:
             raise ValueError(
                 f"ai.embed_model_key {self.embed_model_key!r} references a key not in ai.models. "
-                f"Available keys: {sorted(keys)}"
+                f"Available keys: {sorted(unique_keys)}"
             )
-        if self.stt_key and self.stt_key not in keys:
+        embed_model = key_to_model[self.embed_model_key]
+        if embed_model.role != "embed":
             raise ValueError(
-                f"ai.stt_key {self.stt_key!r} references a key not in ai.models. "
-                f"Available keys: {sorted(keys)}"
+                f"ai.embed_model_key {self.embed_model_key!r} points to model with role={embed_model.role!r}, "
+                f"but role='embed' is required. "
+                f"Model: {embed_model.model_dump()}"
             )
+
+        # Validate stt_key (if set)
+        if self.stt_key:
+            if self.stt_key not in key_to_model:
+                raise ValueError(
+                    f"ai.stt_key {self.stt_key!r} references a key not in ai.models. "
+                    f"Available keys: {sorted(unique_keys)}"
+                )
+            stt_model = key_to_model[self.stt_key]
+            if stt_model.role != "stt":
+                raise ValueError(
+                    f"ai.stt_key {self.stt_key!r} points to model with role={stt_model.role!r}, "
+                    f"but role='stt' is required. "
+                    f"Model: {stt_model.model_dump()}"
+                )
+
         return self
 
     @model_validator(mode="after")
     def validate_transcribe_backend(self) -> "AIConfig":
-        """Reject native transcription when the effective STT provider is Ollama."""
-        stt = self.get_stt_model()
-        effective_provider = stt.provider if stt else self.get_chat_model().provider
-        if effective_provider == "ollama" and self.transcribe_backend == "native":
-            raise ValueError(
-                "ai.transcribe_backend='native' is not supported with provider='ollama'. "
-                "Ollama has no built-in transcription API. "
-                "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess' in config.yaml."
-            )
+        """Validate transcribe_backend is compatible with the effective STT provider.
+
+        Ensures that:
+        1. When transcribe_backend='native', the STT provider supports native transcription
+           (i.e., not Ollama)
+        2. When stt_key is set to a different provider than chat_model_key, the config
+           is compatible with provider construction (either transcribe_backend is not 'native',
+           or stt provider has native support like Azure/Foundry)
+
+        Rationale:
+        - get_provider() only builds chat and embed providers; it ignores stt_key
+        - When transcribe_backend='native', providers try to use their own transcription API
+        - Ollama has no transcription API, so native transcription will fail at runtime
+        - If stt_key points to a different provider (e.g., Azure), it won't be used in
+          provider construction, making the config inconsistent
+        """
+        stt_entry = self.get_stt_model()
+        chat_entry = self.get_chat_model()
+
+        # Determine which provider will actually be used for transcription
+        # (get_provider() only looks at chat/embed, not stt_key for native transcription)
+        effective_transcribe_provider = (
+            stt_entry.provider if stt_entry else chat_entry.provider
+        )
+
+        # Check 1: native transcription requires a provider that supports it
+        if self.transcribe_backend == "native":
+            if effective_transcribe_provider == "ollama":
+                raise ValueError(
+                    "ai.transcribe_backend='native' is not supported with Ollama. "
+                    "Ollama has no built-in transcription API. "
+                    "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess', "
+                    "or use a provider with native transcription support (Azure/Foundry)."
+                )
+
+        # Check 2: stt_key on different provider than chat requires non-native backend
+        # Rationale: get_provider() builds chat provider, not stt provider.
+        # So if stt_key is on a different backend, it won't be used in native mode.
+        if stt_entry and stt_entry.provider != chat_entry.provider:
+            if self.transcribe_backend == "native":
+                raise ValueError(
+                    f"ai.transcribe_backend='native' with sst_key on a different provider "
+                    f"is not supported. "
+                    f"sst_key points to {stt_entry.provider!r}, "
+                    f"but chat_model_key points to {chat_entry.provider!r}. "
+                    f"get_provider() will construct the chat provider, not the sst provider. "
+                    f"Either: "
+                    f"1. Set sst_key to a model on the same provider as chat_model_key, or "
+                    f"2. Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess'."
+                )
+
         return self
 
 
