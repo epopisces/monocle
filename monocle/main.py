@@ -96,7 +96,7 @@ def get_settings() -> Settings:
 async def lifespan(app: FastAPI):
     """Startup and shutdown hooks for the unified process."""
     cfg = get_settings()
-    configure_telemetry(cfg)
+    route_filter_processor = configure_telemetry(cfg)
     logger.info("[API] Monocle starting — provider=%s port=%d", cfg.ai.provider, cfg.server.port)
 
     # Determine if this process is a capture-only (API-only) server.
@@ -129,6 +129,7 @@ async def lifespan(app: FastAPI):
     app.state.vault = vault
     app.state.index = index
     app.state.settings = cfg
+    app.state.route_filter_processor = route_filter_processor
     # Lazy pending-review count cache; invalidated on any vault write.
     # review_count endpoint reads this before falling back to a full scan.
     app.state._review_pending_count = None

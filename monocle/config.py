@@ -24,52 +24,230 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class ModelEntry(BaseModel):
+    """A single model entry in the ai.models registry.
+
+    Each entry describes one model available to the application.  The *key*
+    is the short unique identifier used in ``chat_model_key`` / ``embed_model_key``
+    / ``stt_key``; *name* is the actual model name forwarded to the provider
+    API; *role* describes the model's intended use; *provider* says which
+    backend hosts it; *base_url* optionally overrides the provider-level URL.
+    """
+
+    key: str
+    name: str
+    role: Literal["chat", "embed", "stt"]
+    provider: Literal["ollama", "foundry_local", "azure"]
+    base_url: str | None = None
+
+
+def _default_models() -> list[ModelEntry]:
+    return [
+        ModelEntry(key="llama3.2", name="llama3.2", role="chat", provider="ollama"),
+        ModelEntry(key="nomic-embed", name="nomic-embed-text", role="embed", provider="ollama"),
+    ]
+
+
 class AIConfig(BaseModel):
-    provider: Literal["ollama", "foundry_local", "azure"] = "ollama"
-    embed_model: str = "nomic-embed-text"
+    # Active model selection keys — reference entries in the models list.
+    chat_model_key: str = "llama3.2"
+    embed_model_key: str = "nomic-embed"
+    stt_key: str | None = None  # optional; None = fall back to transcribe_backend
+
     embed_dimensions: int | None = None  # None = auto-detect from first embedding
-    chat_model: str = "llama3.2"
-    transcribe_model: str = "whisper"
+
     # Transcription back-end — pluggable at config time:
-    #   "native"      providers with built-in transcription (e.g. Foundry, Azure) use their
-    #                 own API. Ollama does not support "native" and requires an explicit
-    #                 backend like "whisper_cpp" or "subprocess".
-    #   "whisper_cpp" all providers delegate to a local whisper.cpp HTTP server.
-    #   "subprocess"  all providers call the openai-whisper CLI as a subprocess.
-    transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] = "native"
+    #   "native"      providers with built-in transcription (Foundry, Azure) use their own API.
+    #   "whisper_cpp" delegates to a local whisper.cpp HTTP server.
+    #   "subprocess"  calls the openai-whisper CLI as a subprocess.
+    transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] = "subprocess"
     transcribe_url: str = "http://localhost:9000"  # whisper_cpp server URL
+
+    # Provider-level connection settings (used as defaults when a model entry has no base_url).
     ollama_base_url: str = "http://localhost:11434"
     foundry_local_base_url: str = "http://localhost:5272"
 
-    @model_validator(mode="before")
-    @classmethod
-    def default_transcribe_backend_for_ollama(cls, data: object) -> object:
-        """Set transcribe_backend to 'subprocess' when provider is 'ollama' and
-        transcribe_backend was not explicitly supplied.
+    # Model registry — all models known to this installation.
+    models: list[ModelEntry] = Field(default_factory=_default_models)
 
-        This prevents the default config (ollama + native) from being silently
-        invalid.  Users who explicitly set transcribe_backend='native' with
-        provider='ollama' will get a clear error from the after-validator below.
+    # ------------------------------------------------------------------
+    # Model-registry helpers
+    # ------------------------------------------------------------------
+
+    def get_model(self, key: str) -> ModelEntry:
+        """Return the ``ModelEntry`` with the given *key*, or raise ``ValueError``."""
+        for m in self.models:
+            if m.key == key:
+                return m
+        raise ValueError(f"Model key {key!r} not found in ai.models")
+
+    def get_chat_model(self) -> ModelEntry:
+        """Return the active chat ``ModelEntry``."""
+        return self.get_model(self.chat_model_key)
+
+    def get_embed_model(self) -> ModelEntry:
+        """Return the active embed ``ModelEntry``."""
+        return self.get_model(self.embed_model_key)
+
+    def get_stt_model(self) -> ModelEntry | None:
+        """Return the active STT ``ModelEntry``, or ``None`` if not configured."""
+        if self.stt_key:
+            return self.get_model(self.stt_key)
+        return None
+
+    # ------------------------------------------------------------------
+    # Backward-compatible computed properties
+    # These let existing code (cli.py, health.py, index/chroma.py, etc.)
+    # continue reading settings.ai.provider / .chat_model / .embed_model
+    # without changes, while model_dump() returns the new schema.
+    # ------------------------------------------------------------------
+
+    @property
+    def provider(self) -> str:
+        """Provider of the active chat model (backward compat)."""
+        return self.get_chat_model().provider
+
+    @property
+    def chat_model(self) -> str:
+        """Name of the active chat model (backward compat)."""
+        return self.get_chat_model().name
+
+    @property
+    def embed_model(self) -> str:
+        """Name of the active embed model (backward compat)."""
+        return self.get_embed_model().name
+
+    @property
+    def transcribe_model(self) -> str:
+        """Name of the active STT model, falling back to 'whisper' (backward compat)."""
+        stt = self.get_stt_model()
+        return stt.name if stt else "whisper"
+
+    # ------------------------------------------------------------------
+    # Validators
+    # ------------------------------------------------------------------
+
+    @model_validator(mode="after")
+    def validate_model_keys_exist(self) -> "AIConfig":
+        """Ensure all key references resolve to entries in models, with correct roles.
+
+        Validates:
+        1. All model keys are unique (no duplicates in models list)
+        2. chat_model_key references entry with role='chat'
+        3. embed_model_key references entry with role='embed'
+        4. stt_key (if set) references entry with role='stt'
         """
-        if isinstance(data, dict):
-            if data.get("provider", "ollama") == "ollama" and "transcribe_backend" not in data:
-                data = {**data, "transcribe_backend": "subprocess"}
-        return data
+        # Check for duplicate keys
+        keys = [m.key for m in self.models]
+        unique_keys = set(keys)
+        if len(keys) != len(unique_keys):
+            duplicates = [k for k in unique_keys if keys.count(k) > 1]
+            raise ValueError(
+                f"ai.models contains duplicate keys: {duplicates}. "
+                f"All keys must be unique."
+            )
+
+        # Build a dict for role lookup
+        key_to_model = {m.key: m for m in self.models}
+
+        # Validate chat_model_key
+        if self.chat_model_key not in key_to_model:
+            raise ValueError(
+                f"ai.chat_model_key {self.chat_model_key!r} references a key not in ai.models. "
+                f"Available keys: {sorted(unique_keys)}"
+            )
+        chat_model = key_to_model[self.chat_model_key]
+        if chat_model.role != "chat":
+            raise ValueError(
+                f"ai.chat_model_key {self.chat_model_key!r} points to model with role={chat_model.role!r}, "
+                f"but role='chat' is required. "
+                f"Model: {chat_model.model_dump()}"
+            )
+
+        # Validate embed_model_key
+        if self.embed_model_key not in key_to_model:
+            raise ValueError(
+                f"ai.embed_model_key {self.embed_model_key!r} references a key not in ai.models. "
+                f"Available keys: {sorted(unique_keys)}"
+            )
+        embed_model = key_to_model[self.embed_model_key]
+        if embed_model.role != "embed":
+            raise ValueError(
+                f"ai.embed_model_key {self.embed_model_key!r} points to model with role={embed_model.role!r}, "
+                f"but role='embed' is required. "
+                f"Model: {embed_model.model_dump()}"
+            )
+
+        # Validate stt_key (if set)
+        if self.stt_key:
+            if self.stt_key not in key_to_model:
+                raise ValueError(
+                    f"ai.stt_key {self.stt_key!r} references a key not in ai.models. "
+                    f"Available keys: {sorted(unique_keys)}"
+                )
+            stt_model = key_to_model[self.stt_key]
+            if stt_model.role != "stt":
+                raise ValueError(
+                    f"ai.stt_key {self.stt_key!r} points to model with role={stt_model.role!r}, "
+                    f"but role='stt' is required. "
+                    f"Model: {stt_model.model_dump()}"
+                )
+
+        return self
 
     @model_validator(mode="after")
     def validate_transcribe_backend(self) -> "AIConfig":
-        """Reject native transcription when provider is Ollama.
+        """Validate transcribe_backend is compatible with the effective STT provider.
 
-        Ollama has no built-in audio-transcription API.  Catching this at
-        config-load time gives a clear error rather than a cryptic RuntimeError
-        at the first transcription call.
+        Ensures that:
+        1. When transcribe_backend='native', the STT provider supports native transcription
+           (i.e., not Ollama)
+        2. When stt_key is set to a different provider than chat_model_key, the config
+           is compatible with provider construction (either transcribe_backend is not 'native',
+           or stt provider has native support like Azure/Foundry)
+
+        Rationale:
+        - get_provider() only builds chat and embed providers; it ignores stt_key
+        - When transcribe_backend='native', providers try to use their own transcription API
+        - Ollama has no transcription API, so native transcription will fail at runtime
+        - If stt_key points to a different provider (e.g., Azure), it won't be used in
+          provider construction, making the config inconsistent
         """
-        if self.provider == "ollama" and self.transcribe_backend == "native":
-            raise ValueError(
-                "ai.transcribe_backend='native' is not supported with ai.provider='ollama'. "
-                "Ollama has no built-in transcription API. "
-                "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess' in config.yaml."
-            )
+        stt_entry = self.get_stt_model()
+        chat_entry = self.get_chat_model()
+
+        # Determine which provider will actually be used for transcription
+        # (get_provider() only looks at chat/embed, not stt_key for native transcription)
+        effective_transcribe_provider = (
+            stt_entry.provider if stt_entry else chat_entry.provider
+        )
+
+        # Check 1: native transcription requires a provider that supports it
+        if self.transcribe_backend == "native":
+            if effective_transcribe_provider == "ollama":
+                raise ValueError(
+                    "ai.transcribe_backend='native' is not supported with Ollama. "
+                    "Ollama has no built-in transcription API. "
+                    "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess', "
+                    "or use a provider with native transcription support (Azure/Foundry)."
+                )
+
+        # Check 2: stt_key on different provider than chat requires non-native backend
+        # Rationale: get_provider() builds chat provider, not stt provider.
+        # So if stt_key is on a different backend, it won't be used in native mode.
+        if stt_entry and stt_entry.provider != chat_entry.provider:
+            if self.transcribe_backend == "native":
+                raise ValueError(
+                    f"ai.transcribe_backend='native' with sst_key on a different provider "
+                    f"is not supported. "
+                    f"sst_key points to {stt_entry.provider!r}, "
+                    f"but chat_model_key points to {chat_entry.provider!r}. "
+                    f"get_provider() will construct the chat provider, not the sst provider. "
+                    f"Either: "
+                    f"1. Set sst_key to a model on the same provider as chat_model_key, or "
+                    f"2. Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess'."
+                )
+
         return self
 
 
@@ -142,6 +320,9 @@ class TelemetryConfig(BaseModel):
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
     log_format: Literal["text", "json"] = "text"
     enable_sensitive_data: bool = True
+    # Route prefixes whose spans are dropped before export.
+    # Useful for suppressing noisy polling routes (e.g. /api/review/count).
+    trace_filters: list[str] = Field(default_factory=lambda: ["/api/health"])
 
 
 class UIConfig(BaseModel):

@@ -1210,7 +1210,7 @@ class TestFetchUrlsPreFetch:
         assert len(error_events) == 1
         assert error_events[0]["data"]["name"] == "get_graph"
         assert error_events[0]["data"]["call_id"] == "err-1"
-        assert "Graph builder" in error_events[0]["data"]["message"]
+        assert "Graph builder" in error_events[0]["data"]["error"]
 
     def test_tool_error_stream_continues_to_done(self, api_client):
         """A tool_error event does not abort the stream; done is still emitted with status=success."""

@@ -4,6 +4,20 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-22
+
+### Claude Sonnet 4.6
+- **Made Topbar model chips clickable with model name display and selector dropdown**
+  - `Topbar.tsx`: added `openModelSelector`/`handleModelSelect` handlers; converted badge `<span>` to `<button>`; chips now show `{icon} {role}: {name}` (e.g., `✓ chat: llama3.2`); clicking opens a dropdown listing all models of that role fetched from `GET /api/settings`; selecting a model calls `PATCH /api/settings` and refreshes model status; click-outside closes dropdown
+  - `Topbar.css`: added `.topbar-model-badge--clickable`, `.topbar-model-selector-wrap`, `.topbar-model-dropdown` and child element styles
+  - 437 frontend tests passing, no regressions
+- **Completed AI config schema refactoring** (continued from prior session)
+  - Fixed `monocle/tests/test_cli.py` `TestPullModels` tests that directly set `settings.ai.provider =` (now `@property`): for non-ollama test, build `AIConfig` with `ModelEntry(provider="foundry_local")`; for ollama test, removed now-redundant assignment
+  - Updated `frontend/src/SettingsModal.test.tsx`: replaced `mockSettings.ai` with new schema (`chat_model_key`, `embed_model_key`, `models[]`); updated all `ai-provider-select` testids to `chat-model-select`; updated all assertions for new patchSettings call signature
+  - Fixed `monocle/tests/test_ai.py` `TestAIConfigValidation` / `TestGetTranscriptionProvider` tests that passed `provider="foundry_local"` — added `_FL_AI_NATIVE` constant with proper `ModelEntry` fixture
+  - Fixed pre-existing bug in `test_agents.py`: `error_events[0]["data"]["message"]` → `["error"]` (key name mismatch with chat router SSE payload)
+  - Final state: 903 backend tests passing, 437 frontend tests passing
+
 ## 2026-04-21
 
 ### Claude Haiku 4.5

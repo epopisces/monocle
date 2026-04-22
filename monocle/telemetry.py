@@ -32,23 +32,28 @@ _meter = None
 _configured = False
 
 
-class _HealthCheckFilterSpanProcessor:
-    """Span processor that filters out /api/health traces before export.
-    
-    Wraps the real BatchSpanProcessor to drop spans where http.route == "/api/health".
-    This reduces trace noise while keeping application traces intact.
+class _RouteFilterSpanProcessor:
+    """Span processor that drops spans for configured route prefixes before export.
+
+    The filter list is mutable at runtime — call ``set_filters()`` to update which
+    routes are suppressed without restarting the server.  Useful for hiding noisy
+    polling endpoints (e.g. ``/api/review/count``) while troubleshooting.
     """
 
-    def __init__(self, wrapped_processor: Any) -> None:
+    def __init__(self, wrapped_processor: Any, initial_filters: list[str]) -> None:
         self.wrapped_processor = wrapped_processor
+        self._filters: list[str] = list(initial_filters)
+
+    def set_filters(self, filters: list[str]) -> None:
+        """Replace the active filter list (thread-safe write; GIL is sufficient)."""
+        self._filters = list(filters)
 
     def on_start(self, span: Any, parent_context: Any = None) -> None:
         self.wrapped_processor.on_start(span, parent_context)
 
     def on_end(self, span: Any) -> None:
-        # Filter: skip health check spans (including /api/health/* endpoints like /api/health/models)
         route = span.attributes.get("http.route", "")
-        if route.startswith("/api/health"):
+        if any(route.startswith(f) for f in self._filters):
             return
         self.wrapped_processor.on_end(span)
 
@@ -64,17 +69,23 @@ class _HealthCheckFilterSpanProcessor:
         return self.wrapped_processor.force_flush(timeout_millis)
 
 
-def configure_telemetry(settings: "Settings") -> None:
+# Keep old name as an alias for any external references
+_HealthCheckFilterSpanProcessor = _RouteFilterSpanProcessor
+
+
+def configure_telemetry(settings: "Settings") -> "_RouteFilterSpanProcessor | None":
     """Wire up TracerProvider, MeterProvider, and root-logger handler.
 
-    No-ops gracefully if telemetry.enabled is False.
+    Returns the ``_RouteFilterSpanProcessor`` instance so callers can update
+    the filter list at runtime (e.g. from the settings PATCH endpoint).
+    Returns ``None`` when telemetry is disabled or setup fails.
     """
     global _tracer, _meter, _configured
 
     if not settings.telemetry.enabled:
         logger.info("Telemetry disabled — using no-op tracer/meter")
         _configured = True
-        return
+        return None
 
     try:
         from opentelemetry import trace, metrics
@@ -103,7 +114,10 @@ def configure_telemetry(settings: "Settings") -> None:
 
         tracer_provider = TracerProvider(resource=resource)
         batch_processor = BatchSpanProcessor(span_exporter)
-        filtered_processor = _HealthCheckFilterSpanProcessor(batch_processor)
+        filtered_processor = _RouteFilterSpanProcessor(
+            batch_processor,
+            initial_filters=list(settings.telemetry.trace_filters),
+        )
         tracer_provider.add_span_processor(filtered_processor)
         trace.set_tracer_provider(tracer_provider)
 
@@ -169,14 +183,17 @@ def configure_telemetry(settings: "Settings") -> None:
 
         logging.getLogger().setLevel(getattr(logging, settings.telemetry.log_level))
         logger.info(
-            "Telemetry configured — OTLP endpoint=%s transport=%s",
+            "Telemetry configured — OTLP endpoint=%s transport=%s filters=%s",
             settings.telemetry.otlp_endpoint,
             settings.telemetry.otlp_transport,
+            settings.telemetry.trace_filters,
         )
+        return filtered_processor
 
     except Exception as exc:  # noqa: BLE001
         logger.warning("Telemetry setup failed (continuing without OTel): %s", exc)
         _configured = True
+        return None
 
 
 def get_tracer(name: str = "monocle"):

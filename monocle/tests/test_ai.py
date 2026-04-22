@@ -29,12 +29,37 @@ from monocle.models import NoteMetadata
 # ---------------------------------------------------------------------------
 
 
+_DEFAULT_AI_CFG: dict = {
+    "chat_model_key": "llama3.2",
+    "embed_model_key": "nomic-embed",
+    "models": [
+        {"key": "llama3.2", "name": "llama3.2", "role": "chat", "provider": "ollama"},
+        {"key": "nomic-embed", "name": "nomic-embed-text", "role": "embed", "provider": "ollama"},
+    ],
+}
+
+# AI config where the chat model uses foundry_local (supports native transcription)
+_FL_AI_NATIVE: dict = {
+    "chat_model_key": "fl-chat",
+    "embed_model_key": "nomic-embed",
+    "models": [
+        {"key": "fl-chat", "name": "phi4", "role": "chat", "provider": "foundry_local"},
+        {"key": "nomic-embed", "name": "nomic-embed-text", "role": "embed", "provider": "ollama"},
+    ],
+    "transcribe_backend": "native",
+}
+
+
 def _make_settings(**overrides) -> Settings:
     """Return a minimal Settings object (no config.yaml required)."""
     defaults: dict = {
-        "ai": {"provider": "ollama"},
+        "ai": dict(_DEFAULT_AI_CFG),
         "vault": {"path": "/tmp/vault", "watch": False},
     }
+    # Deep-merge overrides so callers can pass ai sub-keys
+    if "ai" in overrides:
+        merged_ai = {**dict(_DEFAULT_AI_CFG), **overrides.pop("ai")}
+        defaults["ai"] = merged_ai
     defaults.update(overrides)
     with patch("monocle.config._find_config_file", return_value=__import__("pathlib").Path("/nonexistent")):
         with patch("monocle.config._load_yaml", return_value=defaults):
@@ -480,7 +505,15 @@ class TestAzureOpenAIProvider:
 class TestGetProviderFactory:
     @staticmethod
     def _settings(provider: str, extra: dict | None = None) -> Settings:
-        ai_cfg: dict = {"provider": provider}
+        models = [
+            {"key": "chat-model", "name": "llama3.2", "role": "chat", "provider": provider},
+            {"key": "embed-model", "name": "nomic-embed-text", "role": "embed", "provider": provider},
+        ]
+        ai_cfg: dict = {
+            "chat_model_key": "chat-model",
+            "embed_model_key": "embed-model",
+            "models": models,
+        }
         if extra:
             ai_cfg.update(extra)
         cfg = {"ai": ai_cfg, "vault": {"path": "/tmp/vault", "watch": False}}
@@ -523,9 +556,242 @@ class TestGetProviderFactory:
         from monocle.ai import get_provider
 
         settings = self._settings("ollama")
-        settings.ai.provider = "nonexistent"  # type: ignore[assignment]
-        with pytest.raises(ValueError, match="Unknown ai.provider"):
+        # Directly mutate the ModelEntry provider to an invalid value (bypasses Pydantic)
+        settings.ai.get_chat_model().provider = "nonexistent"  # type: ignore[assignment]
+        with pytest.raises(ValueError, match="Unknown provider"):
             get_provider(settings)
+
+
+#endregion
+
+# ---------------------------------------------------------------------------
+#region #*   CompositeAIProvider tests
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeAIProvider:
+    """Tests for CompositeAIProvider deduplication of model status by role."""
+
+    def _make_composite(
+        self,
+        chat_status_models: list,
+        embed_status_models: list,
+        chat_reachable: bool = True,
+        embed_reachable: bool = True,
+    ):
+        """Helper to construct a CompositeAIProvider with mocked underlying providers."""
+        from monocle.ai.composite import CompositeAIProvider
+        from monocle.models import ProviderModelsResponse
+
+        # Create mock providers
+        chat_provider = AsyncMock()
+        embed_provider = AsyncMock()
+
+        # Set up the mock return values
+        chat_provider.get_model_status = AsyncMock(
+            return_value=ProviderModelsResponse(
+                provider="ollama",
+                provider_reachable=chat_reachable,
+                models=chat_status_models,
+            )
+        )
+        embed_provider.get_model_status = AsyncMock(
+            return_value=ProviderModelsResponse(
+                provider="foundry_local",
+                provider_reachable=embed_reachable,
+                models=embed_status_models,
+            )
+        )
+        chat_provider._provider_name = "ollama"
+        embed_provider._provider_name = "foundry_local"
+
+        return CompositeAIProvider(chat_provider=chat_provider, embed_provider=embed_provider)
+
+    @pytest.mark.asyncio
+    async def test_deduplicates_chat_role_from_chat_provider(self):
+        """The composite should return exactly one chat model (from chat_provider)."""
+        from monocle.models import ModelStatus
+
+        chat_models = [
+            ModelStatus(name="llama3.2", role="chat", available=True, loaded=True),
+        ]
+        embed_models = [
+            ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        # Should have exactly one model with role='chat'
+        chat_entries = [m for m in result.models if m.role == "chat"]
+        assert len(chat_entries) == 1
+        assert chat_entries[0].name == "llama3.2"
+
+    @pytest.mark.asyncio
+    async def test_deduplicates_embed_role_from_embed_provider(self):
+        """The composite should return exactly one embed model (from embed_provider)."""
+        from monocle.models import ModelStatus
+
+        chat_models = [
+            ModelStatus(name="llama3.2", role="chat", available=True, loaded=True),
+        ]
+        embed_models = [
+            ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        # Should have exactly one model with role='embed'
+        embed_entries = [m for m in result.models if m.role == "embed"]
+        assert len(embed_entries) == 1
+        assert embed_entries[0].name == "nomic-embed-text"
+
+    @pytest.mark.asyncio
+    async def test_prefers_chat_provider_for_transcribe(self):
+        """When both providers report transcribe, prefer chat_provider."""
+        from monocle.models import ModelStatus
+
+        # Both providers have transcribe models; chat should win
+        chat_models = [
+            ModelStatus(name="llama3.2", role="chat", available=True, loaded=True),
+            ModelStatus(name="whisper-chat", role="transcribe", available=True, loaded=False),
+        ]
+        embed_models = [
+            ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False),
+            ModelStatus(name="whisper-embed", role="transcribe", available=True, loaded=False),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        # Should have exactly one transcribe model from chat_provider
+        transcribe_entries = [m for m in result.models if m.role == "transcribe"]
+        assert len(transcribe_entries) == 1
+        assert transcribe_entries[0].name == "whisper-chat"
+
+    @pytest.mark.asyncio
+    async def test_falls_back_to_embed_provider_for_transcribe(self):
+        """When only embed_provider has transcribe, use it."""
+        from monocle.models import ModelStatus
+
+        chat_models = [
+            ModelStatus(name="llama3.2", role="chat", available=True, loaded=True),
+        ]
+        embed_models = [
+            ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False),
+            ModelStatus(name="whisper-embed", role="transcribe", available=True, loaded=False),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        # Should have exactly one transcribe model from embed_provider
+        transcribe_entries = [m for m in result.models if m.role == "transcribe"]
+        assert len(transcribe_entries) == 1
+        assert transcribe_entries[0].name == "whisper-embed"
+
+    @pytest.mark.asyncio
+    async def test_no_transcribe_when_neither_provider_has_it(self):
+        """When neither provider supports transcribe, omit it from the result."""
+        from monocle.models import ModelStatus
+
+        chat_models = [
+            ModelStatus(name="llama3.2", role="chat", available=True, loaded=True),
+        ]
+        embed_models = [
+            ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        # Should have no transcribe model
+        transcribe_entries = [m for m in result.models if m.role == "transcribe"]
+        assert len(transcribe_entries) == 0
+
+    @pytest.mark.asyncio
+    async def test_provider_name_concatenated(self):
+        """The provider name should be concatenated as 'chat+embed'."""
+        from monocle.models import ModelStatus
+
+        chat_models = [
+            ModelStatus(name="llama3.2", role="chat", available=True, loaded=True),
+        ]
+        embed_models = [
+            ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        assert result.provider == "ollama+foundry_local"
+
+    @pytest.mark.asyncio
+    async def test_provider_reachable_or_logic(self):
+        """provider_reachable should be True if either provider is reachable."""
+        from monocle.models import ModelStatus
+
+        chat_models = [ModelStatus(name="llama3.2", role="chat", available=True, loaded=True)]
+        embed_models = [ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False)]
+
+        # Case 1: both reachable
+        composite = self._make_composite(chat_models, embed_models, chat_reachable=True, embed_reachable=True)
+        result = await composite.get_model_status()
+        assert result.provider_reachable is True
+
+        # Case 2: only chat reachable
+        composite = self._make_composite(chat_models, embed_models, chat_reachable=True, embed_reachable=False)
+        result = await composite.get_model_status()
+        assert result.provider_reachable is True
+
+        # Case 3: only embed reachable
+        composite = self._make_composite(chat_models, embed_models, chat_reachable=False, embed_reachable=True)
+        result = await composite.get_model_status()
+        assert result.provider_reachable is True
+
+        # Case 4: neither reachable
+        composite = self._make_composite(chat_models, embed_models, chat_reachable=False, embed_reachable=False)
+        result = await composite.get_model_status()
+        assert result.provider_reachable is False
+
+    @pytest.mark.asyncio
+    async def test_model_order_preserved_chat_embed_transcribe(self):
+        """Models should be returned in a consistent order: chat, embed, transcribe."""
+        from monocle.models import ModelStatus
+
+        chat_models = [
+            ModelStatus(name="phi4", role="chat", available=True, loaded=True),
+            ModelStatus(name="whisper", role="transcribe", available=True, loaded=False),
+        ]
+        embed_models = [
+            ModelStatus(name="text-embedding", role="embed", available=True, loaded=True),
+        ]
+
+        composite = self._make_composite(chat_models, embed_models)
+        result = await composite.get_model_status()
+
+        # Check order
+        roles = [m.role for m in result.models]
+        assert roles == ["chat", "embed", "transcribe"]
+
+    @pytest.mark.asyncio
+    async def test_multiple_calls_consistent_results(self):
+        """Multiple calls to get_model_status should return consistent results."""
+        from monocle.models import ModelStatus
+
+        chat_models = [ModelStatus(name="llama3.2", role="chat", available=True, loaded=True)]
+        embed_models = [ModelStatus(name="nomic-embed-text", role="embed", available=True, loaded=False)]
+
+        composite = self._make_composite(chat_models, embed_models)
+
+        result1 = await composite.get_model_status()
+        result2 = await composite.get_model_status()
+
+        assert len(result1.models) == len(result2.models)
+        for m1, m2 in zip(result1.models, result2.models):
+            assert m1.role == m2.role
+            assert m1.name == m2.name
 
 
 #endregion
@@ -1072,7 +1338,7 @@ class TestAIConfigValidation:
         import pytest
         from pydantic import ValidationError
 
-        with pytest.raises(ValidationError, match="native.*ollama|ollama.*native"):
+        with pytest.raises(ValidationError, match="(?i:native.*ollama|ollama.*native)"):
             _make_settings(ai={"provider": "ollama", "transcribe_backend": "native"})
 
     def test_ollama_default_gets_subprocess(self):
@@ -1082,7 +1348,7 @@ class TestAIConfigValidation:
 
     def test_foundry_local_native_valid(self):
         """provider=foundry_local with transcribe_backend=native is allowed."""
-        settings = _make_settings(ai={"provider": "foundry_local", "transcribe_backend": "native"})
+        settings = _make_settings(ai=_FL_AI_NATIVE)
         assert settings.ai.transcribe_backend == "native"
 
     def test_ollama_whisper_cpp_valid(self):
@@ -1101,7 +1367,7 @@ class TestGetTranscriptionProvider:
         from monocle.ai.transcription import get_transcription_provider
 
         # "native" is valid with foundry_local / azure (they have a built-in endpoint).
-        settings = _make_settings(ai={"provider": "foundry_local", "transcribe_backend": "native"})
+        settings = _make_settings(ai=_FL_AI_NATIVE)
         result = get_transcription_provider(settings)
         assert result is None
 
@@ -1137,9 +1403,7 @@ class TestGetTranscriptionProvider:
     def test_unknown_backend_raises(self):
         from monocle.ai.transcription import get_transcription_provider
 
-        settings = _make_settings(
-            ai={"provider": "foundry_local", "transcribe_backend": "native"}
-        )
+        settings = _make_settings(ai=_FL_AI_NATIVE)
         # Monkeypatch the backend value to an unknown string
         settings.ai.transcribe_backend = "invalid_backend"  # type: ignore[assignment]
         with pytest.raises(ValueError, match="invalid_backend"):

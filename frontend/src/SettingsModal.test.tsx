@@ -32,21 +32,26 @@ vi.mock('./hooks/useTheme', async (importOriginal) => {
 
 const mockSettings = {
   ai: {
-    provider: 'ollama',
-    model: 'llama3',
-    embed_model: 'nomic-embed-text',
+    chat_model_key: 'llama3.2',
+    embed_model_key: 'nomic-embed',
+    stt_key: null,
+    embed_dimensions: null,
     transcribe_backend: 'subprocess',
-    transcribe_url: null,
-    transcribe_model: 'whisper',
-    embed_dimensions: 1536,
-    base_url: null,
+    transcribe_url: 'http://localhost:9000',
+    ollama_base_url: 'http://localhost:11434',
+    foundry_local_base_url: 'http://localhost:5272',
+    models: [
+      { key: 'llama3.2', name: 'llama3.2', role: 'chat', provider: 'ollama', base_url: null },
+      { key: 'qwen3', name: 'qwen3:9b', role: 'chat', provider: 'ollama', base_url: null },
+      { key: 'nomic-embed', name: 'nomic-embed-text', role: 'embed', provider: 'ollama', base_url: null },
+    ],
   },
   vault: { path: '/vault', inbox_path: '/vault/inbox', templates_path: '/vault/.templates', watch: true, debounce_ms: 2000 },
   index: { chroma_persist_path: './data/chroma', collection_name: 'monocle' },
   agents: { weekly_summary_cron: '0 9 * * 1', reindex_cron: '0 2 * * *' },
   review: { queue_threshold: 70, auto_approve_threshold_pct: 90, confidence_weights: {} },
   server: { host: '127.0.0.1', port: 8000, dev_mode: false },
-  telemetry: { enabled: false, otlp_endpoint: '', log_level: 'INFO', log_format: 'text' },
+  telemetry: { enabled: false, otlp_endpoint: '', log_level: 'INFO', log_format: 'text', trace_filters: ['/api/health'] },
   ui: {},
   mcp_key_last4: 'ab12',
 } as const
@@ -94,22 +99,22 @@ describe('SettingsModal — loaded state', () => {
 
   it('renders settings data after load', async () => {
     renderModal()
-    const select = await screen.findByTestId('ai-provider-select')
-    expect(select).toHaveValue('ollama')
+    const select = await screen.findByTestId('chat-model-select')
+    expect(select).toHaveValue('llama3.2')
   })
 
   it('shows masked MCP key hint', async () => {
     renderModal()
-    await screen.findByTestId('ai-provider-select')
+    await screen.findByTestId('chat-model-select')
     expect(screen.getByTestId('mcp-key-hint')).toHaveTextContent('••••ab12')
   })
 
-  it('calls patchSettings when AI provider changes', async () => {
+  it('calls patchSettings when chat model changes', async () => {
     renderModal()
-    const select = await screen.findByTestId('ai-provider-select')
-    fireEvent.change(select, { target: { value: 'azure' } })
+    const select = await screen.findByTestId('chat-model-select')
+    fireEvent.change(select, { target: { value: 'qwen3' } })
     await waitFor(() =>
-      expect(patchSettings).toHaveBeenCalledWith({ ai: { provider: 'azure' } }),
+      expect(patchSettings).toHaveBeenCalledWith({ ai: { chat_model_key: 'qwen3' } }),
     )
   })
 
@@ -141,14 +146,14 @@ describe('SettingsModal — loaded state', () => {
 
   it('theme radio calls setTheme', async () => {
     renderModal()
-    await screen.findByTestId('ai-provider-select')
+    await screen.findByTestId('chat-model-select')
     fireEvent.click(screen.getByTestId('theme-radio-light'))
     expect(mockSetTheme).toHaveBeenCalledWith('light')
   })
 
   it('shows model status panel when model data loads', async () => {
     renderModal()
-    await screen.findByTestId('ai-provider-select')
+    await screen.findByTestId('chat-model-select')
     await waitFor(() => expect(screen.getByTestId('model-status-panel')).toBeInTheDocument())
     expect(screen.getByTestId('model-status-chat')).toBeInTheDocument()
     expect(screen.getByTestId('model-status-embed')).toBeInTheDocument()
@@ -156,7 +161,7 @@ describe('SettingsModal — loaded state', () => {
 
   it('shows badge "available" for chat model that is not loaded', async () => {
     renderModal()
-    await screen.findByTestId('ai-provider-select')
+    await screen.findByTestId('chat-model-select')
     await waitFor(() => {
       const chatRow = screen.getByTestId('model-status-chat')
       expect(chatRow).toHaveTextContent('available')
@@ -170,7 +175,7 @@ describe('SettingsModal — loaded state', () => {
       models: [],
     })
     renderModal()
-    await screen.findByTestId('ai-provider-select')
+    await screen.findByTestId('chat-model-select')
     await waitFor(() =>
       expect(screen.getByTestId('provider-unreachable')).toBeInTheDocument(),
     )
@@ -238,8 +243,8 @@ describe('SettingsModal — patchSettings rejection', () => {
   it('shows an inline error message when patchSettings rejects', async () => {
     vi.mocked(patchSettings).mockRejectedValueOnce(new Error('Save failed'))
     renderModal()
-    const select = await screen.findByTestId('ai-provider-select')
-    fireEvent.change(select, { target: { value: 'azure' } })
+    const select = await screen.findByTestId('chat-model-select')
+    fireEvent.change(select, { target: { value: 'qwen3' } })
     await waitFor(() =>
       expect(screen.getByTestId('settings-error')).toHaveTextContent(/save failed/i),
     )
@@ -248,16 +253,16 @@ describe('SettingsModal — patchSettings rejection', () => {
   it('clears the error when a subsequent save succeeds', async () => {
     vi.mocked(patchSettings)
       .mockRejectedValueOnce(new Error('Save failed'))
-      .mockResolvedValueOnce({ ...mockSettings, ai: { ...mockSettings.ai, provider: 'foundry_local' } })
+      .mockResolvedValueOnce({ ...mockSettings, ai: { ...mockSettings.ai, chat_model_key: 'qwen3' } })
     renderModal()
-    const select = await screen.findByTestId('ai-provider-select')
+    const select = await screen.findByTestId('chat-model-select')
 
     // First save — triggers error
-    fireEvent.change(select, { target: { value: 'azure' } })
+    fireEvent.change(select, { target: { value: 'qwen3' } })
     await waitFor(() => expect(screen.getByTestId('settings-error')).toBeInTheDocument())
 
     // Second save — should clear the error
-    fireEvent.change(select, { target: { value: 'foundry_local' } })
+    fireEvent.change(select, { target: { value: 'qwen3' } })
     await waitFor(() => expect(screen.queryByTestId('settings-error')).toBeNull())
   })
 })
@@ -291,5 +296,59 @@ describe('SettingsModal — MCP key rotation failure', () => {
 
     // Hint must still show the original masked key
     expect(screen.getByTestId('mcp-key-hint').textContent).toBe(hintBefore)
+  })
+})
+
+describe('SettingsModal — Tracing Filters', () => {
+  beforeEach(() => {
+    vi.mocked(getSettings).mockResolvedValue({ ...mockSettings })
+    vi.mocked(patchSettings).mockResolvedValue({ ...mockSettings })
+  })
+  afterEach(() => vi.restoreAllMocks())
+
+  it('renders tracing filter checkboxes', async () => {
+    renderModal()
+    await screen.findByTestId('chat-model-select')
+    expect(screen.getByTestId('trace-filter-api-health')).toBeInTheDocument()
+    expect(screen.getByTestId('trace-filter-api-review-count')).toBeInTheDocument()
+    expect(screen.getByTestId('trace-filter-api-ingest-failures')).toBeInTheDocument()
+  })
+
+  it('health check filter is checked by default (in mockSettings)', async () => {
+    renderModal()
+    await screen.findByTestId('chat-model-select')
+    const checkbox = screen.getByTestId('trace-filter-api-health').querySelector('input')
+    expect(checkbox).toBeChecked()
+  })
+
+  it('other filters are unchecked by default', async () => {
+    renderModal()
+    await screen.findByTestId('chat-model-select')
+    const reviewCheckbox = screen.getByTestId('trace-filter-api-review-count').querySelector('input')
+    expect(reviewCheckbox).not.toBeChecked()
+  })
+
+  it('toggles a filter on and calls patchSettings with updated list', async () => {
+    renderModal()
+    await screen.findByTestId('chat-model-select')
+    const reviewCheckbox = screen.getByTestId('trace-filter-api-review-count').querySelector('input')!
+    fireEvent.click(reviewCheckbox)
+    await waitFor(() =>
+      expect(patchSettings).toHaveBeenCalledWith({
+        telemetry: { trace_filters: ['/api/health', '/api/review/count'] },
+      }),
+    )
+  })
+
+  it('toggles a filter off and calls patchSettings with reduced list', async () => {
+    renderModal()
+    await screen.findByTestId('chat-model-select')
+    const healthCheckbox = screen.getByTestId('trace-filter-api-health').querySelector('input')!
+    fireEvent.click(healthCheckbox)
+    await waitFor(() =>
+      expect(patchSettings).toHaveBeenCalledWith({
+        telemetry: { trace_filters: [] },
+      }),
+    )
   })
 })

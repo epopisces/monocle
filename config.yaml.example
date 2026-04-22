@@ -8,12 +8,32 @@
 ################################################################################
 
 ai:
-  provider: ollama             # "ollama" | "foundry_local" | "azure"
-  embed_model: nomic-embed-text
-  embed_dimensions: null       # null = auto-detect from model; override to 768, 1536, etc. if needed
-  chat_model: llama3.2
+  chat_model_key: llama3.2          # key of the active chat model (see models list below)
+  embed_model_key: nomic-embed      # key of the active embed model
+  # stt_key: null                   # key of the active STT model (null = use transcribe_backend)
+  embed_dimensions: null            # null = auto-detect; or explicit int (e.g. 768, 1536, etc.)
+  transcribe_backend: subprocess    # "native" | "whisper_cpp" | "subprocess"
+  transcribe_url: http://localhost:9000
   ollama_base_url: http://localhost:11434
   foundry_local_base_url: http://localhost:5272
+  models:
+  - key: llama3.2
+    name: llama3.2
+    role: chat
+    provider: ollama
+  - key: nomic-embed
+    name: nomic-embed-text
+    role: embed
+    provider: ollama
+  # Examples of additional model entries:
+  # - key: qwen3.5:9b
+  #   name: qwen3.5:9b
+  #   role: chat
+  #   provider: ollama
+  # - key: gpt-4o
+  #   name: gpt-4o
+  #   role: chat
+  #   provider: azure
 
 vault:
   path: ./vault

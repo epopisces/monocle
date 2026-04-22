@@ -30,24 +30,48 @@ class ReviewPatch(BaseModel):
     auto_approve_threshold_pct: int | None = Field(None, ge=0, le=100)
 
 
+class ModelEntryPatch(BaseModel):
+    """A model entry supplied in a PATCH request (full replacement semantics).
+
+    Since models list is treated as full-list replacement (not merge-by-key),
+    all fields except base_url must be provided; they are required to match
+    the ModelEntry schema and pass AIConfig validation.
+    """
+
+    key: str
+    name: str
+    role: Literal["chat", "embed", "stt"]
+    provider: Literal["ollama", "foundry_local", "azure"]
+    base_url: str | None = None
+
+
 class AIPatch(BaseModel):
-    provider: Literal["ollama", "foundry_local", "azure"] | None = None
-    embed_model: str | None = None
-    chat_model: str | None = None
-    transcribe_model: str | None = None
+    # Active model selection
+    chat_model_key: str | None = None
+    embed_model_key: str | None = None
+    stt_key: str | None = None
+    # Transcription settings
     transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] | None = None
     transcribe_url: str | None = None
+    # Provider connection settings
     ollama_base_url: str | None = None
+    # Full models-list replacement (optional; replaces entire list when provided)
+    models: list[ModelEntryPatch] | None = None
 
 
 class UIPatch(BaseModel):
     voice_input_backend: Literal["whisper", "web_speech"] | None = None
 
 
+class TelemetryPatch(BaseModel):
+    trace_filters: list[str] | None = None
+
+
 class SettingsPatch(BaseModel):
     review: ReviewPatch | None = None
     ai: AIPatch | None = None
     ui: UIPatch | None = None
+    telemetry: TelemetryPatch | None = None
 
 
 #endregion
@@ -141,6 +165,8 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
     
     If AI provider changes, hot-reload is attempted BEFORE persisting.
     If hot-reload fails, the entire patch is rejected (no partial state).
+    Trace filter updates are deferred until after all validations complete
+    to ensure atomicity (no partial runtime state on rejection).
     """
     from monocle.config import AIConfig, ReviewConfig
     from monocle.ai import get_provider
@@ -150,6 +176,7 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
     config_patch: dict[str, dict] = {}
     ai_provider_changed = False
     new_ai_provider = None
+    pending_trace_filters: list[str] | None = None  # Deferred until after validation
 
     if patch.review is not None:
         review_updates = {k: v for k, v in patch.review.model_dump().items() if v is not None}
@@ -167,17 +194,21 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
                 raise HTTPException(status_code=422, detail=str(exc))
 
     if patch.ai is not None:
-        ai_updates = {k: v for k, v in patch.ai.model_dump().items() if v is not None}
+        # Use exclude_unset=True to only include fields the user explicitly provided.
+        # This allows clients to set sst_key: null and actually clear it (not treat as no-op).
+        # Fields not provided by the user won't be in ai_updates, so we won't overwrite them.
+        ai_updates = patch.ai.model_dump(exclude_unset=True)
         if ai_updates:
             try:
                 # Reconstruct via constructor to run validators (including cross-field checks)
                 ai_data = settings.ai.model_dump()
                 ai_data.update(ai_updates)
-                old_provider = settings.ai.provider
                 new_ai = AIConfig(**ai_data)
                 settings = settings.model_copy(update={"ai": new_ai})
                 config_patch["ai"] = ai_updates
-                if ai_updates.get("provider") and ai_updates["provider"] != old_provider:
+                # Hot-reload required when the active model selection or models list changes
+                _RELOAD_KEYS = {"chat_model_key", "embed_model_key", "stt_key", "models"}
+                if any(k in ai_updates for k in _RELOAD_KEYS):
                     ai_provider_changed = True
             except ValidationError as exc:
                 from fastapi import HTTPException
@@ -200,12 +231,32 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
 
                 raise HTTPException(status_code=422, detail=str(exc))
 
+    if patch.telemetry is not None and patch.telemetry.trace_filters is not None:
+        from monocle.config import TelemetryConfig
+
+        try:
+            telem_data = settings.telemetry.model_dump()
+            telem_data["trace_filters"] = patch.telemetry.trace_filters
+            new_telem = TelemetryConfig(**telem_data)
+            settings = settings.model_copy(update={"telemetry": new_telem})
+            config_patch["telemetry"] = {"trace_filters": patch.telemetry.trace_filters}
+            # Defer the live update until after AI hot-reload validates (for atomicity)
+            pending_trace_filters = patch.telemetry.trace_filters
+        except ValidationError as exc:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=422, detail=str(exc))
+
     # If AI provider is changing, attempt hot-reload BEFORE persisting.
     # This ensures all changes (disk + app state) are atomic.
     if ai_provider_changed:
         try:
             new_ai_provider = await asyncio.to_thread(get_provider, settings)
-            logger.info("[API] AI provider hot-reload succeeded: %s", settings.ai.provider)
+            logger.info(
+                "[API] AI provider hot-reload succeeded: chat=%s embed=%s",
+                settings.ai.chat_model_key,
+                settings.ai.embed_model_key,
+            )
         except Exception as exc:
             from fastapi import HTTPException
 
@@ -225,6 +276,12 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
     request.app.state.settings = settings
     if new_ai_provider is not None:
         request.app.state.ai = new_ai_provider
+
+    # Apply trace filters AFTER all validations/hot-reload succeed (atomic guarantee)
+    if pending_trace_filters is not None:
+        route_filter_processor = getattr(request.app.state, "route_filter_processor", None)
+        if route_filter_processor is not None:
+            route_filter_processor.set_filters(pending_trace_filters)
 
     data = _settings_to_dict(settings)
     mcp_key = os.environ.get(settings.server.mcp_access_key_env, "")
