@@ -10,6 +10,9 @@ continue to return 501 and are tested in the stub section at the bottom.
 """
 from __future__ import annotations
 
+import json
+from unittest.mock import AsyncMock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -715,6 +718,145 @@ class TestIngest:
         )
 
         assert patched.status_code == 422
+
+    def test_ingest_review_execute_runs_approved_actions_through_mcp_and_validates_result(self, api_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        approved = api_client.post(f"/api/ingest/sessions/{session_id}/actions/act_1/approve")
+        assert approved.status_code == 200
+
+        from monocle import mcp_server
+
+        original_update_note = mcp_server.update_note
+        update_spy = AsyncMock(side_effect=original_update_note)
+        monkeypatch.setattr(mcp_server, "update_note", update_spy)
+
+        executed = api_client.post(f"/api/ingest/sessions/{session_id}/execute")
+        assert executed.status_code == 200
+        body = executed.json()
+        assert body["session"]["state"] == "completed"
+        assert body["session"]["execution_summary"]["succeeded"] == 1
+        assert body["session"]["execution_summary"]["failed"] == 0
+        assert body["session"]["execution_summary"]["skipped"] == 0
+        assert body["session"]["execution_summary"]["completed_at"] is not None
+        assert body["session"]["proposed_actions"][0]["approval_state"] == "executed"
+        assert body["session"]["proposed_actions"][0]["execution_result"]["status"] == "succeeded"
+        assert update_spy.await_count == 1
+
+        note = api_client.get("/api/notes/people/alice.md")
+        assert note.status_code == 200
+        note_body = note.json()
+        assert note_body["title"] == "Alice"
+        assert note_body["body"] == "Updated meeting notes."
+        assert note_body["metadata"]["sources"][0]["source_id"].startswith("src_")
+
+    def test_ingest_review_execute_rejects_sessions_not_ready_for_execution(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        executed = api_client.post(f"/api/ingest/sessions/{session_id}/execute")
+        assert executed.status_code == 409
+        assert "approved_pending_execution" in executed.json()["detail"]
+
+    def test_ingest_review_execute_rolls_back_when_post_apply_validation_fails(self, api_client: TestClient, monkeypatch: pytest.MonkeyPatch):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        approved = api_client.post(f"/api/ingest/sessions/{session_id}/actions/act_1/approve")
+        assert approved.status_code == 200
+
+        from monocle import mcp_server
+
+        original_update_note = mcp_server.update_note
+        vault = api_client.app.state.vault
+
+        async def corrupting_update_note(*args, **kwargs):
+            result = await original_update_note(*args, **kwargs)
+            note = vault.read_note(kwargs["file_path"])
+            note.body = "Corrupted after write."
+            vault.write_note(kwargs["file_path"], note)
+            return result
+
+        monkeypatch.setattr(mcp_server, "update_note", corrupting_update_note)
+
+        executed = api_client.post(f"/api/ingest/sessions/{session_id}/execute")
+        assert executed.status_code == 200
+        body = executed.json()
+        assert body["session"]["state"] == "failed"
+        assert body["session"]["execution_summary"]["succeeded"] == 0
+        assert body["session"]["execution_summary"]["failed"] == 1
+        assert body["session"]["proposed_actions"][0]["approval_state"] == "failed"
+        assert "validation failed" in body["session"]["proposed_actions"][0]["execution_result"]["message"].lower()
+
+        note = api_client.get("/api/notes/people/alice.md")
+        assert note.status_code == 200
+        note_body = note.json()
+        assert note_body["body"] == "Original meeting notes."
+
+    def test_archived_source_endpoints_list_and_read_text_content(self, api_client: TestClient):
+        created = api_client.post(
+            "/api/ingest",
+            json={"content": "Captured source body.", "source": "web"},
+        )
+        assert created.status_code == 202
+
+        listed = api_client.get("/api/ingest/sources")
+        assert listed.status_code == 200
+        sources = listed.json()
+        assert len(sources) >= 1
+        source_id = sources[0]["source_id"]
+
+        source = api_client.get(f"/api/ingest/sources/{source_id}")
+        assert source.status_code == 200
+        assert source.json()["source_id"] == source_id
+
+        content = api_client.get(f"/api/ingest/sources/{source_id}/content")
+        assert content.status_code == 200
+        body = content.json()
+        assert body["source"]["source_id"] == source_id
+        assert "Captured source body." in body["text"]
+
+    def test_archived_source_content_rejects_binary_sources_but_download_allows_them(self, api_client: TestClient):
+        created = api_client.post(
+            "/api/ingest",
+            json={
+                "source": "voice",
+                "audio_bytes": "AQIDBA==",
+                "audio_mime_type": "audio/wav",
+            },
+        )
+        assert created.status_code == 202
+
+        listed = api_client.get("/api/ingest/sources")
+        assert listed.status_code == 200
+        source_id = next(source["source_id"] for source in listed.json() if source["kind"] == "audio")
+
+        content = api_client.get(f"/api/ingest/sources/{source_id}/content")
+        assert content.status_code == 415
+
+        download = api_client.get(f"/api/ingest/sources/{source_id}/download")
+        assert download.status_code == 200
+        assert download.content == b"\x01\x02\x03\x04"
+
+    def test_archived_source_content_truncates_large_text_payloads(self, api_client: TestClient):
+        from monocle.routers import ingest as ingest_router
+
+        created = api_client.post(
+            "/api/ingest",
+            json={
+                "content": "x" * (ingest_router._MAX_SOURCE_TEXT_BYTES + 10),
+                "source": "web",
+            },
+        )
+        assert created.status_code == 202
+
+        listed = api_client.get("/api/ingest/sources")
+        assert listed.status_code == 200
+        source_id = listed.json()[0]["source_id"]
+
+        content = api_client.get(f"/api/ingest/sources/{source_id}/content")
+        assert content.status_code == 200
+        body = content.json()
+        assert body["truncated"] is True
+        assert len(body["text"]) == ingest_router._MAX_SOURCE_TEXT_BYTES
 
     def test_ingest_stream_returns_streaming(self, api_client: TestClient):
         r = api_client.post(

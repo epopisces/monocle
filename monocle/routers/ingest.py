@@ -8,11 +8,12 @@ import time
 from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from fastapi import Response
 
 from monocle.models import (
+    ArchivedSourceContentResponse,
     CountResponse,
     IngestOpenQuestionAnswerRequest,
     IngestNotificationSummary,
@@ -22,6 +23,7 @@ from monocle.models import (
     IngestSessionDetailResponse,
     IngestTrueUpResponse,
     ProposedActionPatchRequest,
+    SourceRecord,
 )
 from monocle.rate_limit import limiter
 from monocle.services.ingest_review import (
@@ -32,12 +34,28 @@ from monocle.services.ingest_review import (
     start_review_session,
     update_review_action,
 )
+from monocle.services.ingest_execute import execute_review_session
 
 router = APIRouter(tags=["ingest"])
 logger = logging.getLogger(__name__)
 
 # Maximum audio payload (25 MB)
 _MAX_AUDIO_BYTES = 25 * 1024 * 1024
+_MAX_SOURCE_TEXT_BYTES = 200_000
+
+
+def _is_text_source(kind: str, mime_type: str | None) -> bool:
+    if kind in {"text", "url", "chat_text"}:
+        return True
+    lowered = (mime_type or "").lower()
+    return lowered.startswith("text/") or lowered in {"application/json", "application/xml"}
+
+
+def _read_source_preview(path: Path, max_bytes: int) -> tuple[bytes, bool]:
+    with path.open("rb") as handle:
+        payload = handle.read(max_bytes + 1)
+    truncated = len(payload) > max_bytes
+    return payload[:max_bytes], truncated
 
 
 def _check_audio_size(request: IngestRequest) -> None:
@@ -98,6 +116,61 @@ async def get_session(session_id: str, request: Request) -> IngestSessionDetailR
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
     return detail
+
+
+@router.get("/ingest/sources", response_model=list[SourceRecord])
+async def list_archived_sources(
+    request: Request,
+    limit: int = Query(default=200, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+) -> list[SourceRecord]:
+    store = request.app.state.ingest_session_store
+    return await asyncio.to_thread(store.list_source_records, limit=limit, offset=offset)
+
+
+@router.get("/ingest/sources/{source_id}", response_model=SourceRecord)
+async def get_archived_source(source_id: str, request: Request) -> SourceRecord:
+    store = request.app.state.ingest_session_store
+    source = await asyncio.to_thread(store.get_source_record, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"Archived source not found: {source_id}")
+    return source
+
+
+@router.get("/ingest/sources/{source_id}/content", response_model=ArchivedSourceContentResponse)
+async def get_archived_source_content(source_id: str, request: Request) -> ArchivedSourceContentResponse:
+    store = request.app.state.ingest_session_store
+    source = await asyncio.to_thread(store.get_source_record, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"Archived source not found: {source_id}")
+    if not _is_text_source(source.kind, source.mime_type):
+        raise HTTPException(status_code=415, detail="Archived source is not text-readable.")
+
+    resolved = await asyncio.to_thread(store.resolve_source_path, source_id)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail=f"Archived source payload not found: {source_id}")
+
+    payload, truncated = await asyncio.to_thread(_read_source_preview, resolved, _MAX_SOURCE_TEXT_BYTES)
+    text = payload.decode("utf-8", errors="replace")
+    return ArchivedSourceContentResponse(source=source, text=text, truncated=truncated)
+
+
+@router.get("/ingest/sources/{source_id}/download")
+async def download_archived_source(source_id: str, request: Request) -> FileResponse:
+    store = request.app.state.ingest_session_store
+    source = await asyncio.to_thread(store.get_source_record, source_id)
+    if source is None:
+        raise HTTPException(status_code=404, detail=f"Archived source not found: {source_id}")
+
+    resolved = await asyncio.to_thread(store.resolve_source_path, source_id)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail=f"Archived source payload not found: {source_id}")
+
+    return FileResponse(
+        path=resolved,
+        media_type=source.mime_type or "application/octet-stream",
+        filename=source.source_name,
+    )
 
 
 @router.post("/ingest/sessions/{session_id}/start-review", response_model=IngestSessionDetailResponse)
@@ -182,6 +255,20 @@ async def approve_all_actions(session_id: str, request: Request) -> IngestSessio
     store = request.app.state.ingest_session_store
     vault = request.app.state.vault
     detail = await approve_all_review_actions(store, vault, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
+    return detail
+
+
+@router.post("/ingest/sessions/{session_id}/execute", response_model=IngestSessionDetailResponse)
+async def execute_actions(session_id: str, request: Request) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    reindex_queue = getattr(request.app.state, "reindex_queue", None)
+    try:
+        detail = await execute_review_session(store, vault, reindex_queue, session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
     return detail

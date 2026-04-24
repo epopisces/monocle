@@ -296,6 +296,23 @@ class TestCreateNote:
         template_data = vault.create_from_template.call_args[0][1]
         assert template_data["type"] == "person_note"
 
+    @pytest.mark.asyncio
+    async def test_rejects_protected_metadata_updates(self):
+        from monocle.services.notes import create_note
+
+        vault = MagicMock()
+        vault.create_from_template = MagicMock(return_value=_make_note())
+        vault.write_note = MagicMock()
+
+        with pytest.raises(ValueError, match="metadata_updates may only modify"):
+            await create_note(
+                vault,
+                None,
+                "Alice",
+                "Body",
+                metadata_updates={"review_status": "approved"},
+            )
+
 
 # ===========================================================================
 # update_note
@@ -336,6 +353,50 @@ class TestUpdateNote:
 
         assert result.metadata.updated is not None
         assert result.metadata.updated >= before
+
+    @pytest.mark.asyncio
+    async def test_title_and_metadata_updates_are_applied(self):
+        from monocle.services.notes import update_note
+
+        existing = _make_note(title="Old title", body="old body")
+        vault = MagicMock()
+        vault.read_note = MagicMock(return_value=existing)
+        vault.write_note = MagicMock()
+
+        result = await update_note(
+            vault,
+            None,
+            "work/test-note.md",
+            "new body",
+            title="New title",
+            metadata_updates={"sources": [{
+                "source_id": "src_1",
+                "source_name": "meeting.txt",
+                "archive_path": "src_1/payload",
+                "kind": "text",
+            }]},
+        )
+
+        assert result.title == "New title"
+        assert result.metadata.sources[0].source_id == "src_1"
+
+    @pytest.mark.asyncio
+    async def test_rejects_protected_metadata_updates(self):
+        from monocle.services.notes import update_note
+
+        existing = _make_note(title="Old title", body="old body")
+        vault = MagicMock()
+        vault.read_note = MagicMock(return_value=existing)
+        vault.write_note = MagicMock()
+
+        with pytest.raises(ValueError, match="metadata_updates may only modify"):
+            await update_note(
+                vault,
+                None,
+                "work/test-note.md",
+                "new body",
+                metadata_updates={"approved_by": "system:auto"},
+            )
 
     @pytest.mark.asyncio
     async def test_body_too_long_raises(self):

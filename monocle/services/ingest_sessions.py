@@ -212,7 +212,8 @@ class IngestSessionStore:
                 f"""
                 SELECT session_id, origin, state, title, digest,
                        open_questions_json, related_notes_json, contradictions_json,
-                       created_at, updated_at, prepared_at, last_true_up_at
+                       created_at, updated_at, prepared_at, last_true_up_at,
+                       execution_summary_json
                 FROM ingest_sessions
                 {where_sql}
                 ORDER BY created_at DESC
@@ -241,7 +242,8 @@ class IngestSessionStore:
                 """
                 SELECT session_id, origin, state, title, digest,
                        open_questions_json, related_notes_json, contradictions_json,
-                       created_at, updated_at, prepared_at, last_true_up_at
+                       created_at, updated_at, prepared_at, last_true_up_at,
+                       execution_summary_json
                 FROM ingest_sessions
                 WHERE session_id = ?
                 """,
@@ -262,6 +264,7 @@ class IngestSessionStore:
                 SELECT session_id, origin, state, title, digest,
                        open_questions_json, related_notes_json, contradictions_json,
                        created_at, updated_at, prepared_at, last_true_up_at,
+                       execution_summary_json,
                        request_source, template_hint, artifact_dir
                 FROM ingest_sessions
                 WHERE session_id = ?
@@ -644,6 +647,29 @@ class IngestSessionStore:
             )
             return row.rowcount > 0
 
+    def set_session_execution_summary(
+        self,
+        session_id: str,
+        summary: dict[str, Any],
+        *,
+        state: IngestSessionState | None = None,
+    ) -> bool:
+        now = _utcnow_iso()
+        updates = ["execution_summary_json = ?", "updated_at = ?"]
+        params: list[Any] = [_json_dumps(summary), now]
+        if state is not None:
+            if state not in _INGEST_SESSION_STATES:
+                raise ValueError(f"Invalid ingest session state: {state}")
+            updates.insert(0, "state = ?")
+            params.insert(0, state)
+
+        with self._connect() as conn:
+            row = conn.execute(
+                f"UPDATE ingest_sessions SET {', '.join(updates)} WHERE session_id = ?",
+                (*params, session_id),
+            )
+            return row.rowcount > 0
+
     def answer_open_question(
         self,
         session_id: str,
@@ -697,6 +723,7 @@ class IngestSessionStore:
         rationale: str | None = None,
         diff_preview: dict[str, Any] | None = None,
         proposed_content: dict[str, Any] | None = None,
+        execution_result: dict[str, Any] | None = None,
     ) -> ProposedAction | None:
         updates: list[str] = []
         params: list[Any] = []
@@ -719,6 +746,9 @@ class IngestSessionStore:
         if proposed_content is not None:
             updates.append("proposed_content_json = ?")
             params.append(_json_dumps(proposed_content))
+        if execution_result is not None:
+            updates.append("execution_result_json = ?")
+            params.append(_json_dumps(execution_result))
 
         if not updates:
             with self._connect() as conn:
@@ -757,6 +787,78 @@ class IngestSessionStore:
             action_id,
             approval_state=approval_state,
         )
+
+    def list_source_records(
+        self,
+        *,
+        limit: int = 200,
+        offset: int = 0,
+    ) -> list[SourceRecord]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT source_id, session_id, kind, status, source_name, mime_type,
+                       archive_path, checksum_sha256, captured_at, byte_size, provenance_json
+                FROM source_records
+                ORDER BY captured_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                (max(1, min(limit, 500)), max(offset, 0)),
+            ).fetchall()
+        return [
+            SourceRecord(
+                source_id=row["source_id"],
+                session_id=row["session_id"],
+                kind=row["kind"],
+                status=row["status"],
+                source_name=row["source_name"],
+                mime_type=row["mime_type"],
+                archive_path=row["archive_path"],
+                checksum_sha256=row["checksum_sha256"],
+                captured_at=row["captured_at"],
+                byte_size=row["byte_size"],
+                provenance=_json_loads(row["provenance_json"], {}),
+            )
+            for row in rows
+        ]
+
+    def get_source_record(self, source_id: str) -> SourceRecord | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT source_id, session_id, kind, status, source_name, mime_type,
+                       archive_path, checksum_sha256, captured_at, byte_size, provenance_json
+                FROM source_records
+                WHERE source_id = ?
+                """,
+                (source_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        return SourceRecord(
+            source_id=row["source_id"],
+            session_id=row["session_id"],
+            kind=row["kind"],
+            status=row["status"],
+            source_name=row["source_name"],
+            mime_type=row["mime_type"],
+            archive_path=row["archive_path"],
+            checksum_sha256=row["checksum_sha256"],
+            captured_at=row["captured_at"],
+            byte_size=row["byte_size"],
+            provenance=_json_loads(row["provenance_json"], {}),
+        )
+
+    def resolve_source_path(self, source_id: str) -> Path | None:
+        source = self.get_source_record(source_id)
+        if source is None:
+            return None
+        resolved = (self._sources_root / source.archive_path).resolve()
+        if not resolved.is_relative_to(self._sources_root):
+            raise ValueError(f"Archived source path escapes sources_root: {source.archive_path}")
+        if not resolved.exists():
+            return None
+        return resolved
 
     def approve_all_proposed_actions(self, session_id: str) -> list[ProposedAction]:
         now = _utcnow_iso()
@@ -959,6 +1061,7 @@ class IngestSessionStore:
             updated_at=row["updated_at"],
             prepared_at=row["prepared_at"],
             last_true_up_at=row["last_true_up_at"],
+            execution_summary=_json_loads(row["execution_summary_json"], None),
         )
 
     def _get_sources_for_sessions(
@@ -1034,7 +1137,8 @@ class IngestSessionStore:
         rows = conn.execute(
             f"""
             SELECT session_id, action_id, action_type, approval_state, target_file_path,
-                   target_note_type, rationale, diff_preview_json, proposed_content_json
+                 target_note_type, rationale, diff_preview_json, proposed_content_json,
+                 execution_result_json
             FROM proposed_actions
             WHERE session_id IN ({placeholders})
             ORDER BY session_id ASC, created_at ASC
@@ -1052,6 +1156,7 @@ class IngestSessionStore:
                     rationale=row["rationale"],
                     diff_preview=_json_loads(row["diff_preview_json"], None),
                     proposed_content=_json_loads(row["proposed_content_json"], {}),
+                    execution_result=_json_loads(row["execution_result_json"], None),
                 )
             )
         return grouped
@@ -1068,7 +1173,8 @@ class IngestSessionStore:
         row = conn.execute(
             """
             SELECT session_id, action_id, action_type, approval_state, target_file_path,
-                   target_note_type, rationale, diff_preview_json, proposed_content_json
+                   target_note_type, rationale, diff_preview_json, proposed_content_json,
+                   execution_result_json
             FROM proposed_actions
             WHERE session_id = ? AND action_id = ?
             """,
@@ -1085,6 +1191,7 @@ class IngestSessionStore:
             rationale=row["rationale"],
             diff_preview=_json_loads(row["diff_preview_json"], None),
             proposed_content=_json_loads(row["proposed_content_json"], {}),
+            execution_result=_json_loads(row["execution_result_json"], None),
         )
 
     def _default_source_name(
@@ -1127,6 +1234,7 @@ class IngestSessionStore:
                     updated_at TEXT NOT NULL,
                     prepared_at TEXT,
                     last_true_up_at TEXT,
+                    execution_summary_json TEXT,
                     request_source TEXT NOT NULL,
                     template_hint TEXT,
                     allow_duplicate INTEGER NOT NULL DEFAULT 0,
@@ -1165,6 +1273,7 @@ class IngestSessionStore:
                     rationale TEXT NOT NULL,
                     diff_preview_json TEXT,
                     proposed_content_json TEXT NOT NULL DEFAULT '{}',
+                    execution_result_json TEXT,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                     FOREIGN KEY (session_id) REFERENCES ingest_sessions(session_id) ON DELETE CASCADE
                 )
@@ -1197,6 +1306,8 @@ class IngestSessionStore:
                 )
                 """
             )
+            self._ensure_column(conn, "ingest_sessions", "execution_summary_json", "TEXT")
+            self._ensure_column(conn, "proposed_actions", "execution_result_json", "TEXT")
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_ingest_sessions_state_created ON ingest_sessions(state, created_at DESC)"
             )
@@ -1215,3 +1326,18 @@ class IngestSessionStore:
             conn.execute(
                 "CREATE INDEX IF NOT EXISTS idx_prepare_jobs_status_run_after ON background_prepare_jobs(status, run_after ASC)"
             )
+
+    def _ensure_column(
+        self,
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column in existing:
+            return
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

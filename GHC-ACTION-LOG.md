@@ -45,6 +45,19 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Tightened `IngestSessionStore.set_session_state()` to accept the canonical `IngestSessionState` type and reject invalid runtime values before they reach SQLite; added a focused store regression proving bad states raise and do not mutate persisted sessions
 - Decoupled `IngestReviewScreen` session-list loading from selection and URL setter churn by moving current selection/query reads behind refs, preventing the extra `/api/ingest/sessions` fetch on default selection and session changes; added focused frontend coverage and revalidated the touched review screen plus frontend type-check
 
+### Claude Haiku 4.5
+- **Completed M37 — Ingest Execution, Validation & Source UX**
+  - Created `monocle/services/ingest_execute.py` with orchestration that applies approved ingest actions exclusively through canonical MCP tools (`create_note`, `update_note`; never direct vault writes)
+  - Implemented post-apply validation via deterministic readback checks: after each create/update completes, grep-style substring search confirms expected note content now exists in vault; if validation fails, note is reverted from `.trash/` and action marked failed with detailed message
+  - Added `POST /api/ingest/sessions/{session_id}/execute` endpoint that validates session is in `approved_pending_execution` state, executes all approved actions, records per-action execution results with succeeded/failed/skipped counts, timestamps, and error messages
+  - Added archived source endpoints in `monocle/routers/ingest.py`: `GET /api/ingest/sources` (enumerate), `GET /api/ingest/sources/{source_id}` (metadata), `GET /api/ingest/sources/{source_id}/content` (text payload with truncation flag), `GET /api/ingest/sources/{source_id}/download` (binary/download)
+  - Added `Sources` collapsed `<details>` section to document browser displaying archive links per ingested note via `metadata.sources` backref array with source name/author when known
+  - Implemented source-opening behavior: text sources open inline in read-only preview, binary sources show download button with system default opener, non-ingestible sources (Teams, MCP) display summary card
+  - Styled sources drawer with CSS tokens (`--border`, `--text-secondary`, `--accent`) integrated into `frontend/src/components/DocumentBrowser/DocumentBrowserScreen.css`
+  - Added 6 new M37-focused tests in `monocle/tests/test_api.py`: MCP execution flow, validation failure rollback, rejection edge cases, archived source list/read/content/download/truncation
+  - Archived M37 full details to `docs/milestones.md` and marked M37 complete in `docs/build-plan.md`
+  - Validation: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 992 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 450+ passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
+
 ## 2026-04-22
 
 ### Claude Sonnet 4.6

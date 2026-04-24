@@ -27,7 +27,7 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M36 — Ingest Review Workspace & Proposal Flow (2026-04-24)
+**Last Completed:** M37 — Ingest Execution, Validation & Source UX (2026-04-24)
 **Note:** M34-M36 were completed out of sequence to unblock the ingest-review architecture; M33 and later ingest milestones remain queued.
 **Blocked By:** None
 **Session Notes (M36 — Ingest Review Workspace & Proposal Flow):**
@@ -172,7 +172,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M34 | Ingest Session Schema & Persistence                            | COMPLETE    |
 | M35 | Background Session Preparation & Notifications                 | COMPLETE    |
 | M36 | Ingest Review Workspace & Proposal Flow                        | COMPLETE    |
-| M37 | Ingest Execution, Validation & Source UX                       | NOT STARTED |
+| M37 | Ingest Execution, Validation & Source UX                       | COMPLETE    |
 | M38 | Fast-Capture Path                                              | NOT STARTED |
 | M39 | File History, Revert & Diff Viewer                             | NOT STARTED |
 | M40 | Add Documents & Snippets To Chat Context                       | NOT STARTED |
@@ -852,25 +852,11 @@ Backend review orchestration now hydrates contradiction metadata and diff previe
 
 ### M37: Ingest Execution, Validation & Source UX
 
-**Status:** NOT STARTED — depends on M36
+**Status:** COMPLETE (2026-04-24)
 
-Execute approved ingest proposals through the canonical MCP tool plane, validate the resulting writes, and surface source/document affordances in the document UI.
+Approved ingest proposals now execute through the canonical MCP tool plane with post-apply validation via deterministic readback checks, and archived sources are discoverable in the document browser under a collapsed `Sources` section.
 
-**Deliverables:**
-
-- [ ] Execute approved create/update actions only through the canonical MCP server/tool plane, not a parallel direct-write ingest path
-- [ ] Post-apply validation that confirms expected document changes exist via readback / grep-style checks, then queues reindex for all touched notes
-- [ ] Execution summary that reports which approved actions succeeded, failed, or were skipped, and offers to open affected notes in the Document Viewer
-- [ ] Add a collapsed `Sources` section to vault documents, linking back to archived raw sources with label text including source name and author when known
-- [ ] Add source-opening behavior in the document UI: text-based sources open in the Document Browser by default; other file types can be opened with system defaults
-- [ ] Add Docs/File Explorer support for browsing archived sources under a collapsed dropdown without making them part of the normal semantic knowledge base
-
-**Acceptance Criteria:**
-
-- Approved actions are applied through MCP-owned create/update operations only
-- The system validates that the expected document edits occurred before reporting success and triggers reindexing for touched notes
-- Users can open created/updated notes in the Document Viewer immediately after execution
-- Archived sources are discoverable manually in the docs UI and from a document's collapsed `Sources` section, but remain excluded from default search and embedding flows
+**Full details:** [docs/milestones.md#m37-ingest-execution-validation--source-ux](milestones.md#m37-ingest-execution-validation--source-ux)
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 

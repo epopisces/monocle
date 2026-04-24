@@ -284,6 +284,7 @@ async def create_note(
     note_type: str = "observation",
     domain: str = "personal",
     tags: Annotated[list[str] | None, BeforeValidator(_normalize_tags)] = None,
+    metadata_updates: dict[str, object] | None = None,
 ) -> str:
     """Create a new note in the vault from a template.
 
@@ -306,7 +307,14 @@ async def create_note(
     from monocle.services.notes import create_note as _create_note
 
     note = await _create_note(
-        _state.vault, _state.reindex_queue, title, body, note_type, domain, tags,
+        _state.vault,
+        _state.reindex_queue,
+        title,
+        body,
+        note_type,
+        domain,
+        tags,
+        metadata_updates,
     )
     return json.dumps({"file_path": note.file_path, "title": note.title, "status": "created"})
 
@@ -373,7 +381,12 @@ async def create_reference_from_url(
 
 
 @mcp.tool()
-async def update_note(file_path: str, body: str) -> str:
+async def update_note(
+    file_path: str,
+    body: str,
+    title: str | None = None,
+    metadata_updates: dict[str, object] | None = None,
+) -> str:
     """Update the body of an EXISTING note in the vault.
 
     Canonical operation — see ``docs/tool-contracts.md § update_note``.
@@ -391,7 +404,14 @@ async def update_note(file_path: str, body: str) -> str:
 
     from monocle.services.notes import update_note as _update_note
 
-    await _update_note(_state.vault, _state.reindex_queue, file_path, body)
+    await _update_note(
+        _state.vault,
+        _state.reindex_queue,
+        file_path,
+        body,
+        title=title,
+        metadata_updates=metadata_updates,
+    )
     return json.dumps({"file_path": file_path, "status": "updated"})
 
 

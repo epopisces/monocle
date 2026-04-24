@@ -208,6 +208,8 @@ class VaultTools:
         body: Annotated[str, "New content to merge into the existing note (required, must not be empty)"],
         file_path: Annotated[str | None, "Vault-relative path to the note (preferred when known from search_vault/read_note, e.g. 'people/alice.md')"] = None,
         query: Annotated[str | None, "Person name or topic to find the note (used when file_path is not known, e.g. 'Alice Example')"] = None,
+        title: Annotated[str | None, "Optional replacement title for the note"] = None,
+        metadata_updates: Annotated[dict[str, object] | None, "Optional frontmatter updates merged into the note"] = None,
     ) -> str:
         """Update an EXISTING note with new content using content-aware merging.
 
@@ -291,7 +293,14 @@ class VaultTools:
 
             from monocle.services.notes import update_note as _update_note
 
-            note = await _update_note(self._vault, self._reindex_queue, resolved_path, merged_body)
+            note = await _update_note(
+                self._vault,
+                self._reindex_queue,
+                resolved_path,
+                merged_body,
+                title=title,
+                metadata_updates=metadata_updates,
+            )
             return json.dumps({"file_path": resolved_path, "title": note.title, "status": "updated"})
         except Exception as exc:
             logger.warning("update_note tool error for %r: %s", resolved_path, exc)
@@ -313,6 +322,7 @@ class VaultTools:
             str | list[str] | None,
             Field(description="List of string tags or a string representation, e.g. ['python', 'automation']."),
         ] = None,
+        metadata_updates: Annotated[dict[str, object] | None, "Optional frontmatter updates merged into the new note"] = None,
     ) -> str:
         """Create a NEW note in the vault from scratch using the appropriate template.
 
@@ -333,7 +343,7 @@ class VaultTools:
 
             note = await _create_note(
                 self._vault, self._reindex_queue, title, body,
-                note_type, domain, normalized_tags,
+                note_type, domain, normalized_tags, metadata_updates,
             )
             return json.dumps(
                 {"file_path": note.file_path, "title": note.title, "status": "created"}

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor, within } from '@testing-library/react'
 import { BrowserRouter, MemoryRouter } from 'react-router-dom'
 
 // ── Mock CodeMirror ───────────────────────────────────────────────
@@ -42,6 +42,9 @@ const mockPatchNote = vi.fn()
 const mockDeleteNote = vi.fn()
 const mockListTemplates = vi.fn()
 const mockGetNoteBacklinks = vi.fn()
+const mockListArchivedSources = vi.fn()
+const mockGetArchivedSource = vi.fn()
+const mockGetArchivedSourceContent = vi.fn()
 
 vi.mock('./api/notes', () => ({
   listNotes: (...args: unknown[]) => mockListNotes(...args),
@@ -51,6 +54,14 @@ vi.mock('./api/notes', () => ({
   deleteNote: (...args: unknown[]) => mockDeleteNote(...args),
   listTemplates: (...args: unknown[]) => mockListTemplates(...args),
   getNoteBacklinks: (...args: unknown[]) => mockGetNoteBacklinks(...args),
+}))
+
+vi.mock('./api/ingest', () => ({
+  listArchivedSources: (...args: unknown[]) => mockListArchivedSources(...args),
+  getArchivedSource: (...args: unknown[]) => mockGetArchivedSource(...args),
+  getArchivedSourceContent: (...args: unknown[]) => mockGetArchivedSourceContent(...args),
+  getArchivedSourceDownloadUrl: (sourceId: string) => `/api/ingest/sources/${encodeURIComponent(sourceId)}/download`,
+  isTextSourceRecord: (source: { kind: string; mime_type?: string | null }) => source.kind === 'text' || (source.mime_type ?? '').startsWith('text/'),
 }))
 
 vi.mock('./api/review', () => ({
@@ -108,6 +119,20 @@ const MOCK_NOTE_FULL = {
 const MOCK_BACKLINKS = [
   { source: 'work/decision.md', relation: 'mentioned-in', context: 'Alice was mentioned here.' },
 ]
+
+const MOCK_ARCHIVED_SOURCE = {
+  source_id: 'src_1',
+  session_id: 'ing_1',
+  kind: 'text',
+  status: 'ready',
+  source_name: 'capture.txt',
+  mime_type: 'text/plain',
+  archive_path: 'src_1/payload',
+  checksum_sha256: 'abc',
+  captured_at: '2026-04-24T00:00:00Z',
+  byte_size: 12,
+  provenance: {},
+}
 
 // ── DocumentBrowserScreen tests ───────────────────────────────────
 
@@ -322,6 +347,9 @@ describe('DocumentBrowserScreen', () => {
     mockListTemplates.mockResolvedValue([])
     mockGetNote.mockResolvedValue(MOCK_NOTE_FULL)
     mockGetNoteBacklinks.mockResolvedValue([])
+    mockListArchivedSources.mockResolvedValue([MOCK_ARCHIVED_SOURCE])
+    mockGetArchivedSource.mockResolvedValue(MOCK_ARCHIVED_SOURCE)
+    mockGetArchivedSourceContent.mockResolvedValue({ source: MOCK_ARCHIVED_SOURCE, text: 'Captured source body.', truncated: false })
   })
 
   it('renders file tree after loading', async () => {
@@ -372,6 +400,49 @@ describe('DocumentBrowserScreen', () => {
       </MemoryRouter>,
     )
     await waitFor(() => expect(screen.getByText('Loading notes…')).toBeInTheDocument())
+  })
+
+  it('opens archived text sources in the document browser', async () => {
+    render(
+      <MemoryRouter initialEntries={['/docs']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+
+    const drawer = await screen.findByTestId('archived-sources-drawer')
+    fireEvent.click(within(drawer).getByText(/Archived Sources/i))
+    fireEvent.click(await within(drawer).findByRole('button', { name: 'capture.txt' }))
+
+    await waitFor(() => expect(mockGetArchivedSource).toHaveBeenCalledWith('src_1'))
+    expect(await screen.findByTestId('source-viewer')).toBeInTheDocument()
+    expect(await screen.findByTestId('source-viewer-content')).toHaveTextContent('Captured source body.')
+  })
+
+  it('opens non-text archived sources in a new window', async () => {
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    mockListArchivedSources.mockResolvedValue([
+      {
+        ...MOCK_ARCHIVED_SOURCE,
+        source_id: 'src_bin',
+        source_name: 'recording.wav',
+        kind: 'audio',
+        mime_type: 'audio/wav',
+      },
+    ])
+
+    render(
+      <MemoryRouter initialEntries={['/docs']}>
+        <DocumentBrowserScreen />
+      </MemoryRouter>,
+    )
+
+    const drawer = await screen.findByTestId('archived-sources-drawer')
+    fireEvent.click(within(drawer).getByText(/Archived Sources/i))
+    fireEvent.click(await within(drawer).findByRole('button', { name: 'recording.wav' }))
+
+    expect(openSpy).toHaveBeenCalledWith('/api/ingest/sources/src_bin/download', '_blank', 'noopener,noreferrer')
+    expect(mockGetArchivedSource).not.toHaveBeenCalledWith('src_bin')
+    openSpy.mockRestore()
   })
 })
 
@@ -428,6 +499,41 @@ describe('NoteEditor — isolated', () => {
       </BrowserRouter>,
     )
     expect(screen.queryByTestId('approve-btn')).toBeNull()
+  })
+
+  it('renders collapsed sources for notes with provenance links', () => {
+    const noteWithSources = {
+      ...MOCK_NOTE_FULL,
+      metadata: {
+        ...MOCK_NOTE_FULL.metadata,
+        sources: [{
+          source_id: 'src_1',
+          source_name: 'capture.txt',
+          archive_path: 'src_1/payload',
+          kind: 'text',
+          mime_type: 'text/plain',
+        }],
+      },
+    }
+
+    const onOpenSource = vi.fn()
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={noteWithSources as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+          onOpenSource={onOpenSource}
+        />
+      </BrowserRouter>,
+    )
+
+    const sources = screen.getByTestId('note-sources')
+    fireEvent.click(within(sources).getByText(/Sources \(1\)/i))
+    fireEvent.click(within(sources).getByRole('button', { name: 'capture.txt' }))
+    expect(onOpenSource).toHaveBeenCalledWith('src_1')
   })
 
   it('shows CodeMirror container in YAML mode by default', () => {

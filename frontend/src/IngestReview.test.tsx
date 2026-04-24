@@ -6,6 +6,7 @@ import {
   answerIngestQuestion,
   approveAllIngestActions,
   approveIngestAction,
+  executeIngestSession,
   getIngestSession,
   listIngestSessions,
   patchIngestAction,
@@ -163,6 +164,25 @@ vi.mock('./api/ingest', () => ({
       proposed_actions: [{ ...initialDetail.session.proposed_actions[0], approval_state: 'approved' }],
     },
   }),
+  executeIngestSession: vi.fn().mockResolvedValue({
+    ...initialDetail,
+    session: {
+      ...initialDetail.session,
+      state: 'completed',
+      execution_summary: {
+        total_actions: 1,
+        succeeded: 1,
+        failed: 0,
+        skipped: 0,
+        affected_file_paths: ['people/alice.md'],
+      },
+      proposed_actions: [{
+        ...initialDetail.session.proposed_actions[0],
+        approval_state: 'executed',
+        execution_result: { status: 'succeeded', file_path: 'people/alice.md' },
+      }],
+    },
+  }),
   trueUpIngestSession: vi.fn(),
 }))
 
@@ -223,6 +243,50 @@ describe('IngestReviewScreen', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Approve all/i }))
     await waitFor(() => expect(approveAllIngestActions).toHaveBeenCalledWith('ing_1'))
+
+    fireEvent.click(screen.getByRole('button', { name: /Execute approved/i }))
+    await waitFor(() => expect(executeIngestSession).toHaveBeenCalledWith('ing_1'))
+    expect(await screen.findByTestId('execution-summary')).toBeInTheDocument()
+  })
+
+  it('renders failed execution summaries', async () => {
+    vi.mocked(approveAllIngestActions).mockResolvedValueOnce({
+      ...initialDetail,
+      session: {
+        ...initialDetail.session,
+        state: 'approved_pending_execution',
+        proposed_actions: [{ ...initialDetail.session.proposed_actions[0], approval_state: 'approved' }],
+      },
+    })
+    vi.mocked(executeIngestSession).mockResolvedValueOnce({
+      ...initialDetail,
+      session: {
+        ...initialDetail.session,
+        state: 'failed',
+        execution_summary: {
+          total_actions: 1,
+          succeeded: 0,
+          failed: 1,
+          skipped: 0,
+          affected_file_paths: [],
+        },
+        proposed_actions: [{
+          ...initialDetail.session.proposed_actions[0],
+          approval_state: 'failed',
+          execution_result: { status: 'failed', message: 'Post-apply validation failed.' },
+        }],
+      },
+    })
+
+    renderScreen()
+
+    expect(await screen.findByTestId('ingest-review-detail')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Approve all/i }))
+    await waitFor(() => expect(approveAllIngestActions).toHaveBeenCalledWith('ing_1'))
+
+    fireEvent.click(screen.getByRole('button', { name: /Execute approved/i }))
+    await waitFor(() => expect(executeIngestSession).toHaveBeenCalledWith('ing_1'))
+    expect(await screen.findByTestId('execution-summary')).toHaveTextContent('0 succeeded, 1 failed, 0 skipped.')
   })
 
   it('ignores stale detail responses when switching sessions quickly', async () => {

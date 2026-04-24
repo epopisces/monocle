@@ -7,6 +7,7 @@ import { markdown } from '@codemirror/lang-markdown'
 import { yaml as yamlLang } from '@codemirror/lang-yaml'
 
 import type { Note } from '../../api/notes'
+import { getArchivedSourceDownloadUrl, isTextSourceRecord, type SourceLink } from '../../api/ingest'
 import { putNote } from '../../api/notes'
 import { approveNote } from '../../api/review'
 import { ApiError } from '../../api/client'
@@ -25,6 +26,7 @@ interface NoteEditorProps {
   onSaved: (updated: Note) => void
   onNavigate: (path: string) => void
   allNotes: { file_path: string; title: string }[]
+  onOpenSource?: (sourceId: string) => void
 }
 
 // ── Toast utility ─────────────────────────────────────────────────
@@ -42,6 +44,7 @@ export default function NoteEditor({
   onSaved,
   onNavigate,
   allNotes,
+  onOpenSource,
 }: NoteEditorProps) {
   const [mode, setMode] = useState<EditorMode>('yaml')
   const [localNote, setLocalNote] = useState<Note>(note)
@@ -290,6 +293,7 @@ export default function NoteEditor({
   }
 
   const isPending = localNote.metadata?.review_status === 'pending'
+  const sourceLinks = ((((localNote.metadata ?? {}) as Record<string, unknown>).sources) as SourceLink[] | undefined) ?? []
 
   return (
     <div className="note-editor" data-testid="note-editor">
@@ -336,6 +340,39 @@ export default function NoteEditor({
           )}
         </div>
       </div>
+
+      {sourceLinks.length > 0 && (
+        <details className="note-editor__sources" data-testid="note-sources">
+          <summary>Sources ({sourceLinks.length})</summary>
+          <ul className="note-editor__sources-list">
+            {sourceLinks.map(source => {
+              const label = source.author ? `${source.source_name} - ${source.author}` : source.source_name
+              return (
+                <li key={source.source_id}>
+                  {isTextSourceRecord(source) ? (
+                    <button
+                      type="button"
+                      className="note-editor__source-link"
+                      onClick={() => onOpenSource?.(source.source_id)}
+                    >
+                      {label}
+                    </button>
+                  ) : (
+                    <a
+                      className="note-editor__source-link"
+                      href={getArchivedSourceDownloadUrl(source.source_id)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      {label}
+                    </a>
+                  )}
+                </li>
+              )
+            })}
+          </ul>
+        </details>
+      )}
 
       {/* ── Toast ───────────────────────────────────────────────── */}
       {toast && (
