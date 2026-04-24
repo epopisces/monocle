@@ -133,7 +133,7 @@ async def lifespan(app: FastAPI):
     from monocle.index import get_index
     from monocle.vault import VaultLayer
 
-    vault = VaultLayer(cfg.vault.path)
+    vault = VaultLayer(cfg.vault.path, retention_versions=cfg.history.retention_versions)
     index = get_index(cfg)
     app.state.vault = vault
     app.state.index = index

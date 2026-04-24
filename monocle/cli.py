@@ -37,7 +37,7 @@ def _load_settings():
 def _make_vault(settings):
     """Create a VaultLayer from configuration."""
     from monocle.vault import VaultLayer
-    return VaultLayer(settings.vault.path)
+    return VaultLayer(settings.vault.path, retention_versions=settings.history.retention_versions)
 
 
 def _make_index(settings):

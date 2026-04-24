@@ -201,6 +201,19 @@ class Note(BaseModel):
     mtime: float | None = None  # filesystem mtime for optimistic concurrency
 
 
+class NoteHistoryEntry(BaseModel):
+    timestamp: str
+    title: str | None = None
+    updated: datetime | None = None
+    body_excerpt: str | None = None
+    byte_size: int = 0
+
+
+class NoteHistoryVersionResponse(BaseModel):
+    timestamp: str
+    note: Note
+
+
 class NoteChunk(BaseModel):
     """A single embedding chunk derived from a note."""
 
@@ -350,6 +363,15 @@ class DiffPreview(BaseModel):
     before_excerpt: str | None = None
     after_excerpt: str | None = None
     hunks: list[DiffPreviewHunk] = Field(default_factory=list)
+
+
+class NoteHistoryDiffResponse(BaseModel):
+    file_path: str
+    base_timestamp: str
+    compare_timestamp: str | None = None
+    base_label: str
+    compare_label: str
+    diff_preview: DiffPreview
 
 
 class IngestExecutionValidation(BaseModel):

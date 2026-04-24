@@ -26,7 +26,17 @@ from typing import Any
 import yaml
 from fastapi import HTTPException
 
-from monocle.models import LinkRef, Note, NoteMetadata, NoteRef, Page
+from monocle.models import (
+    DiffPreview,
+    DiffPreviewHunk,
+    LinkRef,
+    Note,
+    NoteHistoryDiffResponse,
+    NoteHistoryEntry,
+    NoteMetadata,
+    NoteRef,
+    Page,
+)
 from monocle.vault.normalise import normalise_frontmatter
 from monocle.vault.wikilinks import (
     parse_links_field,
@@ -92,6 +102,26 @@ def _ms_timestamp() -> str:
     """
     dt = datetime.now(timezone.utc)
     return dt.strftime("%Y-%m-%dT%H-%M-%S.") + f"{dt.microsecond // 1000:03d}Z"
+
+
+_VERSION_TIMESTAMP_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$")
+
+
+def _timestamp_from_datetime(value: datetime) -> str:
+    aware = value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+    aware = aware.astimezone(timezone.utc)
+    return aware.strftime("%Y-%m-%dT%H-%M-%S.") + f"{aware.microsecond // 1000:03d}Z"
+
+
+def _excerpt(text: str | None, limit: int = 320) -> str | None:
+    if text is None:
+        return None
+    stripped = text.strip()
+    if not stripped:
+        return None
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[: limit - 3].rstrip() + "..."
 
 
 def _slugify(text: str) -> str:
@@ -251,8 +281,9 @@ class VaultLayer:
             realpath at construction time for robust path-security checks.
     """
 
-    def __init__(self, vault_path: str | Path) -> None:
+    def __init__(self, vault_path: str | Path, retention_versions: int = 50) -> None:
         self.root = Path(os.path.realpath(str(vault_path)))
+        self.retention_versions = retention_versions
         self.root.mkdir(parents=True, exist_ok=True)
         logger.debug("VaultLayer initialised at %s", self.root)
 
@@ -291,13 +322,121 @@ class VaultLayer:
         """Return the ``.versions/<relative_path>/`` directory path."""
         return self.root / ".versions" / relative_path
 
+    def _version_timestamp_for(self, resolved: Path) -> str:
+        try:
+            note = _parse_note_file(resolved, resolved.name)
+        except Exception:
+            return _ms_timestamp()
+
+        updated = note.metadata.updated
+        if updated is None:
+            return _ms_timestamp()
+        return _timestamp_from_datetime(updated)
+
+    def _prune_version_dir(self, version_dir: Path) -> None:
+        if self.retention_versions < 1 or not version_dir.exists():
+            return
+
+        version_files = sorted(version_dir.glob("*.md"))
+        overflow = len(version_files) - self.retention_versions
+        if overflow <= 0:
+            return
+
+        for old_file in version_files[:overflow]:
+            old_file.unlink(missing_ok=True)
+
+    def set_history_retention(self, retention_versions: int) -> None:
+        self.retention_versions = retention_versions
+        versions_root = self.root / ".versions"
+        if not versions_root.exists():
+            return
+
+        version_dirs = {path.parent for path in versions_root.rglob("*.md")}
+        for version_dir in version_dirs:
+            self._prune_version_dir(version_dir)
+
+    def _resolve_version_file(self, file_path: str, timestamp: str) -> tuple[str, Path]:
+        if not _VERSION_TIMESTAMP_RE.match(timestamp):
+            raise HTTPException(status_code=403, detail="Invalid timestamp format")
+
+        resolved = self._safe_resolve(file_path)
+        relative = self._to_relative(resolved)
+        version_dir = self._version_dir(relative)
+        version_file = version_dir / f"{timestamp}.md"
+
+        try:
+            version_file.relative_to(version_dir)
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Invalid version path")
+
+        if not version_file.exists():
+            raise NoteNotFound(f"{file_path}@{timestamp}")
+
+        return relative, version_file
+
+    def _read_version_note(self, relative_path: str, version_file: Path) -> Note:
+        note = _parse_note_file(version_file, relative_path)
+        note.file_path = relative_path
+        return note
+
+    def _metadata_diff_text(self, note: Note | None) -> str | None:
+        if note is None:
+            return None
+        payload = note.metadata.model_dump(exclude_none=True)
+        payload.pop("updated", None)
+        if not payload:
+            return None
+        return yaml.dump(payload, default_flow_style=False, allow_unicode=True, sort_keys=True).strip()
+
+    def _build_history_diff(self, file_path: str, before_note: Note, after_note: Note) -> NoteHistoryDiffResponse:
+        hunks: list[DiffPreviewHunk] = []
+        if before_note.title != after_note.title:
+            hunks.append(DiffPreviewHunk(section="title", before=before_note.title, after=after_note.title))
+
+        before_meta = self._metadata_diff_text(before_note)
+        after_meta = self._metadata_diff_text(after_note)
+        if before_meta != after_meta:
+            hunks.append(
+                DiffPreviewHunk(
+                    section="frontmatter",
+                    before=_excerpt(before_meta, 800),
+                    after=_excerpt(after_meta, 800),
+                )
+            )
+
+        if before_note.body != after_note.body:
+            hunks.append(
+                DiffPreviewHunk(
+                    section="body",
+                    before=_excerpt(before_note.body, 1200),
+                    after=_excerpt(after_note.body, 1200),
+                )
+            )
+
+        return NoteHistoryDiffResponse(
+            file_path=file_path,
+            base_timestamp="",
+            compare_timestamp=None,
+            base_label="",
+            compare_label="Current",
+            diff_preview=DiffPreview(
+                kind="history",
+                before_excerpt=_excerpt(before_note.body, 500),
+                after_excerpt=_excerpt(after_note.body, 500),
+                hunks=hunks,
+            ),
+        )
+
     def _shadow_version(self, relative_path: str, resolved: Path) -> None:
         """Copy *resolved* to the shadow ``.versions/`` directory."""
         version_dir = self._version_dir(relative_path)
         version_dir.mkdir(parents=True, exist_ok=True)
-        ts = _ms_timestamp()
+        ts = self._version_timestamp_for(resolved)
         version_file = version_dir / f"{ts}.md"
+        if version_file.exists():
+            version_file = version_dir / f"{_ms_timestamp()}.md"
         shutil.copy2(str(resolved), str(version_file))
+        self._prune_version_dir(version_dir)
         logger.debug("Versioned %s → %s", relative_path, version_file.name)
 
     def _trash_path(self, relative_path: str) -> Path:
@@ -450,6 +589,11 @@ class VaultLayer:
                 )
             self._shadow_version(self._to_relative(target), target)
 
+        now = datetime.now(timezone.utc)
+        if note.metadata.created is None:
+            note.metadata.created = now
+        note.metadata.updated = now
+
         content = _note_to_markdown(note)
         self._atomic_write(target, content)
         logger.info("Written note: %s", file_path)
@@ -490,6 +634,7 @@ class VaultLayer:
 
         fm = dict(post.metadata)
         fm.update(updates)
+        fm["updated"] = datetime.now(timezone.utc)
 
         # Shadow before patching
         self._shadow_version(self._to_relative(resolved), resolved)
@@ -672,7 +817,7 @@ class VaultLayer:
             return []
         return sorted(f.stem for f in version_dir.glob("*.md"))
 
-    def restore_version(self, file_path: str, timestamp: str) -> None:
+    def restore_version(self, file_path: str, timestamp: str, if_mtime: float | None = None) -> None:
         """Restore a note from a historical version.
 
         Shadow-versions the current file before replacing it.
@@ -681,37 +826,56 @@ class VaultLayer:
             NoteNotFound(404): Note or version not found.
             HTTPException(403): Path traversal or invalid timestamp.
         """
-        # Validate timestamp format: must match _ms_timestamp() pattern
-        # Pattern: YYYY-MM-DDTHH-MM-SS.mmmZ (e.g. 2026-03-16T10-30-45.123Z)
-        if not re.match(r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.\d{3}Z$", timestamp):
-            raise HTTPException(
-                status_code=403,
-                detail="Invalid timestamp format",
-            )
-
         resolved = self._safe_resolve(file_path)
-        relative = self._to_relative(resolved)
-        version_dir = self._version_dir(relative)
-        version_file = version_dir / f"{timestamp}.md"
-
-        # Ensure version_file is within the intended version directory tree
-        try:
-            version_file.relative_to(version_dir)
-        except ValueError:
-            raise HTTPException(
-                status_code=403,
-                detail="Invalid version path",
-            )
-
-        if not version_file.exists():
-            raise NoteNotFound(f"{file_path}@{timestamp}")
+        relative, version_file = self._resolve_version_file(file_path, timestamp)
+        restored_note = self._read_version_note(relative, version_file)
 
         if resolved.exists():
+            current_mtime = resolved.stat().st_mtime
+            if if_mtime is not None and abs(current_mtime - if_mtime) > 0.01:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Conflict: note modified (expected mtime={if_mtime:.3f}, actual={current_mtime:.3f})",
+                )
             self._shadow_version(relative, resolved)
 
         resolved.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(str(version_file), str(resolved))
+        restored_note.metadata.updated = datetime.now(timezone.utc)
+        self._atomic_write(resolved, _note_to_markdown(restored_note))
         logger.info("Restored %s from version %s", file_path, timestamp)
+
+    def list_version_summaries(self, file_path: str) -> list[NoteHistoryEntry]:
+        resolved = self._safe_resolve(file_path)
+        relative = self._to_relative(resolved)
+        version_dir = self._version_dir(relative)
+        if not version_dir.exists():
+            return []
+
+        entries: list[NoteHistoryEntry] = []
+        for version_file in sorted(version_dir.glob("*.md"), reverse=True):
+            note = self._read_version_note(relative, version_file)
+            entries.append(
+                NoteHistoryEntry(
+                    timestamp=version_file.stem,
+                    title=note.title,
+                    updated=note.metadata.updated,
+                    body_excerpt=_excerpt(note.body),
+                    byte_size=version_file.stat().st_size,
+                )
+            )
+        return entries
+
+    def read_version(self, file_path: str, timestamp: str) -> Note:
+        relative, version_file = self._resolve_version_file(file_path, timestamp)
+        return self._read_version_note(relative, version_file)
+
+    def diff_version_against_current(self, file_path: str, timestamp: str) -> NoteHistoryDiffResponse:
+        before_note = self.read_version(file_path, timestamp)
+        current_note = self.read_note(file_path)
+        diff = self._build_history_diff(file_path, before_note, current_note)
+        diff.base_timestamp = timestamp
+        diff.base_label = timestamp
+        return diff
 
     # ------------------------------------------------------------------
     # Template listing

@@ -30,6 +30,10 @@ class ReviewPatch(BaseModel):
     auto_approve_threshold_pct: int | None = Field(None, ge=0, le=100)
 
 
+class HistoryPatch(BaseModel):
+    retention_versions: int | None = Field(None, ge=1, le=500)
+
+
 class ModelEntryPatch(BaseModel):
     """A model entry supplied in a PATCH request (full replacement semantics).
 
@@ -70,6 +74,7 @@ class TelemetryPatch(BaseModel):
 
 class SettingsPatch(BaseModel):
     review: ReviewPatch | None = None
+    history: HistoryPatch | None = None
     ai: AIPatch | None = None
     ui: UIPatch | None = None
     telemetry: TelemetryPatch | None = None
@@ -169,7 +174,7 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
     Trace filter updates are deferred until after all validations complete
     to ensure atomicity (no partial runtime state on rejection).
     """
-    from monocle.config import AIConfig, ReviewConfig
+    from monocle.config import AIConfig, HistoryConfig, ReviewConfig
     from monocle.ai import get_provider
 
     settings = request.app.state.settings
@@ -189,6 +194,20 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
                 new_review = ReviewConfig(**review_data)
                 settings = settings.model_copy(update={"review": new_review})
                 config_patch["review"] = review_updates
+            except ValidationError as exc:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=422, detail=str(exc))
+
+    if patch.history is not None:
+        history_updates = {k: v for k, v in patch.history.model_dump().items() if v is not None}
+        if history_updates:
+            try:
+                history_data = settings.history.model_dump()
+                history_data.update(history_updates)
+                new_history = HistoryConfig(**history_data)
+                settings = settings.model_copy(update={"history": new_history})
+                config_patch["history"] = history_updates
             except ValidationError as exc:
                 from fastapi import HTTPException
 
@@ -277,6 +296,9 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
     request.app.state.settings = settings
     if new_ai_provider is not None:
         request.app.state.ai = new_ai_provider
+    vault = getattr(request.app.state, "vault", None)
+    if vault is not None:
+        await asyncio.to_thread(vault.set_history_retention, settings.history.retention_versions)
 
     # Apply trace filters AFTER all validations/hot-reload succeed (atomic guarantee)
     if pending_trace_filters is not None:

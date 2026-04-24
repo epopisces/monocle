@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
-from monocle.models import Note, NoteMetadata, NoteRef, Page
+from monocle.models import Note, NoteHistoryDiffResponse, NoteHistoryEntry, NoteHistoryVersionResponse, NoteMetadata, NoteRef, Page
 
 router = APIRouter(tags=["notes"])
 logger = logging.getLogger(__name__)
@@ -40,6 +40,10 @@ class NotePatchRequest(BaseModel):
 
 class NoteMoveRequest(BaseModel):
     to_path: str
+
+
+class NoteRestoreRequest(BaseModel):
+    if_mtime: float | None = None
 
 
 class BacklinkRef(BaseModel):
@@ -143,6 +147,45 @@ async def get_note_backlinks(path: str, request: Request) -> list[BacklinkRef]:
         return results
 
     return await asyncio.to_thread(_scan)
+
+
+@router.get("/notes/{path:path}/history", response_model=list[NoteHistoryEntry])
+async def get_note_history(path: str, request: Request) -> list[NoteHistoryEntry]:
+    vault = request.app.state.vault
+    return await asyncio.to_thread(vault.list_version_summaries, path)
+
+
+@router.get("/notes/{path:path}/history/{timestamp}", response_model=NoteHistoryVersionResponse)
+async def get_note_history_version(path: str, timestamp: str, request: Request) -> NoteHistoryVersionResponse:
+    vault = request.app.state.vault
+    note = await asyncio.to_thread(vault.read_version, path, timestamp)
+    return NoteHistoryVersionResponse(timestamp=timestamp, note=note)
+
+
+@router.get("/notes/{path:path}/history/{timestamp}/diff", response_model=NoteHistoryDiffResponse)
+async def get_note_history_diff(path: str, timestamp: str, request: Request) -> NoteHistoryDiffResponse:
+    vault = request.app.state.vault
+    return await asyncio.to_thread(vault.diff_version_against_current, path, timestamp)
+
+
+@router.post("/notes/{path:path}/history/{timestamp}/restore", response_model=Note)
+async def restore_note_history_version(path: str, timestamp: str, request: Request, body: NoteRestoreRequest | None = None) -> Note:
+    vault = request.app.state.vault
+    reindex_queue = getattr(request.app.state, "reindex_queue", None)
+    activity_monitor = getattr(request.app.state, "activity_monitor", None)
+    if_mtime = body.if_mtime if body is not None else None
+
+    tracker = activity_monitor.track_foreground_write() if activity_monitor is not None else None
+    if tracker is not None:
+        with tracker:
+            await asyncio.to_thread(vault.restore_version, path, timestamp, if_mtime)
+    else:
+        await asyncio.to_thread(vault.restore_version, path, timestamp, if_mtime)
+
+    if reindex_queue is not None:
+        reindex_queue.push(path)
+    request.app.state._review_pending_count = None
+    return await asyncio.to_thread(vault.read_note, path)
 
 
 @router.get("/notes/{path:path}", response_model=Note)

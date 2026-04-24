@@ -68,6 +68,9 @@ review:
     tag_plausibility: 0.20
     entity_match: 0.15
 
+history:
+  retention_versions: 50
+
 ingest:
   background_prepare_enabled: true
   prepare_poll_interval_s: 5.0

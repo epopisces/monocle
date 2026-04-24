@@ -220,6 +220,84 @@ class TestNotes:
         )
         assert r.status_code == 200
 
+    def test_note_history_diff_and_restore_flow(self, api_client: TestClient):
+        payload = {
+            "title": "Versioned",
+            "body": "Original body",
+            "metadata": {"type": "observation", "domain": "work"},
+        }
+        created = api_client.put("/api/notes/work/versioned.md", json=payload)
+        assert created.status_code == 201
+
+        updated = api_client.put(
+            "/api/notes/work/versioned.md",
+            json={
+                **payload,
+                "body": "Updated body",
+                "metadata": {**payload["metadata"], "review_status": "pending"},
+            },
+        )
+        assert updated.status_code == 200
+
+        history = api_client.get("/api/notes/work/versioned.md/history")
+        assert history.status_code == 200
+        entries = history.json()
+        assert len(entries) == 1
+        timestamp = entries[0]["timestamp"]
+
+        version = api_client.get(f"/api/notes/work/versioned.md/history/{timestamp}")
+        assert version.status_code == 200
+        assert version.json()["note"]["body"] == "Original body"
+
+        diff = api_client.get(f"/api/notes/work/versioned.md/history/{timestamp}/diff")
+        assert diff.status_code == 200
+        diff_body = diff.json()
+        assert diff_body["diff_preview"]["kind"] == "history"
+        assert {hunk["section"] for hunk in diff_body["diff_preview"]["hunks"]} >= {"body", "frontmatter"}
+
+        restored = api_client.post(
+            f"/api/notes/work/versioned.md/history/{timestamp}/restore",
+            json={"if_mtime": updated.json()["mtime"]},
+        )
+        assert restored.status_code == 200
+        assert restored.json()["body"] == "Original body"
+
+    def test_note_history_restore_rejects_stale_mtime(self, api_client: TestClient):
+        payload = {
+            "title": "Versioned",
+            "body": "Original body",
+            "metadata": {"type": "observation", "domain": "work"},
+        }
+        api_client.put("/api/notes/work/versioned-stale.md", json=payload)
+        updated = api_client.put(
+            "/api/notes/work/versioned-stale.md",
+            json={
+                **payload,
+                "body": "Updated body",
+                "metadata": {**payload["metadata"], "review_status": "pending"},
+            },
+        )
+        assert updated.status_code == 200
+        stale_mtime = updated.json()["mtime"]
+        timestamp = api_client.get("/api/notes/work/versioned-stale.md/history").json()[0]["timestamp"]
+
+        newest = api_client.put(
+            "/api/notes/work/versioned-stale.md",
+            json={
+                **payload,
+                "body": "Newest body",
+                "metadata": {**payload["metadata"], "review_status": "pending"},
+                "if_mtime": stale_mtime,
+            },
+        )
+        assert newest.status_code == 200
+
+        restored = api_client.post(
+            f"/api/notes/work/versioned-stale.md/history/{timestamp}/restore",
+            json={"if_mtime": stale_mtime},
+        )
+        assert restored.status_code == 409
+
     def test_delete_note(self, api_client: TestClient):
         api_client.put("/api/notes/work/to-delete.md", json={"title": "Del", "body": "b", "metadata": {}})
         r = api_client.delete("/api/notes/work/to-delete.md")

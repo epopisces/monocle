@@ -81,6 +81,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const thresholdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draftQT, setDraftQT] = useState<number | null>(null)
   const [draftAAT, setDraftAAT] = useState<number | null>(null)
+  const [draftHistoryRetention, setDraftHistoryRetention] = useState<number | null>(null)
   const [modelStatus, setModelStatus] = useState<ProviderModelsResponse | null>(null)
   const { theme, setTheme } = useTheme()
 
@@ -105,7 +106,7 @@ export default function SettingsModal({ open, onClose }: Props) {
 
   // Clear draft values when server data refreshes; cancel debounce timer on unmount
   useEffect(() => {
-    if (state.settings) { setDraftQT(null); setDraftAAT(null) }
+    if (state.settings) { setDraftQT(null); setDraftAAT(null); setDraftHistoryRetention(null) }
   }, [state.settings])
   useEffect(() => () => { if (thresholdTimer.current) clearTimeout(thresholdTimer.current) }, [])
 
@@ -166,6 +167,19 @@ export default function SettingsModal({ open, onClose }: Props) {
       dispatch({ type: 'KEY_ROTATED', payload: r.mcp_key_last4 })
     } catch (e) {
       dispatch({ type: 'KEY_ERROR', payload: String(e) })
+    }
+  }
+
+  const handleHistoryRetentionBlur = async () => {
+    if (!settings || draftHistoryRetention === null || Number.isNaN(draftHistoryRetention)) return
+    if (draftHistoryRetention === settings.history.retention_versions) return
+
+    dispatch({ type: 'SAVING' })
+    try {
+      const saved = await patchSettings({ history: { retention_versions: draftHistoryRetention } })
+      dispatch({ type: 'SAVED', payload: saved })
+    } catch (e) {
+      dispatch({ type: 'SAVE_ERROR', payload: String(e) })
     }
   }
 
@@ -340,6 +354,26 @@ export default function SettingsModal({ open, onClose }: Props) {
                   disabled={status === 'saving'}
                   className="settings-range"
                 />
+              </label>
+            </section>
+
+            <section className="settings-section">
+              <h3 className="settings-section__title">History</h3>
+              <label className="settings-field">
+                <span className="settings-field__label">Stored note versions per document</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={500}
+                  step={1}
+                  value={draftHistoryRetention ?? settings.history.retention_versions}
+                  onChange={e => setDraftHistoryRetention(parseInt(e.target.value, 10))}
+                  onBlur={handleHistoryRetentionBlur}
+                  disabled={status === 'saving'}
+                  className="settings-input"
+                  data-testid="history-retention-input"
+                />
+                <span className="settings-field__hint">Older snapshots are pruned automatically when this limit is exceeded.</span>
               </label>
             </section>
 

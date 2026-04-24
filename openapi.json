@@ -211,6 +211,222 @@
         }
       }
     },
+    "/api/notes/{path}/history": {
+      "get": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "Get Note History",
+        "operationId": "get_note_history_api_notes__path__history_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/NoteHistoryEntry"
+                  },
+                  "title": "Response Get Note History Api Notes  Path  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes/{path}/history/{timestamp}": {
+      "get": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "Get Note History Version",
+        "operationId": "get_note_history_version_api_notes__path__history__timestamp__get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Timestamp"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteHistoryVersionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes/{path}/history/{timestamp}/diff": {
+      "get": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "Get Note History Diff",
+        "operationId": "get_note_history_diff_api_notes__path__history__timestamp__diff_get",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Timestamp"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteHistoryDiffResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notes/{path}/history/{timestamp}/restore": {
+      "post": {
+        "tags": [
+          "notes"
+        ],
+        "summary": "Restore Note History Version",
+        "operationId": "restore_note_history_version_api_notes__path__history__timestamp__restore_post",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "timestamp",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Timestamp"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/NoteRestoreRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Note"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notes/{path}": {
       "get": {
         "tags": [
@@ -3063,6 +3279,25 @@
         ],
         "title": "HealthResponse"
       },
+      "HistoryPatch": {
+        "properties": {
+          "retention_versions": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 500.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Versions"
+          }
+        },
+        "type": "object",
+        "title": "HistoryPatch"
+      },
       "IndexStats": {
         "properties": {
           "total_chunks": {
@@ -3848,6 +4083,118 @@
         "title": "Note",
         "description": "Full note contents including frontmatter metadata and Markdown body."
       },
+      "NoteHistoryDiffResponse": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "base_timestamp": {
+            "type": "string",
+            "title": "Base Timestamp"
+          },
+          "compare_timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compare Timestamp"
+          },
+          "base_label": {
+            "type": "string",
+            "title": "Base Label"
+          },
+          "compare_label": {
+            "type": "string",
+            "title": "Compare Label"
+          },
+          "diff_preview": {
+            "$ref": "#/components/schemas/DiffPreview"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "base_timestamp",
+          "base_label",
+          "compare_label",
+          "diff_preview"
+        ],
+        "title": "NoteHistoryDiffResponse"
+      },
+      "NoteHistoryEntry": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "updated": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated"
+          },
+          "body_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body Excerpt"
+          },
+          "byte_size": {
+            "type": "integer",
+            "title": "Byte Size",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp"
+        ],
+        "title": "NoteHistoryEntry"
+      },
+      "NoteHistoryVersionResponse": {
+        "properties": {
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "note": {
+            "$ref": "#/components/schemas/Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "timestamp",
+          "note"
+        ],
+        "title": "NoteHistoryVersionResponse"
+      },
       "NoteMetadata": {
         "properties": {
           "type": {
@@ -4157,6 +4504,23 @@
         ],
         "title": "NoteRef",
         "description": "Lightweight reference to a note (used in listings and search results)."
+      },
+      "NoteRestoreRequest": {
+        "properties": {
+          "if_mtime": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "If Mtime"
+          }
+        },
+        "type": "object",
+        "title": "NoteRestoreRequest"
       },
       "NoteWriteRequest": {
         "properties": {
@@ -4602,6 +4966,16 @@
             "anyOf": [
               {
                 "$ref": "#/components/schemas/ReviewPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "history": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HistoryPatch"
               },
               {
                 "type": "null"

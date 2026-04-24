@@ -71,6 +71,7 @@ def _make_vault(tmp_path: Path, notes: list[dict[str, Any]] | None = None) -> Pa
 def _mock_settings(vault_path: str):
     from monocle.config import (
         AIConfig,
+            HistoryConfig,
         IndexConfig,
         ReviewConfig,
         ServerConfig,
@@ -83,6 +84,7 @@ def _mock_settings(vault_path: str):
     s.vault = VaultConfig(path=vault_path, inbox_path=str(Path(vault_path) / "inbox"))
     s.index = IndexConfig(backend="chroma", chroma_persist_path="./data/chroma_test")
     s.ai = AIConfig()  # defaults: llama3.2 chat on ollama, nomic-embed on ollama
+    s.history = HistoryConfig()
     s.review = ReviewConfig()
     s.server = ServerConfig()
     s.telemetry = TelemetryConfig(enabled=True, otlp_endpoint="http://localhost:4317", log_level="DEBUG", log_format="text")

@@ -80,6 +80,28 @@ class TestPatchSettings:
         assert r.status_code == 200
         assert r.json()["review"]["queue_threshold"] == 0.75
 
+    def test_patch_history_retention_versions(self, api_client: TestClient) -> None:
+        r = api_client.patch("/api/settings", json={"history": {"retention_versions": 12}})
+        assert r.status_code == 200
+        assert r.json()["history"]["retention_versions"] == 12
+        assert api_client.app.state.settings.history.retention_versions == 12
+        assert api_client.app.state.vault.retention_versions == 12
+
+    def test_patch_history_retention_prunes_existing_versions(self, api_client: TestClient) -> None:
+        payload = {"title": "History", "body": "v1", "metadata": {"type": "observation", "domain": "work"}}
+        api_client.put("/api/notes/work/history-prune.md", json=payload)
+        api_client.put("/api/notes/work/history-prune.md", json={**payload, "body": "v2"})
+        api_client.put("/api/notes/work/history-prune.md", json={**payload, "body": "v3"})
+
+        versions_before = api_client.app.state.vault.list_versions("work/history-prune.md")
+        assert len(versions_before) == 2
+
+        r = api_client.patch("/api/settings", json={"history": {"retention_versions": 1}})
+        assert r.status_code == 200
+
+        versions_after = api_client.app.state.vault.list_versions("work/history-prune.md")
+        assert len(versions_after) == 1
+
     def test_patch_review_auto_approve_threshold(self, api_client: TestClient) -> None:
         r = api_client.patch(
             "/api/settings", json={"review": {"auto_approve_threshold_pct": 90}}
