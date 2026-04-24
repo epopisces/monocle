@@ -6,6 +6,8 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
+from monocle.models import NoteMetadata
+
 if TYPE_CHECKING:
     from monocle.models import Note
     from monocle.vault import VaultLayer
@@ -14,12 +16,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_BODY_LENGTH = 50_000
+_ALLOWED_METADATA_UPDATE_KEYS = frozenset({"sources"})
 
 _METADATA_TYPE_ALIASES = {
     "person": "person_note",
     "meeting": "meeting_note",
     "blank": "other",
 }
+
+
+def _apply_metadata_updates(metadata: "NoteMetadata", metadata_updates: dict[str, Any] | None) -> "NoteMetadata":
+    if not metadata_updates:
+        return metadata
+
+    disallowed = sorted(set(metadata_updates) - _ALLOWED_METADATA_UPDATE_KEYS)
+    if disallowed:
+        raise ValueError(
+            "metadata_updates may only modify: "
+            f"{', '.join(sorted(_ALLOWED_METADATA_UPDATE_KEYS))}. "
+            f"Rejected: {', '.join(disallowed)}"
+        )
+
+    metadata_payload = metadata.model_dump(exclude_none=True)
+    for key in _ALLOWED_METADATA_UPDATE_KEYS:
+        if key in metadata_updates:
+            metadata_payload[key] = metadata_updates[key]
+    return NoteMetadata(**metadata_payload)
 
 
 async def read_note(vault: "VaultLayer", file_path: str) -> "Note":
@@ -43,6 +65,7 @@ async def create_note(
     note_type: str = "observation",
     domain: str = "personal",
     tags: list[str] | None = None,
+    metadata_updates: dict[str, Any] | None = None,
 ) -> "Note":
     """Create a new note from a template.
 
@@ -75,8 +98,6 @@ async def create_note(
             f"Allowed: {', '.join(sorted(TEMPLATE_FILE_MAP))}"
         )
 
-    from monocle.models import NoteMetadata
-
     metadata_type = _METADATA_TYPE_ALIASES.get(note_type, note_type)
 
     metadata = NoteMetadata(
@@ -85,6 +106,7 @@ async def create_note(
         tags=tags or [],
         review_status="pending",
     )
+    metadata = _apply_metadata_updates(metadata, metadata_updates)
     note = await asyncio.to_thread(
         vault.create_from_template,
         note_type,
@@ -102,6 +124,9 @@ async def update_note(
     reindex_queue: "ReindexQueue | None",
     file_path: str,
     body: str,
+    *,
+    title: str | None = None,
+    metadata_updates: dict[str, Any] | None = None,
 ) -> "Note":
     """Update the body of an existing note (hard overwrite).
 
@@ -124,7 +149,10 @@ async def update_note(
         raise ValueError(f"body exceeds {_MAX_BODY_LENGTH:,} character limit")
 
     note = await asyncio.to_thread(vault.read_note, file_path)
+    if title is not None:
+        note.title = title
     note.body = body
+    note.metadata = _apply_metadata_updates(note.metadata, metadata_updates)
     note.metadata.updated = datetime.now(timezone.utc)
     await asyncio.to_thread(vault.write_note, file_path, note)
     if reindex_queue is not None:

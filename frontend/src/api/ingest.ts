@@ -56,6 +56,40 @@ export interface DiffPreview {
   hunks: DiffPreviewHunk[]
 }
 
+export interface IngestExecutionValidation {
+  title_match: boolean
+  body_match: boolean
+  sources_attached: boolean
+}
+
+export interface ProposedActionExecutionResult {
+  status: 'succeeded' | 'failed' | 'skipped'
+  message?: string | null
+  file_path?: string | null
+  executed_at?: string | null
+  validation?: IngestExecutionValidation | null
+}
+
+export interface IngestExecutionSummary {
+  total_actions: number
+  succeeded: number
+  failed: number
+  skipped: number
+  affected_file_paths: string[]
+  completed_at?: string | null
+}
+
+export interface SourceLink {
+  source_id: string
+  session_id?: string | null
+  source_name: string
+  archive_path: string
+  kind: string
+  mime_type?: string | null
+  captured_at?: string | null
+  author?: string | null
+}
+
 export interface ProposedAction {
   action_id: string
   action_type: 'create_note' | 'update_note'
@@ -65,6 +99,7 @@ export interface ProposedAction {
   rationale: string
   diff_preview?: DiffPreview | null
   proposed_content: Record<string, unknown>
+  execution_result?: ProposedActionExecutionResult | null
 }
 
 export interface ProposedActionPatchRequest {
@@ -93,6 +128,7 @@ export interface IngestSession {
   updated_at: string
   prepared_at: string | null
   last_true_up_at: string | null
+  execution_summary?: IngestExecutionSummary | null
 }
 
 export interface SourceRecord {
@@ -112,6 +148,12 @@ export interface SourceRecord {
 export interface IngestSessionDetailResponse {
   session: IngestSession
   sources: SourceRecord[]
+}
+
+export interface ArchivedSourceContentResponse {
+  source: SourceRecord
+  text: string
+  truncated: boolean
 }
 
 export interface IngestTrueUpResponse {
@@ -211,6 +253,10 @@ export function approveAllIngestActions(sessionId: string): Promise<IngestSessio
   return apiPost<IngestSessionDetailResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}/approve-all`)
 }
 
+export function executeIngestSession(sessionId: string): Promise<IngestSessionDetailResponse> {
+  return apiPost<IngestSessionDetailResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}/execute`)
+}
+
 export function trueUpIngestSession(sessionId: string): Promise<IngestTrueUpResponse> {
   return apiPost<IngestTrueUpResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}/true-up`)
 }
@@ -249,4 +295,28 @@ export function retryIngestFailure(id: string): Promise<IngestResponse> {
 
 export function deleteIngestFailure(id: string): Promise<void> {
   return apiDelete<void>(`/api/ingest/failures/${encodeURIComponent(id)}`)
+}
+
+export function listArchivedSources(params?: { limit?: number; offset?: number }): Promise<SourceRecord[]> {
+  return apiGet<SourceRecord[]>('/api/ingest/sources', params)
+}
+
+export function getArchivedSource(sourceId: string): Promise<SourceRecord> {
+  return apiGet<SourceRecord>(`/api/ingest/sources/${encodeURIComponent(sourceId)}`)
+}
+
+export function getArchivedSourceContent(sourceId: string): Promise<ArchivedSourceContentResponse> {
+  return apiGet<ArchivedSourceContentResponse>(`/api/ingest/sources/${encodeURIComponent(sourceId)}/content`)
+}
+
+export function getArchivedSourceDownloadUrl(sourceId: string): string {
+  return `/api/ingest/sources/${encodeURIComponent(sourceId)}/download`
+}
+
+export function isTextSourceRecord(source: { kind: string; mime_type?: string | null }): boolean {
+  if (['text', 'url', 'chat_text'].includes(source.kind)) {
+    return true
+  }
+  const mime = (source.mime_type ?? '').toLowerCase()
+  return mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml'
 }

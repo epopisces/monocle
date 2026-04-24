@@ -18,6 +18,7 @@ _DEFAULTS: dict[str, Any] = {
     "tags": [],
     "action_items": [],
     "links": [],
+    "sources": [],
     "confidence": 1.0,
     "confidence_rationale": None,
     "review_status": "approved",  # existing Obsidian notes are trusted
@@ -40,6 +41,7 @@ def normalise_frontmatter(fm: dict[str, Any]) -> dict[str, Any]:
     - ``people: null`` → ``[]``
     - ``tags: null``   → ``[]``
     - ``action_items: null`` → ``[]``
+    - ``sources: null`` → ``[]``
     """
     for key, default in _DEFAULTS.items():
         if key not in fm or fm[key] is None:
@@ -47,7 +49,7 @@ def normalise_frontmatter(fm: dict[str, Any]) -> dict[str, Any]:
             fm[key] = list(default) if isinstance(default, list) else default
 
     # Coerce null list fields that were explicitly set to None in YAML
-    for list_field in ("people", "tags", "action_items", "links"):
+    for list_field in ("people", "tags", "action_items", "links", "sources"):
         if fm.get(list_field) is None:
             fm[list_field] = []
 

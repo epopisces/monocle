@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { listNotes, getNote, listTemplates, type Note, type NoteRef } from '../../api/notes'
+import {
+  getArchivedSource,
+  getArchivedSourceContent,
+  getArchivedSourceDownloadUrl,
+  isTextSourceRecord,
+  listArchivedSources,
+  type ArchivedSourceContentResponse,
+  type SourceRecord,
+} from '../../api/ingest'
 import type { TemplateSchema } from './FormEditor'
 import FileTree from './FileTree'
 import NoteEditor from './NoteEditor'
@@ -10,18 +19,21 @@ import './DocumentBrowserScreen.css'
 export default function DocumentBrowserScreen() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [notes, setNotes] = useState<NoteRef[]>([])
+  const [sources, setSources] = useState<SourceRecord[]>([])
   const [templates, setTemplates] = useState<TemplateSchema[]>([])
-  const [selectedPath, setSelectedPath] = useState<string | null>(
-    searchParams.get('path'),
-  )
+  const [selectedPath, setSelectedPath] = useState<string | null>(searchParams.get('path'))
+  const [selectedSourceId, setSelectedSourceId] = useState<string | null>(searchParams.get('source'))
   const [openNote, setOpenNote] = useState<Note | null>(null)
+  const [openSource, setOpenSource] = useState<SourceRecord | null>(null)
+  const [sourceContent, setSourceContent] = useState<ArchivedSourceContentResponse | null>(null)
+  const [loadingSource, setLoadingSource] = useState(false)
+  const [sourceError, setSourceError] = useState<string | null>(null)
   const [loadingNote, setLoadingNote] = useState(false)
   const [noteError, setNoteError] = useState<string | null>(null)
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [notesError, setNotesError] = useState<string | null>(null)
   const [wikiToast, setWikiToast] = useState<string | null>(null)
 
-  // Load note list + templates on mount
   useEffect(() => {
     setLoadingNotes(true)
     setNotesError(null)
@@ -41,15 +53,26 @@ export default function DocumentBrowserScreen() {
         console.error('[DocumentBrowser] listTemplates error:', err)
         setTemplates([])
       })
+
+    listArchivedSources({ limit: 200 })
+      .then(items => setSources(items))
+      .catch(err => {
+        console.error('[DocumentBrowser] listArchivedSources error:', err)
+        setSources([])
+      })
   }, [])
 
-  // If URL has ?path= or ?wikilink=, resolve them
   useEffect(() => {
     const pathParam = searchParams.get('path')
+    const sourceParam = searchParams.get('source')
     const wikilinkParam = searchParams.get('wikilink')
 
-    if (pathParam) {
+    if (sourceParam) {
+      setSelectedSourceId(sourceParam)
+      setSelectedPath(null)
+    } else if (pathParam) {
       setSelectedPath(pathParam)
+      setSelectedSourceId(null)
     } else if (wikilinkParam && notes.length > 0) {
       const lower = wikilinkParam.toLowerCase()
       const match = notes.find(
@@ -57,25 +80,23 @@ export default function DocumentBrowserScreen() {
       )
       if (match) {
         setSelectedPath(match.file_path)
+        setSelectedSourceId(null)
         setSearchParams({ path: match.file_path }, { replace: true })
       } else {
         setWikiToast(`Note not found: "${wikilinkParam}"`)
-        // Remove unresolved wikilink from URL to prevent toast on refresh/back navigation
         setSearchParams({}, { replace: true })
       }
     }
   }, [searchParams, notes, setSearchParams])
 
-  // Auto-dismiss wikilink resolution toast
   useEffect(() => {
     if (!wikiToast) return
     const t = setTimeout(() => setWikiToast(null), 4000)
     return () => clearTimeout(t)
   }, [wikiToast])
 
-  // Load note content when selectedPath changes
   useEffect(() => {
-    if (!selectedPath) {
+    if (!selectedPath || selectedSourceId) {
       setOpenNote(null)
       return
     }
@@ -93,12 +114,60 @@ export default function DocumentBrowserScreen() {
         if (!cancelled) setLoadingNote(false)
       })
     return () => { cancelled = true }
-  }, [selectedPath])
+  }, [selectedPath, selectedSourceId])
+
+  useEffect(() => {
+    if (!selectedSourceId) {
+      setOpenSource(null)
+      setSourceContent(null)
+      setSourceError(null)
+      return
+    }
+
+    const sourceId: string = selectedSourceId
+
+    let cancelled = false
+    async function loadSource() {
+      setLoadingSource(true)
+      setSourceError(null)
+      try {
+        const source = await getArchivedSource(sourceId)
+        if (cancelled) return
+        setOpenSource(source)
+        if (isTextSourceRecord(source)) {
+          const content = await getArchivedSourceContent(sourceId)
+          if (cancelled) return
+          setSourceContent(content)
+        } else {
+          setSourceContent(null)
+        }
+      } catch (err) {
+        if (!cancelled) setSourceError(String((err as Error)?.message ?? 'Failed to load source'))
+      } finally {
+        if (!cancelled) setLoadingSource(false)
+      }
+    }
+
+    loadSource()
+    return () => { cancelled = true }
+  }, [selectedSourceId])
 
   const handleSelectNote = useCallback((path: string) => {
     setSelectedPath(path)
+    setSelectedSourceId(null)
     setSearchParams({ path }, { replace: true })
   }, [setSearchParams])
+
+  const handleOpenSource = useCallback((sourceId: string) => {
+    const source = sources.find(item => item.source_id === sourceId)
+    if (source && !isTextSourceRecord(source)) {
+      window.open(getArchivedSourceDownloadUrl(sourceId), '_blank', 'noopener,noreferrer')
+      return
+    }
+    setSelectedSourceId(sourceId)
+    setSelectedPath(null)
+    setSearchParams({ source: sourceId }, { replace: true })
+  }, [setSearchParams, sources])
 
   const handleNavigate = useCallback((path: string) => {
     handleSelectNote(path)
@@ -106,7 +175,6 @@ export default function DocumentBrowserScreen() {
 
   const handleSaved = useCallback((updated: Note) => {
     setOpenNote(updated)
-    // Refresh note list entry
     setNotes(prev =>
       prev.map(n =>
         n.file_path === updated.file_path
@@ -142,7 +210,6 @@ export default function DocumentBrowserScreen() {
           {wikiToast}
         </div>
       )}
-      {/* ── Left: file tree ─────────────────────────────────── */}
       <aside className="doc-browser__sidebar">
         <div className="doc-browser__sidebar-header">
           <span className="doc-browser__sidebar-title">Vault</span>
@@ -167,23 +234,67 @@ export default function DocumentBrowserScreen() {
           </div>
         )}
         {!loadingNotes && !notesError && (
-          <FileTree
-            notes={notes}
-            selectedPath={selectedPath}
-            onSelect={handleSelectNote}
-            onDeleted={handleDeleted}
-            onRenamed={handleRenamed}
-          />
+          <>
+            <FileTree
+              notes={notes}
+              selectedPath={selectedPath}
+              onSelect={handleSelectNote}
+              onDeleted={handleDeleted}
+              onRenamed={handleRenamed}
+            />
+            {sources.length > 0 && (
+              <details className="doc-browser__sources-drawer" data-testid="archived-sources-drawer">
+                <summary>Archived Sources ({sources.length})</summary>
+                <ul className="doc-browser__sources-list">
+                  {sources.map(source => (
+                    <li key={source.source_id}>
+                      <button type="button" onClick={() => handleOpenSource(source.source_id)}>
+                        {source.source_name}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </>
         )}
       </aside>
 
-      {/* ── Right: editor + backlinks ─────────────────────── */}
       <div className="doc-browser__main">
-        {!selectedPath && (
+        {!selectedPath && !selectedSourceId && (
           <div className="doc-browser__empty" data-testid="doc-browser-empty">
             <span className="doc-browser__empty-icon">📄</span>
             <p>Select a note from the vault</p>
           </div>
+        )}
+
+        {selectedSourceId && loadingSource && (
+          <div className="doc-browser__loading" data-testid="source-viewer-loading">
+            Loading source…
+          </div>
+        )}
+
+        {selectedSourceId && sourceError && (
+          <div className="doc-browser__error" data-testid="source-viewer-error">
+            {sourceError}
+          </div>
+        )}
+
+        {openSource && !loadingSource && !sourceError && (
+          <section className="doc-browser__source-viewer" data-testid="source-viewer">
+            <div className="doc-browser__source-header">
+              <div>
+                <h2>{openSource.source_name}</h2>
+                <p>{openSource.kind}{openSource.mime_type ? ` · ${openSource.mime_type}` : ''}</p>
+              </div>
+              <a href={getArchivedSourceDownloadUrl(openSource.source_id)} target="_blank" rel="noreferrer">Open source file</a>
+            </div>
+            {sourceContent ? (
+              <pre className="doc-browser__source-content" data-testid="source-viewer-content">{sourceContent.text}</pre>
+            ) : (
+              <p className="doc-browser__source-muted">This archived source is not text-previewable in the document browser.</p>
+            )}
+          </section>
         )}
 
         {selectedPath && loadingNote && (
@@ -206,6 +317,7 @@ export default function DocumentBrowserScreen() {
               onSaved={handleSaved}
               onNavigate={handleNavigate}
               allNotes={notes}
+              onOpenSource={handleOpenSource}
             />
             <BacklinksPanel
               path={openNote.file_path}

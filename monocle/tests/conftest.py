@@ -235,6 +235,7 @@ def api_client(tmp_path: Path, mock_ai):
         from monocle.ingest import IngestPipeline
         from monocle.ingest.plugin import IngestPluginRegistry
         from monocle.ingest.plugins import register_default_plugins
+        from monocle.mcp_server import init_mcp_state
         from monocle.services.ingest_sessions import IngestSessionStore
 
         _reg = IngestPluginRegistry.get()
@@ -277,6 +278,15 @@ def api_client(tmp_path: Path, mock_ai):
 
         from monocle.graph import GraphBuilder
         app.state.graph_builder = GraphBuilder(vault)
+        init_mcp_state(
+            vault,
+            index,
+            mock_ai,
+            pipeline,
+            app.state.graph_builder,
+            settings=settings,
+            reindex_queue=rq,
+        )
 
         yield
 

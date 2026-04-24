@@ -106,6 +106,37 @@
   opacity: 0.85;
 }
 
+.note-editor__sources {
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-surface);
+  padding: 0.55rem var(--space-3);
+}
+
+.note-editor__sources summary {
+  cursor: pointer;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.note-editor__sources-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.note-editor__source-link {
+  background: none;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline;
+}
+
 /* ── Toast ───────────────────────────────────────────────────── */
 .note-editor__toast {
   align-items: center;

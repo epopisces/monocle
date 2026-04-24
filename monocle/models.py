@@ -108,6 +108,19 @@ class LinkRef(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class SourceLink(BaseModel):
+    """A provenance link from a note back to an archived raw source."""
+
+    source_id: str
+    session_id: str | None = None
+    source_name: str
+    archive_path: str
+    kind: SourceRecordKind
+    mime_type: str | None = None
+    captured_at: str | None = None
+    author: str | None = None
+
+
 class GraphNode(BaseModel):
     id: str
     label: str
@@ -157,6 +170,7 @@ class NoteMetadata(BaseModel):
     approved_at: datetime | None = None
     approval_mode: ApprovalMode | None = None
     links: list[LinkRef] = Field(default_factory=list)
+    sources: list[SourceLink] = Field(default_factory=list)
     # Optional org field for multi-employer support
     org: str | None = None
 
@@ -338,6 +352,29 @@ class DiffPreview(BaseModel):
     hunks: list[DiffPreviewHunk] = Field(default_factory=list)
 
 
+class IngestExecutionValidation(BaseModel):
+    title_match: bool = False
+    body_match: bool = False
+    sources_attached: bool = False
+
+
+class ProposedActionExecutionResult(BaseModel):
+    status: Literal["succeeded", "failed", "skipped"]
+    message: str | None = None
+    file_path: str | None = None
+    executed_at: str | None = None
+    validation: IngestExecutionValidation | None = None
+
+
+class IngestExecutionSummary(BaseModel):
+    total_actions: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped: int = 0
+    affected_file_paths: list[str] = Field(default_factory=list)
+    completed_at: str | None = None
+
+
 class ProposedAction(BaseModel):
     action_id: str
     action_type: ProposedActionType
@@ -347,6 +384,7 @@ class ProposedAction(BaseModel):
     rationale: str
     diff_preview: DiffPreview | dict[str, Any] | None = None
     proposed_content: dict[str, Any] = Field(default_factory=dict)
+    execution_result: ProposedActionExecutionResult | dict[str, Any] | None = None
 
 
 class SourceRecord(BaseModel):
@@ -378,11 +416,18 @@ class IngestSession(BaseModel):
     updated_at: str
     prepared_at: str | None = None
     last_true_up_at: str | None = None
+    execution_summary: IngestExecutionSummary | None = None
 
 
 class IngestSessionDetailResponse(BaseModel):
     session: IngestSession
     sources: list[SourceRecord] = Field(default_factory=list)
+
+
+class ArchivedSourceContentResponse(BaseModel):
+    source: SourceRecord
+    text: str
+    truncated: bool = False
 
 
 class IngestResponse(BaseModel):

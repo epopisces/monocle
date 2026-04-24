@@ -161,6 +161,7 @@ class TestInputSchemas:
         assert "note_type" in props
         assert "domain" in props
         assert "tags" in props
+        assert "metadata_updates" in props
         assert set(s["required"]) == {"title", "body"}
 
     def test_create_note_defaults(self):
@@ -168,13 +169,14 @@ class TestInputSchemas:
         assert s["properties"]["note_type"]["default"] == "observation"
         assert s["properties"]["domain"]["default"] == "personal"
         assert s["properties"]["tags"]["default"] is None
+        assert s["properties"]["metadata_updates"]["default"] is None
 
     # -- update_note --
 
     def test_update_note_params(self):
         s = self._get_schema("update_note")
         props = s["properties"]
-        assert set(props.keys()) == {"file_path", "body"}
+        assert set(props.keys()) == {"file_path", "body", "title", "metadata_updates"}
         assert set(s["required"]) == {"file_path", "body"}
 
     # -- get_graph --

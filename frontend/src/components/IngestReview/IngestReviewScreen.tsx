@@ -4,6 +4,7 @@ import {
   answerIngestQuestion,
   approveAllIngestActions,
   approveIngestAction,
+  executeIngestSession,
   getIngestSession,
   listIngestSessions,
   patchIngestAction,
@@ -278,8 +279,31 @@ export default function IngestReviewScreen() {
                 >
                   Approve all
                 </button>
+                <button
+                  type="button"
+                  onClick={() => runMutation('execute', () => executeIngestSession(detail.session.session_id))}
+                  disabled={busyKey !== null || detail.session.state !== 'approved_pending_execution'}
+                >
+                  {busyKey === 'execute' ? 'Executing…' : 'Execute approved'}
+                </button>
               </div>
             </header>
+
+            {detail.session.execution_summary && (
+              <section className="ingest-review__panel" data-testid="execution-summary">
+                <h3>Execution summary</h3>
+                <p className="ingest-review__muted">
+                  {detail.session.execution_summary.succeeded} succeeded, {detail.session.execution_summary.failed} failed, {detail.session.execution_summary.skipped} skipped.
+                </p>
+                <ul className="ingest-review__simple-list">
+                  {detail.session.execution_summary.affected_file_paths.map(filePath => (
+                    <li key={filePath}>
+                      <Link to={`/docs?path=${encodeURIComponent(filePath)}`}>Open {filePath}</Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
             <div className="ingest-review__grid">
               <section className="ingest-review__panel">
