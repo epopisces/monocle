@@ -312,3 +312,20 @@ class TestIngestSessionStore:
         assert row["status"] == "running"
         assert failed_notifications is not None
         assert failed_notifications["count"] == 0
+
+    def test_set_session_state_rejects_invalid_state(self, tmp_path: Path):
+        settings = _make_settings()
+        store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        created = store.create_api_session(IngestRequest(content="review me", source="web"))
+
+        with pytest.raises(ValueError, match="Invalid ingest session state"):
+            store.set_session_state(created.session_id, "not_a_real_state")
+
+        detail = store.get_session(created.session_id)
+        assert detail is not None
+        assert detail.session.state == "queued"

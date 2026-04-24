@@ -244,7 +244,9 @@ describe('IngestReviewScreen', () => {
     )
 
     expect(await screen.findByTestId('ingest-review-screen')).toBeInTheDocument()
+    await waitFor(() => expect(listIngestSessions).toHaveBeenCalledTimes(1))
     fireEvent.click(await screen.findByRole('button', { name: /Bob sync/i }))
+    await waitFor(() => expect(listIngestSessions).toHaveBeenCalledTimes(1))
 
     secondRequest.resolve(secondDetail)
     await waitFor(() => {

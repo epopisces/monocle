@@ -51,6 +51,25 @@ export default function IngestReviewScreen() {
   const [actionDrafts, setActionDrafts] = useState<Record<string, ActionDraft>>({})
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const detailRequestId = useRef(0)
+  const selectedIdRef = useRef<string | null>(selectedId)
+  const querySessionId = searchParams.get('session')
+  const querySessionIdRef = useRef<string | null>(querySessionId)
+  const setSearchParamsRef = useRef(setSearchParams)
+
+  useEffect(() => {
+    selectedIdRef.current = selectedId
+  }, [selectedId])
+
+  useEffect(() => {
+    querySessionIdRef.current = querySessionId
+    if (querySessionId !== selectedIdRef.current) {
+      setSelectedId(querySessionId)
+    }
+  }, [querySessionId])
+
+  useEffect(() => {
+    setSearchParamsRef.current = setSearchParams
+  }, [setSearchParams])
 
   const syncDrafts = useCallback((nextDetail: IngestSessionDetailResponse | null) => {
     if (!nextDetail) {
@@ -80,26 +99,33 @@ export default function IngestReviewScreen() {
       const nextSessions = await listIngestSessions({ ready_only: true, limit: 50 })
       setSessions(nextSessions)
       if (nextSessions.length === 0) {
+        selectedIdRef.current = null
         setSelectedId(null)
         setDetail(null)
-        setSearchParams({}, { replace: true })
+        setSearchParamsRef.current({}, { replace: true })
         return
       }
-      const preferred = searchParams.get('session')
+      const preferred = querySessionIdRef.current
+      const currentSelected = selectedIdRef.current
       const hasPreferred = preferred ? nextSessions.some(item => item.session_id === preferred) : false
-      const nextSelected = hasPreferred ? preferred : (selectedId && nextSessions.some(item => item.session_id === selectedId) ? selectedId : nextSessions[0].session_id)
+      const nextSelected = hasPreferred
+        ? preferred
+        : (currentSelected && nextSessions.some(item => item.session_id === currentSelected)
+          ? currentSelected
+          : nextSessions[0].session_id)
+      selectedIdRef.current = nextSelected
       setSelectedId(nextSelected)
       if (nextSelected) {
-        setSearchParams({ session: nextSelected }, { replace: true })
+        setSearchParamsRef.current({ session: nextSelected }, { replace: true })
       } else {
-        setSearchParams({}, { replace: true })
+        setSearchParamsRef.current({}, { replace: true })
       }
     } catch (e) {
       setError(mapErrorToUserMessage(e))
     } finally {
       setLoadingList(false)
     }
-  }, [searchParams, selectedId, setSearchParams])
+  }, [])
 
   const loadDetail = useCallback(async (sessionId: string) => {
     const requestId = ++detailRequestId.current
@@ -174,9 +200,10 @@ export default function IngestReviewScreen() {
   }, [replaceDetail])
 
   const handleSelect = useCallback((sessionId: string) => {
+    selectedIdRef.current = sessionId
     setSelectedId(sessionId)
-    setSearchParams({ session: sessionId }, { replace: true })
-  }, [setSearchParams])
+    setSearchParamsRef.current({ session: sessionId }, { replace: true })
+  }, [])
 
   const handleTrueUp = useCallback(async () => {
     if (!detail) return

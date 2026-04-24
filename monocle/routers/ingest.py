@@ -139,7 +139,6 @@ async def patch_proposed_action(
         vault,
         session_id,
         action_id,
-        approval_state=body.approval_state,
         target_file_path=body.target_file_path,
         target_note_type=body.target_note_type,
         rationale=body.rationale,

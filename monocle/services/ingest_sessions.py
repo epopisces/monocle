@@ -11,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, get_args
 
 from monocle.models import (
     IngestNotificationSummary,
@@ -22,6 +22,7 @@ from monocle.models import (
     IngestSessionDetailResponse,
     IngestTrueUpResponse,
     IngestSessionOrigin,
+    IngestSessionState,
     ProposedAction,
     SourceRecord,
     SourceRecordKind,
@@ -53,6 +54,9 @@ def _new_id(prefix: str) -> str:
 def _guess_mime_type(path: Path) -> str:
     guessed, _ = mimetypes.guess_type(path.name)
     return guessed or "application/octet-stream"
+
+
+_INGEST_SESSION_STATES = frozenset(get_args(IngestSessionState))
 
 
 @dataclass(frozen=True)
@@ -629,7 +633,9 @@ class IngestSessionStore:
             last_true_up_at=now,
         )
 
-    def set_session_state(self, session_id: str, state: str) -> bool:
+    def set_session_state(self, session_id: str, state: IngestSessionState) -> bool:
+        if state not in _INGEST_SESSION_STATES:
+            raise ValueError(f"Invalid ingest session state: {state}")
         now = _utcnow_iso()
         with self._connect() as conn:
             row = conn.execute(

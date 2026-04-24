@@ -3,6 +3,18 @@ import { apiDelete, apiGet, apiPatch, apiPost } from './client'
 
 export type IngestRequest = components['schemas']['IngestRequest']
 export type IngestResponse = components['schemas']['IngestResponse']
+export type NoteType =
+  | 'person_note'
+  | 'decision'
+  | 'idea'
+  | 'observation'
+  | 'reference'
+  | 'meeting_note'
+  | 'project'
+  | 'action_item'
+  | 'weekly_summary'
+  | 'organization'
+  | 'other'
 
 export interface CountResponse {
   count: number
@@ -49,16 +61,15 @@ export interface ProposedAction {
   action_type: 'create_note' | 'update_note'
   approval_state: 'draft' | 'edited' | 'approved' | 'rejected' | 'executed' | 'failed'
   target_file_path: string | null
-  target_note_type: string | null
+  target_note_type: NoteType | null
   rationale: string
   diff_preview?: DiffPreview | null
   proposed_content: Record<string, unknown>
 }
 
 export interface ProposedActionPatchRequest {
-  approval_state?: ProposedAction['approval_state']
   target_file_path?: string | null
-  target_note_type?: string | null
+  target_note_type?: NoteType | null
   rationale?: string | null
   proposed_content?: Record<string, unknown>
 }

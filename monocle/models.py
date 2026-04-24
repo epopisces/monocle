@@ -409,11 +409,12 @@ class IngestOpenQuestionAnswerRequest(BaseModel):
 
 
 class ProposedActionPatchRequest(BaseModel):
-    approval_state: ProposedActionApprovalState | None = None
     target_file_path: str | None = None
-    target_note_type: str | None = None
+    target_note_type: NOTE_TYPES | None = None
     rationale: str | None = None
     proposed_content: dict[str, Any] | None = None
+
+    model_config = {"extra": "forbid"}
 
 
 #endregion

@@ -696,6 +696,26 @@ class TestIngest:
         assert body_hunk["before"] == "Original meeting notes."
         assert body_hunk["after"] is None
 
+    def test_ingest_review_patch_rejects_approval_state_in_patch_payload(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        patched = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/actions/act_1",
+            json={"approval_state": "approved"},
+        )
+
+        assert patched.status_code == 422
+
+    def test_ingest_review_patch_rejects_invalid_target_note_type(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        patched = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/actions/act_1",
+            json={"target_note_type": "totally_invalid_type"},
+        )
+
+        assert patched.status_code == 422
+
     def test_ingest_stream_returns_streaming(self, api_client: TestClient):
         r = api_client.post(
             "/api/ingest/stream",
