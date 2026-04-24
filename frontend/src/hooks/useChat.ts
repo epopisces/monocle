@@ -6,8 +6,12 @@ const MAX_SESSIONS = 10
 
 export interface ToolCallEntry {
   name: string
+  callId?: string
   resultCount?: number
   error?: string
+  url?: string
+  durationMs?: number
+  status?: 'running' | 'success' | 'error'
 }
 
 export interface NoteCardEntry {
@@ -110,7 +114,13 @@ export function useChat() {
               const last = { ...next[next.length - 1] }
               last.toolCalls = [
                 ...(last.toolCalls ?? []),
-                { name: evt.data.name, resultCount: evt.data.result_count },
+                {
+                  name: evt.data.name,
+                  callId: evt.data.call_id,
+                  url: evt.data.url,
+                  resultCount: evt.data.result_count,
+                  status: 'running',
+                },
               ]
               next[next.length - 1] = last
               return next
@@ -122,10 +132,32 @@ export function useChat() {
               const next = [...prev]
               const last = { ...next[next.length - 1] }
               const calls = [...(last.toolCalls ?? [])]
-              // Update the last tool call matching the name
+              // Update the matching tool call, preferring call_id when present.
               for (let i = calls.length - 1; i >= 0; i--) {
-                if (calls[i].name === evt.data.name) {
-                  calls[i] = { ...calls[i], error: evt.data.error }
+                if ((evt.data.call_id && calls[i].callId === evt.data.call_id) || calls[i].name === evt.data.name) {
+                  calls[i] = { ...calls[i], error: evt.data.error, status: 'error' }
+                  break
+                }
+              }
+              last.toolCalls = calls
+              next[next.length - 1] = last
+              return next
+            })
+            break
+
+          case 'prefetch_complete':
+            setThread(prev => {
+              const next = [...prev]
+              const last = { ...next[next.length - 1] }
+              const calls = [...(last.toolCalls ?? [])]
+              for (let i = calls.length - 1; i >= 0; i--) {
+                if ((evt.data.call_id && calls[i].callId === evt.data.call_id) || calls[i].name === evt.data.name) {
+                  calls[i] = {
+                    ...calls[i],
+                    url: evt.data.url,
+                    durationMs: evt.data.duration_ms,
+                    status: evt.data.status,
+                  }
                   break
                 }
               }

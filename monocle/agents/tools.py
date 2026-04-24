@@ -33,6 +33,7 @@ from pydantic import Field
 
 if TYPE_CHECKING:
     from monocle.ai.base import AIProvider
+    from monocle.config import Settings
     from monocle.graph import GraphBuilder
     from monocle.index.base import IndexLayer
     from monocle.vault import VaultLayer
@@ -88,12 +89,14 @@ class VaultTools:
         vault: "VaultLayer",
         index: "IndexLayer",
         ai: "AIProvider | None",
+        settings: "Settings | None" = None,
         graph_builder: "GraphBuilder | None" = None,
         reindex_queue: "ReindexQueue | None" = None,
     ) -> None:
         self._vault = vault
         self._index = index
         self._ai = ai
+        self._settings = settings
         self._graph_builder = graph_builder
         self._reindex_queue = reindex_queue
 
@@ -429,7 +432,14 @@ class VaultTools:
             from monocle.services.references import create_reference_from_url as _create_ref
 
             note = await _create_ref(
-                self._vault, self._ai, self._reindex_queue, url, extra_context,
+                self._vault,
+                self._ai,
+                self._reindex_queue,
+                url,
+                extra_context,
+                summarize_timeout_s=(
+                    self._settings.ai.url_reference_timeout_s if self._settings is not None else None
+                ),
             )
             return json.dumps(
                 {
@@ -466,6 +476,8 @@ class VaultTools:
                         "Merge the new information into the existing note body. "
                         "Produce a single coherent Markdown body that integrates "
                         "all facts, avoids duplication, and reads naturally. "
+                            "Preserve existing section headings, tables, and checklist "
+                            "structure when they already provide a useful note scaffold. "
                         "Return ONLY the merged body — no YAML frontmatter, no JSON, "
                         "no commentary.\n\n"
                         f"EXISTING:\n{existing}\n\n"

@@ -3,6 +3,12 @@ import './ChatInput.css'
 
 // Detect all http/https URLs in the input text (global flag — finds every match)
 const URL_RE_GLOBAL = /https?:\/\/[^\s)>\]"']+/g
+const TRAILING_URL_PUNCT_RE = /[.,;:!?]+$/
+
+
+function normalizeDetectedUrl(url: string): string {
+  return url.replace(TRAILING_URL_PUNCT_RE, '')
+}
 
 interface Props {
   onSend: (content: string, toolHint?: string, fetchUrls?: string[]) => void
@@ -31,10 +37,12 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     const seen = new Set<string>()
     const result: string[] = []
     for (const m of matches) {
-      if (!seen.has(m[0])) {
-        seen.add(m[0])
-        result.push(m[0])
+      const normalized = normalizeDetectedUrl(m[0])
+      if (!normalized || seen.has(normalized)) {
+        continue
       }
+      seen.add(normalized)
+      result.push(normalized)
     }
     return result
   }, [value])

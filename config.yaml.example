@@ -12,6 +12,7 @@ ai:
   embed_model_key: nomic-embed      # key of the active embed model
   # stt_key: null                   # key of the active STT model (null = use transcribe_backend)
   embed_dimensions: null            # null = auto-detect; or explicit int (e.g. 768, 1536, etc.)
+  url_reference_timeout_s: 120      # max seconds to wait for AI URL summarization fallback
   transcribe_backend: subprocess    # "native" | "whisper_cpp" | "subprocess"
   transcribe_url: http://localhost:9000
   ollama_base_url: http://localhost:11434

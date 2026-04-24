@@ -55,6 +55,7 @@ class AIConfig(BaseModel):
     stt_key: str | None = None  # optional; None = fall back to transcribe_backend
 
     embed_dimensions: int | None = None  # None = auto-detect from first embedding
+    url_reference_timeout_s: float = Field(120.0, gt=0.0, le=300.0)
 
     # Transcription back-end — pluggable at config time:
     #   "native"      providers with built-in transcription (Foundry, Azure) use their own API.

@@ -1,40 +1,38 @@
 # Software Requirements Specification — Monocle
 
-**Version:** 2.3  
-**Date:** 2026-04-07  
+**Version:** 2.4  
+**Date:** 2026-04-24  
 **Status:** Current  
-**Supersedes:** v2.2
+**Supersedes:** v2.3
 
 ---
 
 ## 1. System Overview
 
-Monocle is a personal AI-powered knowledge system with a React web frontend, a FastAPI backend, an Obsidian-compatible vault as its document store, a ChromaDB vector index, and a Microsoft Agent Framework orchestration layer. Multiple capture sources feed the vault; multiple AI client tools read from it via MCP. All Monocle-owned data operations are implemented once in a shared services layer (`monocle/services/`); both the MCP server tools and the chat agent tools are thin wrappers that delegate to those shared services. MCP is the canonical tool contract for Monocle-owned operations.
+Monocle is a personal AI-powered knowledge system with a React web frontend, a FastAPI backend, an Obsidian-compatible vault as its document store, a ChromaDB vector index, a persisted ingest-session store, an immutable source archive, and a Microsoft Agent Framework orchestration layer. Multiple capture sources feed the ingest-session system; multiple AI client tools read from the curated knowledge base via MCP. All Monocle-owned data operations are implemented once in a shared services layer (`monocle/services/`); both the MCP server tools and the chat agent tools are thin wrappers that delegate to those shared services. MCP is the canonical tool contract for Monocle-owned operations.
 
 ### 1.1 Architecture
 
 ```
-Capture Surfaces            FastAPI Backend                     Consumers
-──────────────────          ─────────────────────────────────   ─────────────────
-React Web App   ──REST──►  ┌─ Ingest Router                    MCP Clients
-Voice (browser) ──REST──►  │  └─ AI Provider (embed+metadata)  (Claude, Copilot,
-Teams Bot       ──REST──►  │                                    Cursor…)
-MCP capture_tool──MCP───►  ├─ Vault Router (CRUD, search)          │
-                           │  └─ File Watcher (watchdog)            │
-                           │                                        ▼
-                           ├─ Agent Router                   GET /mcp (Streamable HTTP)
-                           │  └─ Chat Agent (tool wrappers)   GET /search (REST)
-                           │                                  GET /notes (REST)
-                           └─ MCP Server (canonical tools)   GET /graph (REST)
+Capture Surfaces            FastAPI Backend                              Consumers
+──────────────────          ───────────────────────────────────────────   ─────────────────
+React Web App   ──REST──►  ┌─ Ingest Router                             MCP Clients
+Voice (browser) ──REST──►  │  ├─ Ingest Session Store (SQLite/file)     (Claude, Copilot,
+Teams Bot       ──REST──►  │  ├─ Source Archive (immutable files)        Cursor…)
+Inbox Watcher   ──local──► │  └─ AI Provider (extract/digest/linking)   │
+MCP capture_tool──MCP───►  ├─ Vault Router (CRUD, search, history)      │
+                           │  └─ File Watcher / Inbox poller            ▼
+                           ├─ Agent Router                       GET /mcp (Streamable HTTP)
+                           │  └─ Chat Agent (tool wrappers)     GET /search (REST)
+                           └─ MCP Server (canonical tools)      GET /notes (REST)
 
                     ↓ both delegate to ↓
           monocle/services/  (single implementation of all data operations)
-          ├─ search.py       ├─ notes.py     ├─ graph.py
-          ├─ references.py   └─ ingest.py
+          ├─ search.py       ├─ notes.py      ├─ graph.py
+          ├─ references.py   ├─ ingest.py     └─ history.py
 
 Vault (filesystem .md files) ◄──► ChromaDB (embeddings + frontmatter metadata)
-         ▲                                 ▲
-         └────── watchdog file watcher ────┘
+Source Archive (immutable raw files) ──manual review only; excluded from embedding/default search
 ```
 
 ### 1.2 Deployment (Phase 1)
@@ -155,6 +153,16 @@ telemetry:
 
 ui:
   chat_session_history_limit: 10  # Number of chat sessions retained in browser localStorage
+
+ingest:
+  session_store_path: ./data/ingest/sessions.db
+  source_archive_path: ./data/sources
+  inbox_poll_interval_s: 30
+  idle_prepare_enabled: true
+  max_idle_prepare_jobs: 2
+
+history:
+  retention_versions: 50          # retain the most recent N stored versions per note
 
 **FR-CFG-04:** Azure backend configuration SHALL be read exclusively from environment variables: `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_EMBED_DEPLOYMENT`, `AZURE_OPENAI_CHAT_DEPLOYMENT`.
 
@@ -329,20 +337,21 @@ links:
 
 **FR-VLT-06:** Note writes SHALL be atomic: new content SHALL be written to a temp file created via `tempfile.mkstemp` **in the system temp directory** (not inside the vault), then renamed into place via `os.replace`. Using a temp dir outside the vault ensures the file watcher never triggers on the temp file, and the final rename is atomic on POSIX filesystems (best-effort on Windows).
 
-**FR-VLT-07:** Before overwriting an existing note, `write_note` SHALL save the previous version to `<vault_root>/.versions/<relative_path>/<updated_at_ms>.md` where `updated_at_ms` is the ISO 8601 timestamp with **millisecond precision** (e.g. `2026-03-13T09-12-34.567Z`) from the existing frontmatter `updated` field. Millisecond precision prevents silent collision when a note is written multiple times within the same second. The `.versions/` directory SHALL be excluded from the file watcher (FR-WTCH-01), the `reindex` command, and `GET /api/notes` listings. The CLI command `versions list <file_path>` SHALL enumerate stored versions; `versions restore <file_path> <timestamp>` SHALL overwrite the current file with a chosen version.
+**FR-VLT-07:** Before overwriting an existing note, `write_note` SHALL save the previous version to `<vault_root>/.versions/<relative_path>/<updated_at_ms>.md` where `updated_at_ms` is the ISO 8601 timestamp with **millisecond precision** (e.g. `2026-03-13T09-12-34.567Z`) from the existing frontmatter `updated` field. Millisecond precision prevents silent collision when a note is written multiple times within the same second. Stored versions SHALL be subject to a configurable retention limit (`history.retention_versions`). The `.versions/` directory SHALL be excluded from the file watcher (FR-WTCH-01), the `reindex` command, and `GET /api/notes` listings. The CLI command `versions list <file_path>` SHALL enumerate stored versions; `versions restore <file_path> <timestamp>` SHALL overwrite the current file with a chosen version.
 
 ### 2.5 File Watcher & Re-Index (FR-WTCH)
 
 **FR-WTCH-01:** The `InboxWatcher` SHALL run as an **async task integrated into the unified FastAPI process** (Phase 1). It monitors only `vault/inbox/` (configured via `vault.inbox_path`) and SHALL NOT watch the rest of the vault. Supported file types: `.md`, `.txt`, audio files (`.webm`, `.mp3`, `.wav`, `.m4a`). The integration point is `main.py`'s lifespan hook; the watcher runs in a thread-pool executor so file-system callbacks do not block the async event loop. *(Future: if performance bottlenecks emerge at scale, the watcher can be extracted as a standalone subprocess via `ProcessManager` without any change to the watcher's own API — see § FR-PROC.)*
 
 **FR-WTCH-02:** On new file detection in the inbox:
-1. The watcher reads the file and calls the ingest pipeline directly via `IngestPipeline` (Phase 1 in-process) or via its internal API
-2. On success: the pipeline moves or records the file as processed; the watcher removes it from inbox if the pipeline does not
-3. On failure: the watcher writes a `.error.md` sidecar alongside the source file (see FR-ING-10) and leaves the source file in place for manual inspection
+1. The watcher archives the source file into the immutable source store with provenance metadata
+2. The watcher creates a persisted ingest session rather than writing a vault note directly
+3. The new ingest session is queued for dormant background preparation and surfaced as a notification/review item for the user
+4. On failure: the system records the ingest session or source as failed and preserves the raw source for manual inspection
 
 **FR-WTCH-03:** A 2-second debounce per file path SHALL be applied to handle multi-write saves before triggering ingest.
 
-**FR-WTCH-04 (API-mediated re-index):** The main API SHALL enqueue file-scoped re-index work whenever a note is written via `PUT /api/notes`, `PATCH /api/notes`, or the ingest pipeline output. The queue SHALL coalesce pending work by `file_path` so repeated saves of the same file result in at most one outstanding re-index job. New files created by the ingest pipeline SHALL be prioritised ahead of background editor-save updates.
+**FR-WTCH-04 (API-mediated re-index):** The main API SHALL enqueue file-scoped re-index work whenever a note is written via `PUT /api/notes`, `PATCH /api/notes`, approved ingest-session execution output, or fast-capture execution output. The queue SHALL coalesce pending work by `file_path` so repeated saves of the same file result in at most one outstanding re-index job. New files created by approved ingest execution SHALL be prioritised ahead of background editor-save updates.
 
 **FR-WTCH-04a (Editor save coalescing):** Repeated editor-driven saves for the same file within a configurable idle window (default: 10 seconds since the latest write) SHALL collapse into a single re-index. `PUT /api/notes` and `PATCH /api/notes` responses SHALL complete after the vault write succeeds; they SHALL NOT block on embedding work unless the caller explicitly requests synchronous indexing.
 
@@ -359,9 +368,86 @@ This process catches Obsidian edits and any changes made outside the API.
 
 **FR-WTCH-08:** The inbox watcher SHALL exclude from monitoring: `.versions/`, `.trash/`, `.templates/`, `prompts/`, `data/`.
 
-### 2.6 Ingest Pipeline (FR-ING)
+### 2.6 Ingest Sessions & Review Flow (FR-ING)
 
-**FR-ING-01:** The ingest pipeline handles unstructured input (text, voice, Teams message, or any registered plugin source) and converts it to a structured vault note.
+**FR-ING-01:** The ingest subsystem handles unstructured input (text, voice, Teams message, inbox file, URL reference, or any registered plugin source) by creating a persisted ingest session rather than immediately writing a structured vault note.
+
+**FR-ING-02:** Ingest SHALL be a two-phase workflow:
+1. Session preparation: extraction, digest, related-note linking, contradiction analysis, and proposal generation
+2. Approved execution: canonical MCP-backed `create_note` / `update_note` operations, post-apply validation, and re-index
+
+**FR-ING-03:** An ingest session SHALL be persisted independently of any active chat or browser session and SHALL support dormant background preparation during application idle windows.
+
+**FR-ING-04:** The system SHALL accept an ingest request model that creates or updates an ingest session:
+
+```python
+class IngestRequest(BaseModel):
+  content: str | None = None
+  audio: bytes | None = None
+  audio_mime: str | None = None
+  source: Literal["web", "mcp", "voice", "teams", "import", "inbox", "chat"]
+  template_hint: str | None = None
+  allow_duplicate: bool = False
+  fast_capture: bool = False
+```
+
+**FR-ING-05:** The canonical ingest-session schema SHALL include at least:
+
+```python
+class IngestSession(BaseModel):
+  session_id: str
+  origin: Literal["chat", "inbox"]
+  state: Literal[
+    "captured", "queued", "preparing", "dormant_ready", "in_review",
+    "awaiting_user", "proposal_ready", "approved_pending_execution",
+    "executing", "completed", "failed", "dismissed"
+  ]
+  source_ids: list[str]
+  title: str | None = None
+  digest: str | None = None
+  open_questions: list[dict] = []
+  related_notes: list[dict] = []
+  contradictions: list[dict] = []
+  proposed_actions: list[dict] = []
+  created_at: str
+  updated_at: str
+  prepared_at: str | None = None
+  last_true_up_at: str | None = None
+```
+
+**FR-ING-06:** The canonical source-record schema SHALL include immutable provenance metadata and explicit lifecycle state:
+
+```python
+class SourceRecord(BaseModel):
+  source_id: str
+  session_id: str
+  kind: Literal["file", "url", "chat_text", "chat_upload"]
+  status: Literal[
+    "captured", "archived", "queued", "processing", "ready",
+    "consumed", "completed", "failed", "dismissed"
+  ]
+  source_name: str
+  author: str | None = None
+  mime_type: str | None = None
+  archive_path: str
+  checksum_sha256: str
+  captured_at: str
+  provenance: dict = {}
+```
+
+**FR-ING-07:** The canonical proposed-action schema SHALL support per-action approval with user edits and visible diffs before execution:
+
+```python
+class ProposedAction(BaseModel):
+  action_id: str
+  action_type: Literal["create_note", "update_note"]
+  approval_state: Literal["draft", "edited", "approved", "rejected", "executed", "failed"]
+  target_file_path: str | None = None
+  target_note_type: str | None = None
+  rationale: str
+  diff_preview: dict | None = None
+  proposed_content: dict = {}
+```
 
 **FR-ING-08 (Plugin Registry):** The ingest pipeline SHALL use a plugin registry to decouple content extraction from the classification/metadata steps. The `IngestPlugin` ABC:
 
@@ -382,54 +468,28 @@ class IngestPlugin(ABC):
 
 The `IngestPluginRegistry` singleton holds all registered plugins. On each ingest call, the registry calls `can_handle` in registration order and uses the first matching plugin. Built-in plugins: `TextPlugin` (passthrough), `AudioPlugin` (calls `AIProvider.transcribe`), `TeamsPlugin` (extracts text from Bot Framework Activity). Future sources (e.g., OneNote) are implemented by registering a new `IngestPlugin` subclass without modifying pipeline code.
 
-**FR-ING-02:** Pipeline steps (run in order):
-1. Content extraction — `IngestPluginRegistry.resolve(request)` selects plugin; `plugin.extract()` yields plain text (includes `AIProvider.transcribe` if audio)
-2. Routing — `RoutingAgent.route(text, template_hint)` → `RoutingDecision`; checks note template `sentence_starters` first for a fast-path match; falls back to LLM classification via `prompts/routing.md` if no starter matches
-3. Metadata extraction — `AIProvider.extract_note_metadata(text, template)` using `prompts/extract.md` prompt; extracts frontmatter values for the selected template
-4. Note construction — populate selected template with extracted frontmatter + body content
-5. File write — `VaultLayer.create_from_template()`; filename derived from title slug
-6. Re-index — main API calls `IndexLayer.upsert_chunks` directly for the new file (does not rely on the inbox watcher for API-originated ingests)
-7. Confidence scoring — `IngestConfidence` evaluates the written note using the deterministic formula; composite score + approval metadata written via `VaultLayer.patch_frontmatter()`
+**FR-ING-09:** Preparation steps (run in order unless marked optional/concurrent):
+1. Content extraction — `IngestPluginRegistry.resolve(request)` selects plugin; `plugin.extract()` yields plain text
+2. Source archival — immutable source record is created outside the vault
+3. Digest preparation — summarize key takeaways and derive candidate entities/topics
+4. Knowledge linking — propose links to related notes in the MCP knowledge base
+5. Contradiction analysis — warnings with explanations and links to conflicting note(s)
+6. Proposal generation — emit `create_note` / `update_note` actions with visible deltas
+7. Dormant persistence — prepared session is stored for later review or queued for idle-time completion
+8. Approved execution — once approved, actions execute through the canonical MCP tool plane
+9. Validation / reindex — confirm expected changes exist and queue re-index for touched notes
 
-**On failure (steps 2–5):** the pipeline SHALL write a `.error.md` sidecar alongside the source file — see FR-ING-10.
+**FR-ING-10:** The system SHALL support a user-triggered `true-up` operation that reruns session preparation on a dormant session before approval to account for drift in the source material or knowledge base since the session was first prepared.
 
-**FR-ING-03:** Step 1 (extraction) always completes before steps 2–3. When a sentence-starter fast path is taken in step 2, metadata extraction (step 3) begins immediately. When LLM routing is required, steps 2 and 3 MAY run concurrently via `asyncio.gather`. Steps 4–6 are sequential.
+**FR-ING-11:** Contradiction handling SHALL produce warnings with explanations and links to the contradicting document(s). Contradictions are advisory only: they do not block review completion or action approval.
 
-**FR-ING-04:** The pipeline SHALL accept:
+**FR-ING-12:** Approval semantics SHALL be per-action with edits allowed before approval. The ingest-review workflow SHALL also provide an `approve all` operation that applies to all proposed actions in the current ingest session.
 
-```python
-class IngestRequest(BaseModel):
-    content: str | None = None        # pre-transcribed text
-    audio: bytes | None = None        # raw audio for transcription
-    audio_mime: str | None = None     # e.g. "audio/webm"
-    source: Literal["web", "mcp", "voice", "teams", "import"]
-    template_hint: str | None = None  # override template selection
-    allow_duplicate: bool = False     # set True to force creation when similar_note_detected is True
-```
+**FR-ING-13:** The source archive SHALL be outside the vault, immutable, excluded from embedding and default search, and linked back into resulting vault documents through a `Sources` section containing source name and author when known.
 
-**FR-ING-05:** The pipeline SHALL return the new `Note` object (without embedding vectors) plus the file path written.
+**FR-ING-14:** The system SHALL support a fast-capture mode for high-confidence users. Fast-capture SHALL reuse the ingest-session/source architecture while bypassing the full review workflow and still preserving provenance, post-write validation, and re-index behavior.
 
-**FR-ING-06:** If template classification confidence is below a threshold (tunable, default 0.6), the system SHALL fall back to the `blank` template and log a warning.
-
-**FR-ING-07:** After the note is written, the ingest agent SHALL evaluate it and produce an `IngestConfidence` result:
-
-```python
-class IngestConfidence(BaseModel):
-    score: float                      # 0.0 – 1.0 composite score
-    template_match: float             # confidence the correct template was applied
-    metadata_coverage: float          # fraction of required frontmatter fields populated
-    tag_plausibility: float           # whether tags are semantically consistent with body
-    entity_match: float               # whether detected people already exist as person notes
-    confidence_rationale: str         # human-readable explanation of score breakdown; written to note frontmatter; shown in the Review Queue panel to help users understand low-confidence scores
-```
-
-The composite `score` is a weighted average of the four sub-scores (weights configurable). The `score`, `review_status`, `confidence_rationale`, and approval metadata (`approved_by`, `approved_at`, `approval_mode`) SHALL be written to the note's frontmatter via `VaultLayer.patch_frontmatter()` before the endpoint response is returned. Auto-approval is controlled by `review.auto_approve_threshold_pct`: `0` disables auto-approval; otherwise a note is auto-approved when `score * 100 >= auto_approve_threshold_pct`.
-
-**FR-ING-11 (Duplicate Detection / Similarity Warning):** Before writing a new note, the ingest pipeline SHALL compute the embedding of the note body and compare it semantically against notes ingested in the last 7 days using cosine similarity. If any existing note has similarity > 0.95, the response SHALL include a `similar_note_detected` flag with a reference to the similar note, prompting user confirmation. No automatic deduplication occurs. The user can proceed with note creation by including `allow_duplicate=true` in the request body. **Rationale:** User confirmation is more important than silent fallback; some note captures legitimately repeat and should all be preserved.
-
-**FR-ING-12 (Failed Ingest Index):** Whenever the pipeline writes a `.error.md` sidecar, it SHALL also write a lightweight failed-ingest record containing: source path or request identifier, failure step, failure timestamp, retryable flag, and sidecar path. This record powers UI visibility and retry flows and SHALL be removed automatically when the failed ingest is retried successfully or the source is dismissed.
-
-**FR-ING-09 (Sentence Starters):** Each note template YAML schema SHALL include a `sentence_starters` list — opening phrases that strongly signal the template type. Examples:
+**FR-ING-15:** Each note template YAML schema SHALL include a `sentence_starters` list — opening phrases that strongly signal the template type. Examples:
 
 | Template | Example starters |
 |---|---|
@@ -440,13 +500,7 @@ The composite `score` is a weighted average of the four sub-scores (weights conf
 
 The routing agent SHALL check the first sentence of the input against all templates' sentence starters before invoking the LLM. A sentence-starter match sets `RoutingDecision.sentence_starter_matched = True` and boosts routing confidence to at least `0.85`.
 
-**FR-ING-10 (Error Sidecar Files):** When the ingest pipeline fails at any step after content extraction (steps 2–5), the system SHALL write a `.error.md` file adjacent to the source file. The sidecar SHALL contain:
-- Failure reason and step where failure occurred
-- Template that was attempted (if routing completed)
-- Partial frontmatter extracted (if any)
-- Suggested remediation (e.g., `Set type: decision manually and re-save to inbox`)
-
-Sidecar files are excluded from the index, the file watcher, and `GET /api/notes` listings. They are for human inspection only.
+**FR-ING-16 (Failed Ingest Records):** When preparation or execution fails, the system SHALL write a lightweight failed-ingest record containing session identifier, source identifier, failure stage, failure timestamp, retryable flag, and diagnostic detail path if one exists. Failed ingest records power UI visibility and retry flows and SHALL be removed automatically when the failed step is retried successfully or the session is dismissed.
 
 ---
 
@@ -469,7 +523,7 @@ class RoutingDecision(BaseModel):
 
 **FR-RTNG-03:** The routing agent is invoked by `IngestPipeline` after content extraction. Plugin resolution (which runs first) is responsible for format extraction (audio → text); routing is responsible for semantic dispatch.
 
-**FR-RTNG-04:** Routing confidence below 0.6 causes the pipeline to fall back to `blank` template with `review_status: pending`, identical to the former classification-confidence fallback.
+**FR-RTNG-04:** Routing confidence below 0.6 causes session preparation to fall back to a `blank` template candidate for proposal generation, preserving the low-confidence fallback without forcing an immediate vault write.
 
 ---
 
@@ -537,19 +591,32 @@ All endpoints return `application/json`. Error responses conform to RFC 7807. Th
 **FR-API-01:** `POST /api/ingest`  
 Accepts multipart form (`audio` file) or JSON body:
 ```json
-{ "content": "string", "source": "web|mcp|voice|teams|import", "template_hint": "person" }
+{ "content": "string", "source": "web|mcp|voice|teams|import|inbox|chat", "template_hint": "person", "fast_capture": false }
 ```
 Response format depends on `Accept` header (content negotiation):
-- `Accept: application/json` (default): Returns `201 Created` with the created `Note` object
-- `Accept: text/event-stream`: Returns SSE stream with pipeline progress events
+- `Accept: application/json` (default): Returns `202 Accepted` with the created `IngestSession` summary
+- `Accept: text/event-stream`: Returns SSE stream with session-preparation progress events
 ```
-event: transcribing          data: {}
-event: writing               data: {"template": "person"}
-event: done                  data: {"file_path": "...", "confidence": 0.82, "review_status": "pending"}
+event: archiving_source      data: {"source_id": "..."}
+event: digest_ready          data: {"session_id": "..."}
+event: proposals_ready       data: {"session_id": "...", "action_count": 2}
+event: dormant_ready         data: {"session_id": "..."}
 event: error                 data: {"message": "..."}
 ```
 
 **FR-API-02:** Returns `422` if both `content` and `audio` are absent, if `content` exceeds 50,000 characters, if the `audio` file upload exceeds 25 MB, or if an unsupported audio format is provided.
+
+**FR-API-02a:** `GET /api/ingest/sessions` — Lists ingest sessions with filters such as `state`, `origin`, `ready_only`, `limit`, and `offset`. This powers notifications and the dedicated ingest-review workspace.
+
+**FR-API-02b:** `GET /api/ingest/sessions/{session_id}` — Returns the full ingest session, including digest, linked notes, contradiction warnings, proposed actions, and source records.
+
+**FR-API-02c:** `POST /api/ingest/sessions/{session_id}/true-up` — Re-runs session preparation for a dormant or in-review session to account for drift since it was first prepared. Returns `202 Accepted` and updates `last_true_up_at` when complete.
+
+**FR-API-02d:** `PATCH /api/ingest/sessions/{session_id}/actions/{action_id}` — Allows editing or updating approval state for a proposed action. Accepts revised content, rationale, and approval state.
+
+**FR-API-02e:** `POST /api/ingest/sessions/{session_id}/approve-all` — Marks all draft or edited actions in the current ingest session as approved.
+
+**FR-API-02f:** `POST /api/ingest/sessions/{session_id}/execute` — Executes approved actions via the canonical MCP-backed create/update path, validates the resulting writes, and queues re-index work.
 
 **FR-API-03:** `POST /api/transcribe`  
 Accepts multipart form with `audio` file field. Returns:
@@ -558,7 +625,7 @@ Accepts multipart form with `audio` file field. Returns:
 ```
 Used by the frontend voice capture modal for transcription-only (without ingest).
 
-**FR-API-03a:** Before writing a new note, the ingest pipeline performs an optional semantic similarity check: the body of the new note is compared against the last 7 days of ingested notes. If any note has cosine similarity > 0.95, a `similar_note_detected` flag is returned (along with a reference note path) to prompt user confirmation before proceeding. This is advisory only; the user can force creation with `allow_duplicate=true` in the request body. **No automatic deduplication occurs.**
+**FR-API-03a:** During proposal generation, the ingest subsystem performs an optional semantic similarity check against recent notes and related-note candidates. Similarity findings are advisory only and are surfaced as duplicate or overlap warnings in the ingest-review workspace. **No automatic deduplication occurs.**
 
 #### 2.7.2 Vault (Notes CRUD)
 
@@ -682,7 +749,8 @@ Response:
 ```json
 {
   "messages": [ { "role": "user", "content": "..." } ],
-  "session_id": "optional-uuid"
+  "session_id": "optional-uuid",
+  "context_items": []
 }
 ```
 SSE event types:
@@ -698,27 +766,32 @@ SSE event types:
 
 The endpoint returns `Content-Type: text/event-stream`. The connection is closed by the server after the `done` event.
 
+`context_items` are explicit user-added document or snippet references supplied from the Document Browser or Docs explorer. They are distinct from implicit vault retrieval and SHALL be preserved in chat session history as user-provided grounding.
+
 #### 2.7.9 Ingest Progress (SSE)
 
-**FR-API-21:** `POST /api/ingest/stream` — Same parameters as `POST /api/ingest` but returns an SSE stream of pipeline progress events instead of a single `201` response. Progress event types:
+**FR-API-21:** `POST /api/ingest/stream` — Same parameters as `POST /api/ingest` but returns an SSE stream of session-preparation progress events instead of a single `202` response. Progress event types:
 
 | Event type | Payload |
 |---|---|
-| `transcribing` | `{}` |
-| `classifying` | `{}` |
-| `writing` | `{ "template": "person" }` |
-| `scoring` | `{}` |
-| `done` | `{ "file_path": "...", "confidence": 0.82, "review_status": "pending" }` |
+| `archiving_source` | `{ "source_id": "..." }` |
+| `extracting` | `{}` |
+| `digesting` | `{}` |
+| `linking` | `{ "candidate_count": 4 }` |
+| `proposing` | `{}` |
+| `done` | `{ "session_id": "...", "state": "dormant_ready" }` |
 | `error` | `{ "message": "..." }` |
 
-The original `POST /api/ingest` synchronous endpoint SHALL remain for backwards compatibility with MCP tools.
+The original `POST /api/ingest` endpoint remains the ingest entry point, but it now creates ingest sessions instead of directly creating notes.
 
 #### 2.7.10 Settings
 
 **FR-API-22:** `GET /api/settings` — Returns current server settings. Secret values are **never** returned in full: the MCP access key is returned as a masked string (`"••••••••<last4chars>"`). Response example:
 ```json
 {
-  "ai": { "provider": "ollama", "chat_model": "llama3.2", "embed_model": "nomic-embed-text" },
+  "ai": { "provider": "ollama", "chat_model": "llama3.2", "embed_model": "nomic-embed-text", "url_reference_timeout_s": 120 },
+  "ingest": { "inbox_poll_interval_s": 30, "idle_prepare_enabled": true },
+  "history": { "retention_versions": 50 },
   "review": { "queue_threshold": 0.75, "auto_approve_threshold_pct": 90 },
   "agents": {
     "weekly_summary": { "enabled": true, "cron": "0 17 * * 5", "domains": [] },
@@ -729,7 +802,7 @@ The original `POST /api/ingest` synchronous endpoint SHALL remain for backwards 
 }
 ```
 
-**FR-API-23:** `PATCH /api/settings` — Updates mutable server-side settings at runtime. Accepted fields: `ai.provider`, `ai.chat_model`, `ai.embed_model`, `review.queue_threshold`, `review.auto_approve_threshold_pct`, `agents.weekly_summary.enabled`, `agents.weekly_summary.cron`, `agents.weekly_summary.domains`, `agents.reindex.enabled`, `agents.reindex.cron`, `ui.chat_session_history_limit`. Changing `ai.provider` reloads the `AIProvider` singleton. Changing embedding models returns a warning that a `reindex --force` is required. **Updated values SHALL be written back to `config.yaml` atomically (write temp + rename) so that changes survive a server restart.** This endpoint SHALL **not** accept new secret values (rotate the MCP key via `POST /api/settings/rotate-mcp-key`).
+**FR-API-23:** `PATCH /api/settings` — Updates mutable server-side settings at runtime. Accepted fields include `ai.provider`, `ai.chat_model`, `ai.embed_model`, `ai.url_reference_timeout_s`, `ingest.inbox_poll_interval_s`, `ingest.idle_prepare_enabled`, `history.retention_versions`, `review.queue_threshold`, `review.auto_approve_threshold_pct`, `agents.weekly_summary.enabled`, `agents.weekly_summary.cron`, `agents.weekly_summary.domains`, `agents.reindex.enabled`, `agents.reindex.cron`, and `ui.chat_session_history_limit`. Changing `ai.provider` reloads the `AIProvider` singleton. Changing embedding models returns a warning that a `reindex --force` is required. **Updated values SHALL be written back to `config.yaml` atomically (write temp + rename) so that changes survive a server restart.** This endpoint SHALL **not** accept new secret values (rotate the MCP key via `POST /api/settings/rotate-mcp-key`).
 
 **FR-API-24:** `POST /api/settings/rotate-mcp-key` — Generates a new cryptographically random 64-hex-character MCP access key, writes it to the `.env` file (replacing the old value), and reloads it in memory. Returns `{ "mcp_key_hint": "••••••••<last4chars>" }`. Old key is immediately invalidated.
 
@@ -811,6 +884,13 @@ A Typer application invocable as `python -m monocle <command>`, primarily for se
 - Stream AI responses token-by-token via `EventSource` or `ReadableStream` from a `POST /api/chat` streaming endpoint
 - Collapse agent tool calls into a disclosure element (e.g., "Used `search_vault` — 4 results")
 - Render agent response Markdown (headings, lists, bold/italic, code blocks)
+- Show explicit user-added context items when a document, section, sentence, or selection has been added from the Docs explorer or Document Viewer
+
+**FR-WEB-03a (Ingest Review Workspace):** The app SHALL provide a dedicated ingest-review workflow separate from the general chat screen. It SHALL:
+- List dormant and active ingest sessions with notification counts
+- Open a prepared ingest session with digest, linked-note candidates, contradiction warnings, open questions, and proposed actions
+- Support per-action edits, approval toggles, and an `approve all` action for the current ingest session
+- Allow the user to trigger a true-up / validation rerun before approving changes
 
 **FR-WEB-04 (Voice):** The voice capture modal SHALL:
 - First attempt transcription using the browser Web Speech API
@@ -825,6 +905,15 @@ A Typer application invocable as `python -m monocle <command>`, primarily for se
 - Provide a mode toggle between Markdown source mode, a lightweight rich preview editing mode for common formatting operations, and the frontmatter form editor
 - Auto-save on 2-second debounce via `PUT /api/notes/{path}`, while relying on the coalesced re-index queue from FR-WTCH-04/04a so active typing does not trigger a full embed pass on every save
 - Provide an AI Assist slide-over panel that sends instructions about the current note to the chat agent
+- Include a collapsed `Sources` section in each document, expanded on demand, showing linked archived sources labeled with source name and author when known
+- Open text-based source files in the Document Browser and non-text files with the operating system's default application
+- Provide access to file-history diffs and revert actions in the Document Viewer
+- Provide right-click context-menu actions that add the current document, section, sentence, or current selection into a new or existing chat session as explicit context
+
+**FR-WEB-05a (Docs Explorer):** The Docs/File Explorer SHALL:
+- Display archived sources under a collapsed dropdown separate from the normal vault tree
+- Allow drag-and-drop of a document into a new or existing chat session as explicit context
+- Keep archived sources out of the default semantic knowledge-base browsing surface unless the user explicitly expands the sources area
 
 **FR-WEB-06 (Search):** The search screen SHALL support both semantic (`GET /api/search`) and keyword (`GET /api/search/keyword`) modes, with a threshold slider for semantic mode.
 
@@ -852,6 +941,10 @@ On page load, the frontend SHALL call `GET /api/settings` to initialise all sett
 **FR-WEB-10a (Failed Capture Visibility):** The app shell SHALL display a failed-captures indicator whenever `GET /api/ingest/failures` returns any items. The indicator opens a slide-over listing failed ingests with actions to inspect the sidecar, retry the ingest, or dismiss the failure once manually handled.
 
 **FR-WEB-11 (Chat History):** Chat sessions SHALL be persisted to `localStorage`. Each session is identified by a UUID, holds an ordered list of messages (`role`, `content`, optional `tool_calls`), and records a `created_at` timestamp. The frontend SHALL retain up to **`ui.chat_session_history_limit` sessions** (default 10; configurable via `config.yaml` and settable at runtime via `PATCH /api/settings`). A session picker dropdown in the chat topbar allows the user to load a previous session. Chat history is client-side only — it is not sent to the server or stored in the vault.
+
+Chat session history SHALL also preserve any explicit user-added `context_items` so that document/snippet grounding remains visible and auditable when a session is reloaded.
+
+**FR-WEB-11a (Add To Chat Context):** Users SHALL be able to add a document or snippet to a new or existing chat session from either the Docs explorer or the Document Viewer. When no text is selected, the context menu SHALL offer `add document`, `add section`, and `add sentence` actions. When text is selected, the context menu SHALL offer `add selection` actions.
 
 **FR-WEB-12 (Keyboard Shortcuts):** The following keyboard shortcuts SHALL be supported application-wide:
 

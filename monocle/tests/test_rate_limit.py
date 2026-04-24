@@ -162,7 +162,7 @@ class TestMainAppRateLimits:
         payload = {"content": "rate limit test note", "source": "web"}
         for _ in range(30):
             r = api_client.post("/api/ingest", json=payload)
-            assert r.status_code in (200, 201, 409)
+            assert r.status_code in (200, 202, 409)
         r = api_client.post("/api/ingest", json=payload)
         assert r.status_code == 429
 

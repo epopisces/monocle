@@ -45,10 +45,54 @@ logger = logging.getLogger(__name__)
 _otel_configured = False
 
 
+def _disable_agent_framework_otel() -> None:
+    """Disable Agent Framework instrumentation when Monocle owns OTel.
+
+    Monocle configures tracing at the application level. Leaving the agent
+    framework's separate instrumentation enabled in the same process can cause
+    cross-context detach errors on streaming chat paths.
+    """
+    try:
+        from agent_framework.observability import OBSERVABILITY_SETTINGS
+
+        OBSERVABILITY_SETTINGS.enable_instrumentation = False
+        OBSERVABILITY_SETTINGS.enable_sensitive_data = False
+    except Exception:
+        return
+
+
+def _otel_providers_already_configured() -> bool:
+    """Return True when app-level OTel providers are already installed.
+
+    Monocle configures OpenTelemetry during FastAPI startup. Reconfiguring the
+    global providers again from the agent framework causes provider override
+    warnings and context-detach errors during chat streaming.
+    """
+    try:
+        from opentelemetry import metrics, trace
+
+        tracer_provider = trace.get_tracer_provider()
+        meter_provider = metrics.get_meter_provider()
+        tracer_name = type(tracer_provider).__name__.lower()
+        meter_name = type(meter_provider).__name__.lower()
+        return "proxy" not in tracer_name or "proxy" not in meter_name
+    except Exception:
+        return False
+
+
 def _configure_agent_otel(settings: "Settings") -> None:
     """Configure agent framework OTel providers (idempotent within a process)."""
     global _otel_configured
     if _otel_configured:
+        return
+    if not settings.telemetry.enabled:
+        _disable_agent_framework_otel()
+        _otel_configured = True
+        return
+    if _otel_providers_already_configured():
+        _disable_agent_framework_otel()
+        _otel_configured = True
+        logger.debug("[AGENT] App OTel providers already configured; skipping agent-framework provider setup")
         return
     try:
         from agent_framework.observability import configure_otel_providers
@@ -467,7 +511,14 @@ def create_chat_agent(
 
     _configure_agent_otel(settings)
 
-    tool_registry = VaultTools(vault=vault, index=index, ai=ai, graph_builder=graph_builder, reindex_queue=reindex_queue)
+    tool_registry = VaultTools(
+        vault=vault,
+        index=index,
+        ai=ai,
+        settings=settings,
+        graph_builder=graph_builder,
+        reindex_queue=reindex_queue,
+    )
     client = _AIProviderChatClient(ai=ai, tool_hint=tool_hint)
 
     base_instructions = (

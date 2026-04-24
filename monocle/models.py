@@ -38,6 +38,42 @@ T = TypeVar("T")
 # ---------------------------------------------------------------------------
 
 NoteSource = Literal["web", "voice", "teams", "mcp", "import", "agent"]
+IngestSessionOrigin = Literal["api", "chat", "inbox"]
+IngestSessionState = Literal[
+    "captured",
+    "queued",
+    "preparing",
+    "dormant_ready",
+    "in_review",
+    "awaiting_user",
+    "proposal_ready",
+    "approved_pending_execution",
+    "executing",
+    "completed",
+    "failed",
+    "dismissed",
+]
+SourceRecordKind = Literal["text", "audio", "file", "url", "chat_text", "chat_upload"]
+SourceRecordStatus = Literal[
+    "captured",
+    "archived",
+    "queued",
+    "processing",
+    "ready",
+    "consumed",
+    "completed",
+    "failed",
+    "dismissed",
+]
+ProposedActionType = Literal["create_note", "update_note"]
+ProposedActionApprovalState = Literal[
+    "draft",
+    "edited",
+    "approved",
+    "rejected",
+    "executed",
+    "failed",
+]
 ReviewStatus = Literal["pending", "approved", "rejected"]
 ApprovalMode = Literal["auto", "manual"]
 
@@ -186,6 +222,7 @@ class IngestRequest(BaseModel):
     content: str | None = None
     content_type: str = "text/plain"
     source: NoteSource = "web"
+    origin: IngestSessionOrigin = "api"
     template_hint: str | None = None
     audio_bytes: AudioBytesField = Field(
         default=None,
@@ -194,6 +231,7 @@ class IngestRequest(BaseModel):
     )
     audio_mime_type: str | None = None
     allow_duplicate: bool = False  # FR-ING-11: advisory duplicate-detection flow
+    fast_capture: bool = False
 
 
 class IngestConfidence(BaseModel):
@@ -260,11 +298,83 @@ class BrainStats(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class IngestResponse(BaseModel):
-    """Response body for POST /api/ingest."""
+class IngestNotification(BaseModel):
+    id: str
+    kind: str
+    status: Literal["unread", "read", "dismissed"] = "unread"
+    created_at: str
 
-    note: Note
-    confidence: IngestConfidence
+
+class DiffPreviewHunk(BaseModel):
+    section: str | None = None
+    before: str | None = None
+    after: str | None = None
+
+
+class DiffPreview(BaseModel):
+    kind: str
+    before_excerpt: str | None = None
+    after_excerpt: str | None = None
+    hunks: list[DiffPreviewHunk] = Field(default_factory=list)
+
+
+class ProposedAction(BaseModel):
+    action_id: str
+    action_type: ProposedActionType
+    approval_state: ProposedActionApprovalState
+    target_file_path: str | None = None
+    target_note_type: str | None = None
+    rationale: str
+    diff_preview: DiffPreview | dict[str, Any] | None = None
+    proposed_content: dict[str, Any] = Field(default_factory=dict)
+
+
+class SourceRecord(BaseModel):
+    source_id: str
+    session_id: str
+    kind: SourceRecordKind
+    status: SourceRecordStatus
+    source_name: str
+    mime_type: str | None = None
+    archive_path: str
+    checksum_sha256: str
+    captured_at: str
+    byte_size: int = 0
+    provenance: dict[str, Any] = Field(default_factory=dict)
+
+
+class IngestSession(BaseModel):
+    session_id: str
+    origin: IngestSessionOrigin
+    state: IngestSessionState
+    source_ids: list[str] = Field(default_factory=list)
+    title: str | None = None
+    digest: str | None = None
+    open_questions: list[dict[str, Any]] = Field(default_factory=list)
+    related_notes: list[dict[str, Any]] = Field(default_factory=list)
+    contradictions: list[dict[str, Any]] = Field(default_factory=list)
+    proposed_actions: list[ProposedAction] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    prepared_at: str | None = None
+    last_true_up_at: str | None = None
+
+
+class IngestSessionDetailResponse(BaseModel):
+    session: IngestSession
+    sources: list[SourceRecord] = Field(default_factory=list)
+
+
+class IngestResponse(BaseModel):
+    """Accepted ingest-session summary returned by POST /api/ingest."""
+
+    session_id: str
+    origin: IngestSessionOrigin
+    state: IngestSessionState
+    source_ids: list[str] = Field(default_factory=list)
+    created_at: str
+    updated_at: str
+    notification: IngestNotification | None = None
 
 
 #endregion

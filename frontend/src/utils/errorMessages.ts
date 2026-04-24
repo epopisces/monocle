@@ -3,9 +3,18 @@
  * Logs raw errors to console in development mode only.
  * Prevents leakage of internal/server details to end users.
  */
+
+function shouldLogErrorDetails(): boolean {
+  const nodeEnv = (globalThis as { process?: { env?: { NODE_ENV?: string } } }).process?.env?.NODE_ENV
+  if (typeof nodeEnv === 'string') {
+    return nodeEnv === 'development'
+  }
+  return import.meta.env.DEV
+}
+
 export function mapErrorToUserMessage(error: unknown): string {
   // Log raw error to console in development (useful for debugging)
-  if (process.env.NODE_ENV === 'development') {
+  if (shouldLogErrorDetails()) {
     console.error('Error details:', error)
   }
 

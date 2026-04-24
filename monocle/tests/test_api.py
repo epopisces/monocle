@@ -400,16 +400,19 @@ class TestOmniSearch:
 # ===========================================================================
 
 class TestIngest:
-    def test_ingest_text_returns_201(self, api_client: TestClient):
+    def test_ingest_text_returns_202_with_session_summary(self, api_client: TestClient):
         r = api_client.post(
             "/api/ingest",
             json={"content": "Met with Sarah today about the project.", "source": "web"},
         )
-        assert r.status_code == 201
+        assert r.status_code == 202
         body = _json(r)
-        assert "note" in body
-        assert "confidence" in body
-        assert "file_path" in body["note"]
+        assert body["origin"] == "api"
+        assert body["state"] == "queued"
+        assert body["session_id"].startswith("ing_")
+        assert len(body["source_ids"]) == 1
+        assert body["source_ids"][0].startswith("src_")
+        assert body["notification"]["kind"] == "ingest_captured"
 
     def test_ingest_requires_content_or_audio(self, api_client: TestClient):
         # Empty content is valid for text (pipeline handles it)
@@ -431,17 +434,35 @@ class TestIngest:
         )
         assert r.status_code == 422
 
-    def test_ingest_confidence_fields_present(self, api_client: TestClient):
+    def test_ingest_session_can_be_loaded_after_creation(self, api_client: TestClient):
         r = api_client.post(
             "/api/ingest",
             json={"content": "I decided to refactor the pipeline.", "source": "web"},
         )
-        assert r.status_code == 201
-        body = _json(r)
-        conf = body["confidence"]
-        assert "score" in conf
-        assert "template_match" in conf
-        assert "similar_note_detected" in conf
+        assert r.status_code == 202
+        session_id = r.json()["session_id"]
+
+        detail = api_client.get(f"/api/ingest/sessions/{session_id}")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["session"]["session_id"] == session_id
+        assert body["session"]["state"] == "queued"
+        assert body["session"]["proposed_actions"] == []
+        assert len(body["sources"]) == 1
+        assert body["sources"][0]["status"] == "archived"
+
+    def test_list_ingest_sessions_returns_created_session(self, api_client: TestClient):
+        created = api_client.post(
+            "/api/ingest",
+            json={"content": "Queue this for later review.", "source": "web"},
+        )
+        assert created.status_code == 202
+        session_id = created.json()["session_id"]
+
+        listed = api_client.get("/api/ingest/sessions")
+        assert listed.status_code == 200
+        sessions = listed.json()
+        assert any(item["session_id"] == session_id for item in sessions)
 
     def test_ingest_stream_returns_streaming(self, api_client: TestClient):
         r = api_client.post(
@@ -482,8 +503,8 @@ class TestIngest:
         assert done_data_lines, "done event has no data line"
         import json as _json
         done_payload = _json.loads(done_data_lines[0])
-        assert "note_path" in done_payload
-        assert "confidence" in done_payload
+        assert "session_id" in done_payload
+        assert "state" in done_payload
         assert "elapsed_ms" in done_payload
 
 

@@ -1,7 +1,7 @@
 template: person
 note_type: person_note
 default_folder: people
-description: "Person you know — contact, relationship context, and life events."
+description: "Person you know — relationship, personal context, care needs, and organizational ties."
 
 sentence_starters:
   - "I met"
@@ -42,7 +42,7 @@ fields:
   - name: people
     required: true
     type: list
-    description: "People mentioned in this note (auto-populated; used for backlinks)."
+    description: "People mentioned in this note. For person notes, include the subject's own name first; used for backlinks and graph edges."
   
   - name: relationship_type
     required: false
@@ -57,12 +57,12 @@ fields:
   - name: org
     required: false
     type: string
-    description: "Primary organization or company."
+    description: "Primary organization or company for quick filters and summaries."
   
   - name: org_role
     required: false
     type: string
-    description: "Their role/title in the organization."
+    description: "Their current or most relevant role/title in the primary organization."
 
   - name: organizations
     required: false
@@ -71,6 +71,32 @@ fields:
       Work history and organizational affiliations. Each entry: {name, role, join_date (YYYY-MM),
       leave_date (YYYY-MM or null), current (true/false)}. Used to auto-create structured links
       to organization notes and populate the knowledge graph.
+
+  # Personal Context & Care
+  - name: family_context
+    required: false
+    type: string
+    description: "Important family details or relational context (e.g., spouse, children, a baby due, caregiving responsibilities)."
+
+  - name: life_stage
+    required: false
+    type: string
+    description: "Current season of life or major context shaping decisions, stress, or priorities."
+
+  - name: prayer_requests
+    required: false
+    type: list
+    description: "Prayer requests, care needs, burdens, or desired support. Use short phrases."
+
+  - name: care_topics
+    required: false
+    type: list
+    description: "Sensitive or pastoral themes discussed: struggle, sin, grief, health, marriage, parenting, burnout, etc."
+
+  - name: conversation_topics
+    required: false
+    type: list
+    description: "Topics frequently discussed or raised in this interaction: AI, organizational dysfunction, World Cup, leadership, etc."
   
   # Important Dates
   - name: birthdate
@@ -113,7 +139,7 @@ fields:
   - name: tags
     required: false
     type: list
-    description: "Topics/interests: python, photography, leadership, etc."
+    description: "Stable interests or descriptors: python, photography, leadership, church, soccer, etc."
   
   - name: status
     required: false

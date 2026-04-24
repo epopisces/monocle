@@ -511,6 +511,29 @@ class TestVaultLayerCreateFromTemplate:
         )
         assert note.file_path == "people/sarah-chen.md"
         assert note.metadata.type == "person_note"
+        assert note.metadata.people == ["Sarah Chen"]
+
+    def test_person_template_schema_supports_personal_and_org_contexts(self):
+        schema_path = Path(__file__).parent.parent / "vault" / "templates" / "person.yaml"
+        schema = yaml.safe_load(schema_path.read_text(encoding="utf-8"))
+
+        field_names = {field["name"] for field in schema.get("fields", [])}
+        expected = {
+            "title",
+            "people",
+            "relationship_type",
+            "org",
+            "org_role",
+            "organizations",
+            "family_context",
+            "life_stage",
+            "prayer_requests",
+            "care_topics",
+            "conversation_topics",
+            "next_action",
+        }
+        missing = expected - field_names
+        assert not missing, f"Missing person template fields: {missing}"
 
     def test_decision_template(self, tmp_path: Path):
         vault = VaultLayer(tmp_path)
@@ -547,6 +570,55 @@ class TestVaultLayerCreateFromTemplate:
         vault = VaultLayer(tmp_path)
         note = vault.create_from_template("idea", {"title": "Body Test"}, body="Custom body.")
         assert note.body == "Custom body."
+
+    def test_person_template_uses_markdown_scaffold_when_body_empty(self, tmp_path: Path):
+        (tmp_path / ".templates").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".templates" / "person.md").write_text(
+            "# {title}\n\n## Relationship Snapshot\n- **Relationship type:**\n\n## Notes\n{body}\n",
+            encoding="utf-8",
+        )
+
+        vault = VaultLayer(tmp_path)
+        note = vault.create_from_template("person_note", {"title": "Alice Example"})
+
+        assert note.body.startswith("# Alice Example")
+        assert "## Relationship Snapshot" in note.body
+        assert "[Add note content here.]" in note.body
+
+    def test_person_template_inserts_body_into_scaffold_when_present(self, tmp_path: Path):
+        (tmp_path / ".templates").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".templates" / "person.md").write_text(
+            "# {title}\n\n## Summary\n[Summary placeholder]\n\n## Notes\n{body}\n",
+            encoding="utf-8",
+        )
+
+        vault = VaultLayer(tmp_path)
+        note = vault.create_from_template(
+            "person_note",
+            {"title": "Alice Example"},
+            body="Met over coffee and talked about AI.",
+        )
+
+        assert note.body.startswith("# Alice Example")
+        assert "## Summary" in note.body
+        assert "## Notes\nMet over coffee and talked about AI." in note.body
+
+    def test_organization_template_renders_name_alias_and_body(self, tmp_path: Path):
+        (tmp_path / ".templates").mkdir(parents=True, exist_ok=True)
+        (tmp_path / ".templates" / "organization.md").write_text(
+            "# {org_name}\n\n## Notes\n{body}\n",
+            encoding="utf-8",
+        )
+
+        vault = VaultLayer(tmp_path)
+        note = vault.create_from_template(
+            "organization",
+            {"name": "Acme Corp", "org_type": "company"},
+            body="Important partner organization.",
+        )
+
+        assert note.body.startswith("# Acme Corp")
+        assert "Important partner organization." in note.body
 
     def test_template_preserved_on_roundtrip(self, tmp_path: Path):
         """Template field should be preserved when written and read back."""

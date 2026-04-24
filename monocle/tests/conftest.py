@@ -235,6 +235,7 @@ def api_client(tmp_path: Path, mock_ai):
         from monocle.ingest import IngestPipeline
         from monocle.ingest.plugin import IngestPluginRegistry
         from monocle.ingest.plugins import register_default_plugins
+        from monocle.services.ingest_sessions import IngestSessionStore
 
         _reg = IngestPluginRegistry.get()
         if not _reg.plugins:
@@ -255,6 +256,12 @@ def api_client(tmp_path: Path, mock_ai):
             registry=_reg,
             failed_registry=failed_reg,
         )
+        ingest_session_store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
 
         app.state.vault = vault
         app.state.index = index
@@ -262,6 +269,7 @@ def api_client(tmp_path: Path, mock_ai):
         app.state.settings = settings
         app.state.reindex_queue = rq
         app.state.ingest_pipeline = pipeline
+        app.state.ingest_session_store = ingest_session_store
         app.state.failed_registry = failed_reg
         app.state.watcher = None
         app.state._review_pending_count = None  # lazy count cache; see review.py
