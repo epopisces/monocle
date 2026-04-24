@@ -4,7 +4,9 @@ from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
-from monocle.models import IngestRequest
+import pytest
+
+from monocle.models import IngestRequest, ProposedAction
 from monocle.services.ingest_sessions import IngestSessionStore
 
 
@@ -184,3 +186,129 @@ class TestIngestSessionStore:
         assert detail is not None
         assert len(selects) == 3
         assert detail.session.source_ids == [detail.sources[0].source_id]
+
+    def test_update_proposed_action_persists_edit_and_marks_session_in_review(self, tmp_path: Path):
+        settings = _make_settings()
+        store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        created = store.create_api_session(IngestRequest(content="review me", source="web"))
+        job = store.claim_prepare_jobs(limit=1)[0]
+        store.complete_prepare_job(
+            job.job_id,
+            created.session_id,
+            title="Prepared review",
+            digest="Digest",
+            open_questions=[],
+            related_notes=[],
+            contradictions=[],
+            proposed_actions=[
+                ProposedAction(
+                    action_id="act_1",
+                    action_type="update_note",
+                    approval_state="draft",
+                    target_file_path="people/alice.md",
+                    target_note_type="person_note",
+                    rationale="Capture new context.",
+                    proposed_content={"title": "Alice", "body": "Original draft"},
+                )
+            ],
+            artifact_payload={"digest": "Digest"},
+        )
+
+        updated = store.update_proposed_action(
+            created.session_id,
+            "act_1",
+            approval_state="edited",
+            rationale="Capture the clarified meeting details.",
+            proposed_content={"title": "Alice", "body": "Edited draft"},
+        )
+
+        assert updated is not None
+        assert updated.approval_state == "edited"
+        assert updated.proposed_content["body"] == "Edited draft"
+
+        detail = store.get_session(created.session_id)
+        assert detail is not None
+        assert detail.session.state == "in_review"
+        assert detail.session.proposed_actions[0].rationale == "Capture the clarified meeting details."
+
+    def test_complete_prepare_job_rejects_mismatched_job_and_session(self, tmp_path: Path):
+        settings = _make_settings()
+        store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        first = store.create_api_session(IngestRequest(content="first", source="web"))
+        second = store.create_api_session(IngestRequest(content="second", source="web"))
+        jobs = store.claim_prepare_jobs(limit=2)
+        first_job = next(job for job in jobs if job.session_id == first.session_id)
+
+        with pytest.raises(ValueError, match="does not belong"):
+            store.complete_prepare_job(
+                first_job.job_id,
+                second.session_id,
+                title="Prepared review",
+                digest="Digest",
+                open_questions=[],
+                related_notes=[],
+                contradictions=[],
+                proposed_actions=[],
+                artifact_payload={"digest": "Digest"},
+            )
+
+        first_detail = store.get_session(first.session_id)
+        second_detail = store.get_session(second.session_id)
+        assert first_detail is not None
+        assert second_detail is not None
+        assert first_detail.session.state == "preparing"
+        assert second_detail.session.state == "preparing"
+
+        with store._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM background_prepare_jobs WHERE job_id = ?",
+                (first_job.job_id,),
+            ).fetchone()
+        assert row is not None
+        assert row["status"] == "running"
+
+    def test_fail_prepare_job_rejects_mismatched_job_and_session(self, tmp_path: Path):
+        settings = _make_settings()
+        store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        first = store.create_api_session(IngestRequest(content="first", source="web"))
+        second = store.create_api_session(IngestRequest(content="second", source="web"))
+        jobs = store.claim_prepare_jobs(limit=2)
+        first_job = next(job for job in jobs if job.session_id == first.session_id)
+
+        with pytest.raises(ValueError, match="does not belong"):
+            store.fail_prepare_job(first_job.job_id, second.session_id, "boom")
+
+        first_detail = store.get_session(first.session_id)
+        second_detail = store.get_session(second.session_id)
+        assert first_detail is not None
+        assert second_detail is not None
+        assert first_detail.session.state == "preparing"
+        assert second_detail.session.state == "preparing"
+
+        with store._connect() as conn:
+            row = conn.execute(
+                "SELECT status FROM background_prepare_jobs WHERE job_id = ?",
+                (first_job.job_id,),
+            ).fetchone()
+            failed_notifications = conn.execute(
+                "SELECT COUNT(*) AS count FROM ingest_notifications WHERE kind = 'ingest_prepare_failed'",
+            ).fetchone()
+        assert row is not None
+        assert row["status"] == "running"
+        assert failed_notifications is not None
+        assert failed_notifications["count"] == 0

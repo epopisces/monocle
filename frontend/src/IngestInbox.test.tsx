@@ -90,6 +90,7 @@ describe('IngestInbox', () => {
     expect(await screen.findByTestId('ingest-inbox')).toBeInTheDocument()
     await waitFor(() => expect(screen.getByTestId('ingest-inbox-detail')).toBeInTheDocument())
     expect(markIngestNotificationRead).toHaveBeenCalledWith('notif_1')
+    expect(getIngestSession).toHaveBeenCalledTimes(1)
   })
 
   it('dismisses a notification', async () => {

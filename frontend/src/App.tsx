@@ -5,11 +5,11 @@ import AppShell from './components/layout/AppShell'
 import SettingsModal from './components/SettingsModal'
 import ChatScreen from './components/Chat/ChatScreen'
 import DocumentBrowserScreen from './components/DocumentBrowser/DocumentBrowserScreen'
+import IngestReviewScreen from './components/IngestReview/IngestReviewScreen'
 import SearchScreen from './components/Search/SearchScreen'
 import GraphScreen from './components/Graph/GraphScreen'
 import StatsScreen from './components/Stats/StatsScreen'
 import VoiceModal from './components/VoiceModal/VoiceModal'
-import IngestInbox from './components/IngestInbox/IngestInbox'
 import ReviewQueue from './components/ReviewQueue/ReviewQueue'
 import FailedCaptures from './components/FailedCaptures/FailedCaptures'
 import CommandPalette, { type PaletteAction } from './components/CommandPalette/CommandPalette'
@@ -25,7 +25,6 @@ function AppContent() {
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
-  const [ingestOpen, setIngestOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [failedOpen, setFailedOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
@@ -82,7 +81,6 @@ function AppContent() {
   const closeAllModals = useCallback(() => {
     setSettingsOpen(false)
     setVoiceOpen(false)
-    setIngestOpen(false)
     setReviewOpen(false)
     setFailedOpen(false)
     setCommandPaletteOpen(false)
@@ -120,7 +118,7 @@ function AppContent() {
       label: 'Open Prepared Ingest Sessions',
       icon: '📥',
       keywords: ['ingest', 'prepared', 'dormant', 'session', 'inbox'],
-      onExecute: () => { setIngestOpen(true); setCommandPaletteOpen(false) },
+      onExecute: () => { navigate('/ingest-review'); setCommandPaletteOpen(false) },
     },
     {
       id: 'open-review',
@@ -156,7 +154,7 @@ function AppContent() {
       <AppShell
         onSettingsOpen={() => setSettingsOpen(true)}
         onVoiceOpen={() => setVoiceOpen(true)}
-        onIngestOpen={() => setIngestOpen(true)}
+        onIngestOpen={() => navigate('/ingest-review')}
         onReviewOpen={() => setReviewOpen(true)}
         onFailedOpen={() => setFailedOpen(true)}
         ingestCount={ingestCount}
@@ -166,6 +164,7 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<ChatScreen onVoiceOpen={() => setVoiceOpen(true)} />} />
           <Route path="/docs" element={<DocumentBrowserScreen />} />
+          <Route path="/ingest-review" element={<IngestReviewScreen />} />
           <Route path="/search" element={<SearchScreen />} />
           <Route path="/graph" element={<GraphScreen />} />
           <Route path="/stats" element={<StatsScreen />} />
@@ -177,11 +176,6 @@ function AppContent() {
         onClose={() => setVoiceOpen(false)}
         onSaved={handleVoiceSaved}
         voiceBackend={voiceBackend}
-      />
-      <IngestInbox
-        open={ingestOpen}
-        onClose={() => setIngestOpen(false)}
-        onCountUpdate={setIngestCount}
       />
       <ReviewQueue
         open={reviewOpen}

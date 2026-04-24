@@ -11,6 +11,10 @@ vi.mock('react-force-graph', () => ({
   ForceGraph2D: () => null,
 }))
 
+vi.mock('./components/IngestReview/IngestReviewScreen', () => ({
+  default: () => null,
+}))
+
 // Graph and Notes API calls fired by GraphScreen on the /graph route
 vi.mock('./api/graph', () => ({ getGraph: vi.fn().mockResolvedValue({ focus: null, nodes: [], edges: [] }) }))
 vi.mock('./api/notes', () => ({ listNotes: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }) }))

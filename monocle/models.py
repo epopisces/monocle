@@ -404,6 +404,18 @@ class IngestTrueUpResponse(BaseModel):
     last_true_up_at: str
 
 
+class IngestOpenQuestionAnswerRequest(BaseModel):
+    answer: str = Field(min_length=1, max_length=10_000)
+
+
+class ProposedActionPatchRequest(BaseModel):
+    approval_state: ProposedActionApprovalState | None = None
+    target_file_path: str | None = None
+    target_note_type: str | None = None
+    rationale: str | None = None
+    proposed_content: dict[str, Any] | None = None
+
+
 #endregion
 
 # ---------------------------------------------------------------------------

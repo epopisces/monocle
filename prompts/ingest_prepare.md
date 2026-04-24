@@ -17,9 +17,9 @@ Return only valid JSON with this shape:
   ],
   "proposed_actions": [
     {
-      "action_type": "create_note" | "update_note",
+      "action_type": "create_note",
       "target_file_path": "optional vault-relative note path",
-      "target_note_type": "person_note | decision | idea | observation | reference | meeting_note | project | action_item | organization | other",
+      "target_note_type": "person_note",
       "rationale": "Why this action should be reviewed",
       "proposed_content": {
         "title": "optional proposed note title",
@@ -30,6 +30,8 @@ Return only valid JSON with this shape:
 }
 
 Rules:
+- Allowed `action_type` values: `create_note`, `update_note`.
+- Allowed `target_note_type` values: `person_note`, `decision`, `idea`, `observation`, `reference`, `meeting_note`, `project`, `action_item`, `organization`, `other`.
 - Use the supplied related note candidates when you mention contradictions.
 - Do not invent file paths that were not supplied unless the action is a create_note.
 - Keep proposed actions draft-quality and concise.

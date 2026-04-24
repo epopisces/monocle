@@ -8,7 +8,7 @@ import pytest
 
 from monocle.ingest import IngestPipeline
 from monocle.index.memory import MemoryIndex
-from monocle.models import IngestRequest, NoteMetadata
+from monocle.models import IngestRequest, NoteMetadata, RoutingDecision
 from monocle.services.activity import ActivityMonitor
 from monocle.services.ingest_prepare import IngestPreparationWorker
 from monocle.services.ingest_sessions import IngestSessionStore
@@ -137,3 +137,69 @@ class TestIngestPreparationWorker:
         assert detail is not None
         assert detail.session.state == "queued"
         assert detail.session.last_true_up_at == refreshed.last_true_up_at
+
+    @pytest.mark.asyncio
+    async def test_run_once_fails_job_when_archive_path_escapes_sources_root(self, prep_fixture):
+        store, worker, _activity = prep_fixture
+        created = store.create_api_session(IngestRequest(content="Tampered source path.", source="web"))
+        escaped_path = store.sources_root.parent / "escaped.txt"
+        escaped_path.write_text("outside the sources root", encoding="utf-8")
+
+        with store._connect() as conn:
+            conn.execute(
+                "UPDATE source_records SET archive_path = ? WHERE session_id = ?",
+                ("../escaped.txt", created.session_id),
+            )
+
+        processed = await worker.run_once()
+
+        assert processed == 1
+        detail = store.get_session(created.session_id)
+        assert detail is not None
+        assert detail.session.state == "failed"
+
+        notifications = store.list_notifications(kind="ingest_prepare_failed")
+        assert len(notifications) == 1
+        assert notifications[0].session_id == created.session_id
+
+    @pytest.mark.asyncio
+    async def test_generate_prep_payload_uses_local_prompt_override_without_frontmatter(
+        self,
+        prep_fixture,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        import monocle.prompts as prompts_module
+
+        store, worker, _activity = prep_fixture
+        created = store.create_api_session(IngestRequest(content="Prompt override session.", source="web"))
+        context = store.get_prepare_context(created.session_id)
+        assert context is not None
+
+        prompts_root = tmp_path / "prompts"
+        (prompts_root / "local").mkdir(parents=True, exist_ok=True)
+        (prompts_root / "ingest_prepare.md").write_text(
+            "---\nname: ingest_prepare\n---\nDEFAULT PROMPT",
+            encoding="utf-8",
+        )
+        (prompts_root / "local" / "ingest_prepare.md").write_text(
+            "---\nname: ingest_prepare_local\n---\nLOCAL PREP PROMPT",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(prompts_module, "_PROMPTS_DIR", prompts_root)
+
+        worker._ai.chat.reset_mock()
+
+        payload = await worker._generate_prep_payload(
+            source_text="Prompt override session.",
+            routing_decision=RoutingDecision(template="blank", note_type="observation", confidence=1.0, fast_path=True),
+            note_metadata=NoteMetadata(title="Prompt Override", type="observation"),
+            related_notes=[],
+            context=context,
+        )
+
+        assert payload["title"] == "Alice sync"
+        messages = worker._ai.chat.await_args.args[0]
+        assert messages[0]["content"] == "LOCAL PREP PROMPT"
+        assert "name:" not in messages[0]["content"]
+        assert "---" not in messages[0]["content"]

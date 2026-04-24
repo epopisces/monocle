@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from monocle.ai.base import _parse_json_response
 from monocle.models import ProposedAction
+from monocle.prompts import load_prompt
 from monocle.services.search import search_vault
 
 if TYPE_CHECKING:
@@ -26,6 +27,11 @@ if TYPE_CHECKING:
     from monocle.index.base import IndexLayer
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_PREPARE_PROMPT = (
+    "You prepare dormant ingest sessions for later human review. "
+    "Return only JSON with keys title, digest, open_questions, contradictions, proposed_actions."
+)
 
 
 def _trim_text(text: str, limit: int) -> str:
@@ -203,7 +209,13 @@ class IngestPreparationWorker:
         return "\n\n".join(part for part in parts if part).strip()
 
     def _store_path(self, context: "IngestSessionPrepareContext", archive_path: str) -> Path:
-        return (self._store.sources_root / archive_path).resolve()
+        sources_root = self._store.sources_root.resolve()
+        resolved = (sources_root / archive_path).resolve()
+        if not resolved.is_relative_to(sources_root):
+            raise ValueError(
+                f"Archived source path escapes sources_root for session {context.session.session_id}: {archive_path}"
+            )
+        return resolved
 
     async def _related_notes(self, source_text: str) -> list[dict[str, Any]]:
         query = _trim_text(source_text, min(self._settings.ingest.source_excerpt_chars, 1200))
@@ -251,11 +263,7 @@ class IngestPreparationWorker:
         if self._ai is None:
             return self._deterministic_payload(source_text, routing_decision, note_metadata, related_notes, context)
 
-        prompt_path = Path("prompts/ingest_prepare.md")
-        system_prompt = prompt_path.read_text(encoding="utf-8") if prompt_path.exists() else (
-            "You prepare dormant ingest sessions for later human review. "
-            "Return only JSON with keys title, digest, open_questions, contradictions, proposed_actions."
-        )
+        system_prompt = load_prompt("ingest_prepare") or _DEFAULT_PREPARE_PROMPT
         messages = [
             {"role": "system", "content": system_prompt},
             {

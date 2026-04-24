@@ -1,11 +1,70 @@
 import type { components } from './schema.d.ts'
-import { apiGet, apiPost, apiDelete } from './client'
+import { apiDelete, apiGet, apiPatch, apiPost } from './client'
 
 export type IngestRequest = components['schemas']['IngestRequest']
 export type IngestResponse = components['schemas']['IngestResponse']
 
 export interface CountResponse {
   count: number
+}
+
+export interface OpenQuestion {
+  id?: string
+  question?: string
+  reason?: string
+  answer?: string
+  answered_at?: string
+}
+
+export interface RelatedNote {
+  file_path?: string
+  title?: string
+  score?: number
+  excerpt?: string
+}
+
+export interface ContradictionWarning {
+  file_path?: string
+  title?: string
+  summary?: string
+  severity?: string
+  excerpt?: string
+}
+
+export interface DiffPreviewHunk {
+  section?: string | null
+  before?: string | null
+  after?: string | null
+}
+
+export interface DiffPreview {
+  kind: string
+  before_excerpt?: string | null
+  after_excerpt?: string | null
+  hunks: DiffPreviewHunk[]
+}
+
+export interface ProposedAction {
+  action_id: string
+  action_type: 'create_note' | 'update_note'
+  approval_state: 'draft' | 'edited' | 'approved' | 'rejected' | 'executed' | 'failed'
+  target_file_path: string | null
+  target_note_type: string | null
+  rationale: string
+  diff_preview?: DiffPreview | null
+  proposed_content: Record<string, unknown>
+}
+
+export interface ProposedActionPatchRequest {
+  approval_state?: ProposedAction['approval_state']
+  target_file_path?: string | null
+  target_note_type?: string | null
+  rationale?: string | null
+  proposed_content?: Record<string, unknown>
+}
+
+export interface IngestOpenQuestionAnswerRequest {
+  answer: string
 }
 
 export interface IngestSession {
@@ -15,10 +74,10 @@ export interface IngestSession {
   source_ids: string[]
   title: string | null
   digest: string | null
-  open_questions: Array<Record<string, unknown>>
-  related_notes: Array<Record<string, unknown>>
-  contradictions: Array<Record<string, unknown>>
-  proposed_actions: Array<Record<string, unknown>>
+  open_questions: OpenQuestion[]
+  related_notes: RelatedNote[]
+  contradictions: ContradictionWarning[]
+  proposed_actions: ProposedAction[]
   created_at: string
   updated_at: string
   prepared_at: string | null
@@ -85,8 +144,60 @@ export function ingest(body: IngestRequest): Promise<IngestResponse> {
   return apiPost<IngestResponse>('/api/ingest', body)
 }
 
+export function listIngestSessions(params?: {
+  state?: string
+  origin?: string
+  ready_only?: boolean
+  limit?: number
+  offset?: number
+}): Promise<IngestSession[]> {
+  return apiGet<IngestSession[]>('/api/ingest/sessions', params)
+}
+
 export function getIngestSession(sessionId: string): Promise<IngestSessionDetailResponse> {
   return apiGet<IngestSessionDetailResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}`)
+}
+
+export function startIngestReview(sessionId: string): Promise<IngestSessionDetailResponse> {
+  return apiPost<IngestSessionDetailResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}/start-review`)
+}
+
+export function answerIngestQuestion(
+  sessionId: string,
+  questionId: string,
+  body: IngestOpenQuestionAnswerRequest,
+): Promise<IngestSessionDetailResponse> {
+  return apiPatch<IngestSessionDetailResponse>(
+    `/api/ingest/sessions/${encodeURIComponent(sessionId)}/questions/${encodeURIComponent(questionId)}`,
+    body,
+  )
+}
+
+export function patchIngestAction(
+  sessionId: string,
+  actionId: string,
+  body: ProposedActionPatchRequest,
+): Promise<IngestSessionDetailResponse> {
+  return apiPatch<IngestSessionDetailResponse>(
+    `/api/ingest/sessions/${encodeURIComponent(sessionId)}/actions/${encodeURIComponent(actionId)}`,
+    body,
+  )
+}
+
+export function approveIngestAction(sessionId: string, actionId: string): Promise<IngestSessionDetailResponse> {
+  return apiPost<IngestSessionDetailResponse>(
+    `/api/ingest/sessions/${encodeURIComponent(sessionId)}/actions/${encodeURIComponent(actionId)}/approve`,
+  )
+}
+
+export function rejectIngestAction(sessionId: string, actionId: string): Promise<IngestSessionDetailResponse> {
+  return apiPost<IngestSessionDetailResponse>(
+    `/api/ingest/sessions/${encodeURIComponent(sessionId)}/actions/${encodeURIComponent(actionId)}/reject`,
+  )
+}
+
+export function approveAllIngestActions(sessionId: string): Promise<IngestSessionDetailResponse> {
+  return apiPost<IngestSessionDetailResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}/approve-all`)
 }
 
 export function trueUpIngestSession(sessionId: string): Promise<IngestTrueUpResponse> {

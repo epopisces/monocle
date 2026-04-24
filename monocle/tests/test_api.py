@@ -13,6 +13,70 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
+from monocle.models import ProposedAction
+
+
+def _prepare_review_session(
+    api_client: TestClient,
+    *,
+    open_questions: list[dict] | None = None,
+    contradictions: list[dict] | None = None,
+    proposed_actions: list[ProposedAction] | None = None,
+) -> str:
+    seed = api_client.put(
+        "/api/notes/people/alice.md",
+        json={
+            "title": "Alice",
+            "body": "Original meeting notes.",
+            "metadata": {"type": "person_note", "domain": "work", "review_status": "approved"},
+        },
+    )
+    assert seed.status_code in (200, 201)
+
+    created = api_client.post(
+        "/api/ingest",
+        json={"content": "Prepared session for review workflow.", "source": "web"},
+    )
+    assert created.status_code == 202
+    session_id = created.json()["session_id"]
+
+    store = api_client.app.state.ingest_session_store
+    job = store.claim_prepare_jobs(limit=1)[0]
+    store.complete_prepare_job(
+        job.job_id,
+        session_id,
+        title="Prepared review",
+        digest="Review digest",
+        open_questions=(
+            open_questions
+            if open_questions is not None
+            else [{"id": "oq_1", "question": "What changed?", "reason": "Clarify the update."}]
+        ),
+        related_notes=[],
+        contradictions=(
+            contradictions
+            if contradictions is not None
+            else [{"file_path": "people/alice.md", "summary": "Existing note may be stale.", "severity": "warning"}]
+        ),
+        proposed_actions=(
+            proposed_actions
+            if proposed_actions is not None
+            else [
+                ProposedAction(
+                    action_id="act_1",
+                    action_type="update_note",
+                    approval_state="draft",
+                    target_file_path="people/alice.md",
+                    target_note_type="person_note",
+                    rationale="Refresh the person note.",
+                    proposed_content={"title": "Alice", "body": "Updated meeting notes."},
+                )
+            ]
+        ),
+        artifact_payload={"digest": "Review digest"},
+    )
+    return session_id
+
 #endregion
 
 # ---------------------------------------------------------------------------
@@ -547,6 +611,90 @@ class TestIngest:
         detail = api_client.get(f"/api/ingest/sessions/{session_id}")
         assert detail.status_code == 200
         assert detail.json()["session"]["state"] == "queued"
+
+    def test_ingest_review_flow_supports_questions_edits_diffs_and_individual_approval_handoff(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client)
+
+        detail = api_client.get(f"/api/ingest/sessions/{session_id}")
+        assert detail.status_code == 200
+        body = detail.json()
+        assert body["session"]["contradictions"][0]["title"] == "Alice"
+        assert body["session"]["proposed_actions"][0]["diff_preview"]["kind"] == "update"
+        assert body["session"]["proposed_actions"][0]["diff_preview"]["hunks"][0]["section"] in {"title", "body"}
+
+        started = api_client.post(f"/api/ingest/sessions/{session_id}/start-review")
+        assert started.status_code == 200
+        assert started.json()["session"]["state"] == "in_review"
+
+        answered = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/questions/oq_1",
+            json={"answer": "It now includes the new meeting outcome."},
+        )
+        assert answered.status_code == 200
+        answered_body = answered.json()
+        assert answered_body["session"]["state"] == "proposal_ready"
+        assert answered_body["session"]["open_questions"][0]["answer"] == "It now includes the new meeting outcome."
+
+        patched = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/actions/act_1",
+            json={
+                "rationale": "Refresh the person note with the clarified outcome.",
+                "proposed_content": {"body": "Edited meeting notes with clarified outcome."},
+            },
+        )
+        assert patched.status_code == 200
+        patched_body = patched.json()
+        assert patched_body["session"]["proposed_actions"][0]["rationale"] == "Refresh the person note with the clarified outcome."
+        assert patched_body["session"]["proposed_actions"][0]["diff_preview"]["after_excerpt"] == "Edited meeting notes with clarified outcome."
+
+        approved = api_client.post(f"/api/ingest/sessions/{session_id}/actions/act_1/approve")
+        assert approved.status_code == 200
+        approved_body = approved.json()
+        assert approved_body["session"]["state"] == "approved_pending_execution"
+        assert approved_body["session"]["proposed_actions"][0]["approval_state"] == "approved"
+
+    def test_ingest_review_approve_all_does_not_promote_rejected_only_session(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        rejected = api_client.post(f"/api/ingest/sessions/{session_id}/actions/act_1/reject")
+        assert rejected.status_code == 200
+        rejected_body = rejected.json()
+        assert rejected_body["session"]["state"] == "proposal_ready"
+        assert rejected_body["session"]["proposed_actions"][0]["approval_state"] == "rejected"
+
+        approve_all = api_client.post(f"/api/ingest/sessions/{session_id}/approve-all")
+        assert approve_all.status_code == 200
+        approve_all_body = approve_all.json()
+        assert approve_all_body["session"]["state"] == "proposal_ready"
+        assert approve_all_body["session"]["proposed_actions"][0]["approval_state"] == "rejected"
+
+    def test_ingest_review_patch_rejects_target_path_traversal(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        patched = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/actions/act_1",
+            json={"target_file_path": "../../.env"},
+        )
+
+        assert patched.status_code == 403
+
+    def test_ingest_review_diff_preview_preserves_explicit_body_clear(self, api_client: TestClient):
+        session_id = _prepare_review_session(api_client, open_questions=[])
+
+        patched = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/actions/act_1",
+            json={"proposed_content": {"body": ""}},
+        )
+
+        assert patched.status_code == 200
+        patched_body = patched.json()
+        body_hunk = next(
+            hunk
+            for hunk in patched_body["session"]["proposed_actions"][0]["diff_preview"]["hunks"]
+            if hunk["section"] == "body"
+        )
+        assert body_hunk["before"] == "Original meeting notes."
+        assert body_hunk["after"] is None
 
     def test_ingest_stream_returns_streaming(self, api_client: TestClient):
         r = api_client.post(
