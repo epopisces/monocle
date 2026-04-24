@@ -155,6 +155,7 @@ async def get_note(path: str, request: Request) -> Note:
 async def put_note(path: str, body: NoteWriteRequest, request: Request, response: Response) -> Note:
     vault = request.app.state.vault
     reindex_queue = getattr(request.app.state, "reindex_queue", None)
+    activity_monitor = getattr(request.app.state, "activity_monitor", None)
 
     # Detect create vs update before writing so we can return 201 vs 200.
     # _safe_resolve validates the path (raises 403 on traversal) without
@@ -171,7 +172,12 @@ async def put_note(path: str, body: NoteWriteRequest, request: Request, response
         body=body.body,
         metadata=body.metadata,
     )
-    await asyncio.to_thread(vault.write_note, path, note, body.if_mtime)
+    tracker = activity_monitor.track_foreground_write() if activity_monitor is not None else None
+    if tracker is not None:
+        with tracker:
+            await asyncio.to_thread(vault.write_note, path, note, body.if_mtime)
+    else:
+        await asyncio.to_thread(vault.write_note, path, note, body.if_mtime)
 
     if reindex_queue is not None:
         reindex_queue.push(path)
@@ -188,8 +194,14 @@ async def put_note(path: str, body: NoteWriteRequest, request: Request, response
 async def patch_note(path: str, body: NotePatchRequest, request: Request) -> Note:
     vault = request.app.state.vault
     reindex_queue = getattr(request.app.state, "reindex_queue", None)
+    activity_monitor = getattr(request.app.state, "activity_monitor", None)
 
-    updated_note = await asyncio.to_thread(vault.patch_frontmatter, path, body.updates, body.if_mtime)
+    tracker = activity_monitor.track_foreground_write() if activity_monitor is not None else None
+    if tracker is not None:
+        with tracker:
+            updated_note = await asyncio.to_thread(vault.patch_frontmatter, path, body.updates, body.if_mtime)
+    else:
+        updated_note = await asyncio.to_thread(vault.patch_frontmatter, path, body.updates, body.if_mtime)
 
     if reindex_queue is not None:
         reindex_queue.push(path)
@@ -201,7 +213,13 @@ async def patch_note(path: str, body: NotePatchRequest, request: Request) -> Not
 @router.delete("/notes/{path:path}", status_code=204)
 async def delete_note(path: str, request: Request) -> None:
     vault = request.app.state.vault
-    await asyncio.to_thread(vault.delete_note, path)
+    activity_monitor = getattr(request.app.state, "activity_monitor", None)
+    tracker = activity_monitor.track_foreground_write() if activity_monitor is not None else None
+    if tracker is not None:
+        with tracker:
+            await asyncio.to_thread(vault.delete_note, path)
+    else:
+        await asyncio.to_thread(vault.delete_note, path)
     request.app.state._review_pending_count = None  # deleted note may have been pending
 
 

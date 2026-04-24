@@ -387,6 +387,18 @@ class IngestPipeline:
             return note, confidence
 
     # ------------------------------------------------------------------
+    # Shared analysis API
+    # ------------------------------------------------------------------
+
+    async def analyze_content(
+        self,
+        text: str,
+        template_hint: str | None = None,
+    ) -> tuple[Any, Any]:
+        """Return routing and extracted metadata without constructing a note."""
+        return await self._route_and_extract(text, template_hint)
+
+    # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
 

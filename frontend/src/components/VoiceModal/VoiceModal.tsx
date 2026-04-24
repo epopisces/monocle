@@ -323,8 +323,10 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
         content: trimmed,
         content_type: 'text/plain',
         source: 'voice',
+        origin: 'api',
         template_hint: state.template,
         allow_duplicate: false,
+        fast_capture: false,
       })
       onSaved?.()
       onClose()

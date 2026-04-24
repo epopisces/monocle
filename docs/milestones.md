@@ -1107,3 +1107,66 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 
 **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 961 passed, 8 deselected, EXIT 0.
 
+---
+
+### M35: Background Session Preparation & Notifications
+
+**Goal:** Turn persisted ingest sessions into dormant, review-ready work items by preparing them during idle time and surfacing ready notifications through a dedicated app-shell entry point.
+
+**Completed:** 2026-04-24
+
+**Deliverables completed:**
+
+- [x] Added `IngestConfig` to `monocle/config.py` and `config.yaml.example` so background preparation cadence, concurrency, related-note breadth, and source excerpt size are server-configurable.
+- [x] Added `monocle/services/activity.py` with `ActivityMonitor`, then wired it through `monocle/main.py`, `monocle/routers/chat.py`, and `monocle/routers/notes.py` so background prep only runs when chat streams and foreground note writes are idle.
+- [x] Added `monocle/services/ingest_prepare.py` with `IngestPreparationWorker`, persisted-job claiming, idle-gated loop execution, deterministic fallback behavior, and artifact output under `data/ingest/artifacts/<session>/prepare_result.json`.
+- [x] Extended `IngestSessionStore` in `monocle/services/ingest_sessions.py` with job-claiming, prepare completion/failure handling, ready-notification persistence, notification list/count/status helpers, and `enqueue_true_up()` for refreshable dormant sessions.
+- [x] Exposed new ingest APIs in `monocle/routers/ingest.py`: `GET /api/ingest/notifications`, `GET /api/ingest/notifications/count`, `POST /api/ingest/notifications/{id}/read`, `POST /api/ingest/notifications/{id}/dismiss`, and `POST /api/ingest/sessions/{session_id}/true-up`.
+- [x] Added `prompts/ingest_prepare.md` and reused `IngestPipeline.analyze_content()` so background prep can combine LLM-assisted digesting with deterministic routing, metadata extraction, and fallback behavior.
+- [x] Added a separate app-shell notification surface: topbar ingest badge, `IngestInbox` drawer, unread-count polling, detail rendering, dismiss/read actions, and true-up action wiring in the frontend.
+- [x] Regenerated `openapi.json` and `frontend/src/api/schema.d.ts` so the frontend typed API layer matches the new M35 backend surface.
+
+**Acceptance Criteria met:**
+
+- Persisted ingest sessions can now be prepared later without re-running the initial capture flow; prepared outputs are stored on disk and reloaded through the session/detail APIs.
+- Background preparation only runs during idle windows, using activity-gated dispatch instead of competing with active chat streams or foreground note writes.
+- Users now see ready-session notification counts and a dedicated prepared-session drawer in the app shell.
+- Prepared sessions remain dormant until opened and can be requeued with a true-up action that returns the session to the queued state.
+
+**Implementation notes:**
+
+- The selected Phase 1.5 design was the persisted SQLite-backed job queue executed in-process, which preserved resumability and simple operations while avoiding a second worker service.
+- Background preparation uses a hybrid path: reuse existing ingest analysis for routing/metadata, then enrich with one LLM JSON prompt and deterministic related-note search, with graceful fallback when AI or search is unavailable.
+- Notification handling is intentionally separate from the review queue so ingest-ready work items have their own count, drawer, and dismissal lifecycle before the dedicated M36 review workspace lands.
+- `enqueue_true_up()` dismisses stale `ingest_ready` notifications and creates or reuses a queued preparation job so the same session can be refreshed against newer vault state.
+
+**Files modified:**
+
+- `config.yaml.example`
+- `monocle/config.py`
+- `monocle/ingest/__init__.py`
+- `monocle/main.py`
+- `monocle/models.py`
+- `monocle/routers/chat.py`
+- `monocle/routers/ingest.py`
+- `monocle/routers/notes.py`
+- `monocle/services/activity.py`
+- `monocle/services/ingest_prepare.py`
+- `monocle/services/ingest_sessions.py`
+- `monocle/tests/test_api.py`
+- `monocle/tests/test_ingest_prepare.py`
+- `openapi.json`
+- `prompts/ingest_prepare.md`
+- `frontend/src/App.tsx`
+- `frontend/src/App.test.tsx`
+- `frontend/src/IngestInbox.test.tsx`
+- `frontend/src/api/ingest.ts`
+- `frontend/src/api/schema.d.ts`
+- `frontend/src/components/IngestInbox/IngestInbox.tsx`
+- `frontend/src/components/IngestInbox/IngestInbox.css`
+- `frontend/src/components/VoiceModal/VoiceModal.tsx`
+- `frontend/src/components/layout/AppShell.tsx`
+- `frontend/src/components/layout/Topbar.tsx`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 971 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 448 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+

@@ -18,6 +18,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from monocle.config import Settings
+from monocle.services.activity import ActivityMonitor
 from monocle.telemetry import configure_telemetry
 
 # Router imports
@@ -138,6 +139,7 @@ async def lifespan(app: FastAPI):
     app.state.index = index
     app.state.settings = cfg
     app.state.route_filter_processor = route_filter_processor
+    app.state.activity_monitor = ActivityMonitor()
     # Lazy pending-review count cache; invalidated on any vault write.
     # review_count endpoint reads this before falling back to a full scan.
     app.state._review_pending_count = None
@@ -289,6 +291,20 @@ async def lifespan(app: FastAPI):
         failed_registry=failed_registry,
     )
     app.state.ingest_pipeline = ingest_pipeline
+
+    from monocle.services.ingest_prepare import IngestPreparationWorker
+
+    ingest_prepare_worker = IngestPreparationWorker(
+        store=app.state.ingest_session_store,
+        pipeline=ingest_pipeline,
+        vault=vault,
+        index=index,
+        ai=ai,
+        settings=cfg,
+        activity=app.state.activity_monitor,
+    )
+    app.state.ingest_prepare_worker = ingest_prepare_worker
+    await ingest_prepare_worker.start()
 
     # ------------------------------------------------------------------
     # Scheduler (cron jobs — weekly summary + re-index)
@@ -456,6 +472,7 @@ async def lifespan(app: FastAPI):
     logger.info("[API] Monocle shutting down")
     if watcher is not None:
         await watcher.stop()
+    await ingest_prepare_worker.stop()
     await reindex_queue.stop()
     if scheduler is not None:
         await scheduler.stop()

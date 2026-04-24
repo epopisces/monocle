@@ -297,6 +297,14 @@ class ReviewConfig(BaseModel):
     confidence_weights: ConfidenceWeightsConfig = Field(default_factory=ConfidenceWeightsConfig)
 
 
+class IngestConfig(BaseModel):
+    background_prepare_enabled: bool = True
+    prepare_poll_interval_s: float = Field(5.0, ge=1.0, le=60.0)
+    max_idle_prepare_jobs: int = Field(1, ge=1, le=8)
+    related_notes_limit: int = Field(5, ge=1, le=20)
+    source_excerpt_chars: int = Field(4000, ge=500, le=20000)
+
+
 class ServerConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
@@ -405,7 +413,7 @@ def save_config_patch(patch: dict) -> None:
     import tempfile
     import yaml  # noqa: PLC0415
 
-    _ALLOWED = {"ai", "vault", "index", "agents", "review", "server", "telemetry", "ui"}
+    _ALLOWED = {"ai", "vault", "index", "agents", "review", "ingest", "server", "telemetry", "ui"}
 
     config_path = _find_config_file()
     current = _load_yaml(config_path)
@@ -446,6 +454,7 @@ class Settings(BaseModel):
     index: IndexConfig = Field(default_factory=IndexConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     review: ReviewConfig = Field(default_factory=ReviewConfig)
+    ingest: IngestConfig = Field(default_factory=IngestConfig)
     server: ServerConfig = Field(default_factory=ServerConfig)
     telemetry: TelemetryConfig = Field(default_factory=TelemetryConfig)
     ui: UIConfig = Field(default_factory=UIConfig)

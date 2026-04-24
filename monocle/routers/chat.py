@@ -166,6 +166,7 @@ async def _stream_agent_response(
     _active_tool_calls: dict[str, str] = {}  # call_id → tool_name, for enriching result events
 
     app = request.app
+    activity_monitor = getattr(app.state, "activity_monitor", None)
     ai = getattr(app.state, "ai", None)
     vault = getattr(app.state, "vault", None)
     index = getattr(app.state, "index", None)
@@ -185,79 +186,81 @@ async def _stream_agent_response(
     # as context into the last user message so the agent can reference them.
     # -----------------------------------------------------------------------
     pre_fetch_context = ""
-    if chat_request.fetch_urls:
-        from monocle.agents.tools import VaultTools
-        _MAX_PREFETCH = 5  # safety cap
-        urls_to_fetch = [
-            _sanitize_prefetch_url(u)
-            for u in chat_request.fetch_urls[:_MAX_PREFETCH]
-            if isinstance(u, str) and _sanitize_prefetch_url(u).startswith(("http://", "https://"))
-        ]
-        if urls_to_fetch:
-            vault_tools = VaultTools(
-                vault=vault,
-                index=index,
-                ai=ai,
-                reindex_queue=reindex_queue,
-            )
-            logger.info("[CHAT] Pre-fetching %d URL(s) in parallel", len(urls_to_fetch))
-            prefetch_call_ids = [f"prefetch:{i}" for i in range(len(urls_to_fetch))]
-            for url, call_id in zip(urls_to_fetch, prefetch_call_ids):
-                yield _sse("tool_call", {
-                    "name": "create_reference_from_url",
-                    "call_id": call_id,
-                    "url": url,
-                })
-            results = await asyncio.gather(
-                *[_run_prefetch_url(vault_tools, url) for url in urls_to_fetch],
-            )
-            context_lines: list[str] = []
-            for call_id, (url, duration_ms, result) in zip(prefetch_call_ids, results):
-                if isinstance(result, Exception):
-                    logger.warning("[CHAT] Pre-fetch failed for %s: %s", url, result)
-                    yield _sse("tool_error", {
-                        "name": "create_reference_from_url",
-                        "call_id": call_id,
-                        "error": str(result),
-                    })
-                    yield _sse("prefetch_complete", {
+    tracker = activity_monitor.track_chat_stream() if activity_monitor is not None else suppress()
+    with tracker:
+        if chat_request.fetch_urls:
+            from monocle.agents.tools import VaultTools
+            _MAX_PREFETCH = 5  # safety cap
+            urls_to_fetch = [
+                _sanitize_prefetch_url(u)
+                for u in chat_request.fetch_urls[:_MAX_PREFETCH]
+                if isinstance(u, str) and _sanitize_prefetch_url(u).startswith(("http://", "https://"))
+            ]
+            if urls_to_fetch:
+                vault_tools = VaultTools(
+                    vault=vault,
+                    index=index,
+                    ai=ai,
+                    reindex_queue=reindex_queue,
+                )
+                logger.info("[CHAT] Pre-fetching %d URL(s) in parallel", len(urls_to_fetch))
+                prefetch_call_ids = [f"prefetch:{i}" for i in range(len(urls_to_fetch))]
+                for url, call_id in zip(urls_to_fetch, prefetch_call_ids):
+                    yield _sse("tool_call", {
                         "name": "create_reference_from_url",
                         "call_id": call_id,
                         "url": url,
-                        "status": "error",
-                        "duration_ms": round(duration_ms, 1),
                     })
-                    context_lines.append(f"- {url}: failed to fetch")
-                else:
-                    try:
-                        data = json.loads(result)  # type: ignore[arg-type]
-                        yield _sse("note_created", {
-                            "file_path": data.get("file_path", ""),
-                            "type": "reference",
+                results = await asyncio.gather(
+                    *[_run_prefetch_url(vault_tools, url) for url in urls_to_fetch],
+                )
+                context_lines: list[str] = []
+                for call_id, (url, duration_ms, result) in zip(prefetch_call_ids, results):
+                    if isinstance(result, Exception):
+                        logger.warning("[CHAT] Pre-fetch failed for %s: %s", url, result)
+                        yield _sse("tool_error", {
+                            "name": "create_reference_from_url",
+                            "call_id": call_id,
+                            "error": str(result),
                         })
                         yield _sse("prefetch_complete", {
                             "name": "create_reference_from_url",
                             "call_id": call_id,
                             "url": url,
-                            "status": "success",
-                            "duration_ms": round(duration_ms, 1),
-                            "file_path": data.get("file_path", ""),
-                        })
-                        context_lines.append(
-                            f"- {url} → saved as '{data.get('title', '')}' at {data.get('file_path', '')}"
-                        )
-                    except Exception:
-                        yield _sse("prefetch_complete", {
-                            "name": "create_reference_from_url",
-                            "call_id": call_id,
-                            "url": url,
-                            "status": "success",
+                            "status": "error",
                             "duration_ms": round(duration_ms, 1),
                         })
-                        context_lines.append(f"- {url}: fetched")
-            if context_lines:
-                pre_fetch_context = (
-                    "[The following URLs have been pre-fetched and saved as reference notes:]\n"
+                        context_lines.append(f"- {url}: failed to fetch")
+                    else:
+                        try:
+                            data = json.loads(result)  # type: ignore[arg-type]
+                            yield _sse("note_created", {
+                                "file_path": data.get("file_path", ""),
+                                "type": "reference",
+                            })
+                            yield _sse("prefetch_complete", {
+                                "name": "create_reference_from_url",
+                                "call_id": call_id,
+                                "url": url,
+                                "status": "success",
+                                "duration_ms": round(duration_ms, 1),
+                                "file_path": data.get("file_path", ""),
+                            })
+                            context_lines.append(
+                                f"- {url} → saved as '{data.get('title', '')}' at {data.get('file_path', '')}"
+                            )
+                        except Exception:
+                            yield _sse("prefetch_complete", {
+                                "name": "create_reference_from_url",
+                                "call_id": call_id,
+                                "url": url,
+                                "status": "success",
+                                "duration_ms": round(duration_ms, 1),
+                            })
+                            context_lines.append(f"- {url}: fetched")
+                if context_lines:
+                    pre_fetch_context = (
+                        "[The following URLs have been pre-fetched and saved as reference notes:]\n"
                     + "\n".join(context_lines)
                     + "\n\n"
                 )
@@ -418,6 +421,8 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
     async def stream_with_tracing():
         """Wrap streaming response with OTel span for message event recording."""
         trace_span = None
+        activity_monitor = getattr(request.app.state, "activity_monitor", None)
+        tracker = activity_monitor.track_chat_stream() if activity_monitor is not None else suppress()
         try:
             trace_span = get_tracer("monocle.chat").start_span("chat.stream")
             trace_span.set_attribute("session_id", body.session_id or "unknown")
@@ -441,34 +446,35 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
             assistant_tokens = []
             
             # Stream all events from agent
-            async for event_str in _stream_agent_response(request, body):
-                yield event_str
-                
-                # Parse token events to accumulate assistant response
-                if trace_span:
-                    try:
-                        # SSE frames are formatted as:
-                        # event: token
-                        # data: {"delta": "..."}
-                        # 
-                        # Check if this frame is a token event
-                        lines = event_str.split('\n')
-                        event_type = None
-                        for line in lines:
-                            if line.startswith('event: '):
-                                event_type = line[7:].strip()
-                                break
-                        
-                        if event_type == 'token':
-                            # Parse the data payload
+            with tracker:
+                async for event_str in _stream_agent_response(request, body):
+                    yield event_str
+                    
+                    # Parse token events to accumulate assistant response
+                    if trace_span:
+                        try:
+                            # SSE frames are formatted as:
+                            # event: token
+                            # data: {"delta": "..."}
+                            # 
+                            # Check if this frame is a token event
+                            lines = event_str.split('\n')
+                            event_type = None
                             for line in lines:
-                                if line.startswith('data: '):
-                                    data = json.loads(line[6:])
-                                    if isinstance(data, dict) and 'delta' in data:
-                                        assistant_tokens.append(data['delta'])
+                                if line.startswith('event: '):
+                                    event_type = line[7:].strip()
                                     break
-                    except (json.JSONDecodeError, ValueError, IndexError):
-                        pass  # Silently skip parse errors
+                            
+                            if event_type == 'token':
+                                # Parse the data payload
+                                for line in lines:
+                                    if line.startswith('data: '):
+                                        data = json.loads(line[6:])
+                                        if isinstance(data, dict) and 'delta' in data:
+                                            assistant_tokens.append(data['delta'])
+                                        break
+                        except (json.JSONDecodeError, ValueError, IndexError):
+                            pass  # Silently skip parse errors
 
         finally:
             # Record accumulated assistant response as a span event

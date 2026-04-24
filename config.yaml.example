@@ -68,6 +68,13 @@ review:
     tag_plausibility: 0.20
     entity_match: 0.15
 
+ingest:
+  background_prepare_enabled: true
+  prepare_poll_interval_s: 5.0
+  max_idle_prepare_jobs: 1
+  related_notes_limit: 5
+  source_excerpt_chars: 4000
+
 server:
   host: 127.0.0.1              # Change to 0.0.0.0 to expose to local network
   port: 8000

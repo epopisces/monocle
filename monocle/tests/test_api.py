@@ -477,6 +477,77 @@ class TestIngest:
         sessions = listed.json()
         assert any(item["session_id"] == session_id for item in sessions)
 
+    def test_ingest_notifications_api_lists_count_and_marks_read(self, api_client: TestClient):
+        created = api_client.post(
+            "/api/ingest",
+            json={"content": "Prepare this for dormant review.", "source": "web"},
+        )
+        assert created.status_code == 202
+        session_id = created.json()["session_id"]
+        store = api_client.app.state.ingest_session_store
+        job = store.claim_prepare_jobs(limit=1)[0]
+        store.complete_prepare_job(
+            job.job_id,
+            session_id,
+            title="Dormant prep",
+            digest="Prepared digest",
+            open_questions=[{"id": "oq_1", "question": "Need more detail?"}],
+            related_notes=[],
+            contradictions=[],
+            proposed_actions=[],
+            artifact_payload={"digest": "Prepared digest"},
+        )
+
+        count = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
+        assert count.status_code == 200
+        assert count.json()["count"] == 1
+
+        listed = api_client.get("/api/ingest/notifications?kind=ingest_ready")
+        assert listed.status_code == 200
+        items = listed.json()
+        assert len(items) == 1
+        assert items[0]["session_id"] == session_id
+        assert items[0]["session_state"] == "dormant_ready"
+        assert items[0]["open_questions_count"] == 1
+
+        mark = api_client.post(f"/api/ingest/notifications/{items[0]['notification_id']}/read")
+        assert mark.status_code == 204
+
+        count_after = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
+        assert count_after.status_code == 200
+        assert count_after.json()["count"] == 0
+
+    def test_ingest_session_true_up_requeues_prepared_session(self, api_client: TestClient):
+        created = api_client.post(
+            "/api/ingest",
+            json={"content": "Make this ready, then refresh it.", "source": "web"},
+        )
+        assert created.status_code == 202
+        session_id = created.json()["session_id"]
+        store = api_client.app.state.ingest_session_store
+        job = store.claim_prepare_jobs(limit=1)[0]
+        store.complete_prepare_job(
+            job.job_id,
+            session_id,
+            title="Prepared",
+            digest="Digest",
+            open_questions=[],
+            related_notes=[],
+            contradictions=[],
+            proposed_actions=[],
+            artifact_payload={"digest": "Digest"},
+        )
+
+        response = api_client.post(f"/api/ingest/sessions/{session_id}/true-up")
+        assert response.status_code == 202
+        body = response.json()
+        assert body["session_id"] == session_id
+        assert body["state"] == "queued"
+
+        detail = api_client.get(f"/api/ingest/sessions/{session_id}")
+        assert detail.status_code == 200
+        assert detail.json()["session"]["state"] == "queued"
+
     def test_ingest_stream_returns_streaming(self, api_client: TestClient):
         r = api_client.post(
             "/api/ingest/stream",

@@ -39,6 +39,7 @@ T = TypeVar("T")
 
 NoteSource = Literal["web", "voice", "teams", "mcp", "import", "agent"]
 IngestSessionOrigin = Literal["api", "chat", "inbox"]
+IngestNotificationStatus = Literal["unread", "read", "dismissed"]
 IngestSessionState = Literal[
     "captured",
     "queued",
@@ -301,8 +302,27 @@ class BrainStats(BaseModel):
 class IngestNotification(BaseModel):
     id: str
     kind: str
-    status: Literal["unread", "read", "dismissed"] = "unread"
+    status: IngestNotificationStatus = "unread"
     created_at: str
+
+
+class IngestNotificationSummary(BaseModel):
+    notification_id: str
+    session_id: str
+    kind: str
+    status: IngestNotificationStatus
+    created_at: str
+    session_state: IngestSessionState
+    session_title: str | None = None
+    session_digest: str | None = None
+    source_names: list[str] = Field(default_factory=list)
+    open_questions_count: int = 0
+    contradictions_count: int = 0
+    proposed_actions_count: int = 0
+
+
+class CountResponse(BaseModel):
+    count: int
 
 
 class DiffPreviewHunk(BaseModel):
@@ -375,6 +395,13 @@ class IngestResponse(BaseModel):
     created_at: str
     updated_at: str
     notification: IngestNotification | None = None
+
+
+class IngestTrueUpResponse(BaseModel):
+    session_id: str
+    job_id: str
+    state: IngestSessionState
+    last_true_up_at: str
 
 
 #endregion

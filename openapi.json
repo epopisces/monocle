@@ -28,6 +28,28 @@
         }
       }
     },
+    "/api/health/models": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Models",
+        "description": "Return configured AI provider and per-model availability / load status.\n\nThis endpoint is polled by the frontend to show which models are running\n(loaded in memory) vs. merely available (downloaded but not warm).\nA model that is available but not loaded will incur a cold-start delay on\nfirst use.",
+        "operationId": "health_models_api_health_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderModelsResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/notes": {
       "get": {
         "tags": [
@@ -635,13 +657,75 @@
         }
       }
     },
+    "/api/search/omni": {
+      "get": {
+        "tags": [
+          "search"
+        ],
+        "summary": "Omni Search",
+        "description": "Fast full-text vault scan: filename first, then frontmatter, then body.\n\nUses NoteRef fields (filename, title, type, domain, tags) for fast matching.\nOnly reads full note bodies for body content match.\nPaginates through all notes regardless of vault size.",
+        "operationId": "omni_search_api_search_omni_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 3,
+              "description": "Search query (min 3 chars)",
+              "title": "Q"
+            },
+            "description": "Search query (min 3 chars)"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/OmniResult"
+                  },
+                  "title": "Response Omni Search Api Search Omni Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ingest": {
       "post": {
         "tags": [
           "ingest"
         ],
         "summary": "Ingest",
-        "description": "Run the 8-step ingest pipeline and return the created note + confidence.",
+        "description": "Create a persisted ingest session and archive its raw source.",
         "operationId": "ingest_api_ingest_post",
         "requestBody": {
           "content": {
@@ -654,7 +738,7 @@
           "required": true
         },
         "responses": {
-          "201": {
+          "202": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -677,13 +761,428 @@
         }
       }
     },
+    "/api/ingest/sessions": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "List Sessions",
+        "description": "List persisted ingest sessions for the review workspace.",
+        "operationId": "list_sessions_api_ingest_sessions_get",
+        "parameters": [
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "State"
+            }
+          },
+          {
+            "name": "origin",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Origin"
+            }
+          },
+          {
+            "name": "ready_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Ready Only"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestSession"
+                  },
+                  "title": "Response List Sessions Api Ingest Sessions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/sessions/{session_id}": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Get Session",
+        "description": "Return the full persisted ingest session with its archived sources.",
+        "operationId": "get_session_api_ingest_sessions__session_id__get",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestSessionDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/sessions/{session_id}/true-up": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "True Up Session",
+        "operationId": "true_up_session_api_ingest_sessions__session_id__true_up_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestTrueUpResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/notifications": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "List Notifications",
+        "operationId": "list_notifications_api_ingest_notifications_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 20,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/IngestNotificationSummary"
+                  },
+                  "title": "Response List Notifications Api Ingest Notifications Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/notifications/count": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Count Notifications",
+        "operationId": "count_notifications_api_ingest_notifications_count_get",
+        "parameters": [
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Kind"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/notifications/{notification_id}/read": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Mark Notification Read",
+        "operationId": "mark_notification_read_api_ingest_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/notifications/{notification_id}/dismiss": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Dismiss Notification",
+        "operationId": "dismiss_notification_api_ingest_notifications__notification_id__dismiss_post",
+        "parameters": [
+          {
+            "name": "notification_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Notification Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ingest/stream": {
       "post": {
         "tags": [
           "ingest"
         ],
         "summary": "Ingest Stream",
-        "description": "Streaming ingest \u2014 emits SSE progress events for each pipeline step.",
+        "description": "Streaming ingest capture \u2014 emits SSE progress for archival and persistence.",
         "operationId": "ingest_stream_api_ingest_stream_post",
         "requestBody": {
           "content": {
@@ -872,13 +1371,93 @@
           "graph"
         ],
         "summary": "Get Graph",
+        "description": "Return the knowledge graph, optionally centred on a focal note.\n\n- **focus** \u2014 vault-relative path (e.g. ``people/sarah.md``).  When\n  omitted, the full-vault graph is returned.\n- **max_degree** \u2014 maximum BFS distance from the focus node (default 3).\n- **types** \u2014 note type filter.  Repeat the parameter for multiple values\n  (e.g. ``?types=person_note&types=meeting_note``).  A single value may\n  also contain comma-separated types (e.g. ``?types=person_note,meeting_note``).\n  When omitted all types are included.\n- **n** \u2014 maximum number of vault notes considered (default 500).",
         "operationId": "get_graph_api_graph_get",
+        "parameters": [
+          {
+            "name": "focus",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Vault-relative path of the focal note",
+              "title": "Focus"
+            },
+            "description": "Vault-relative path of the focal note"
+          },
+          {
+            "name": "max_degree",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 6,
+              "minimum": 1,
+              "description": "Max BFS hops from focus",
+              "default": 3,
+              "title": "Max Degree"
+            },
+            "description": "Max BFS hops from focus"
+          },
+          {
+            "name": "types",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Types"
+            }
+          },
+          {
+            "name": "n",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 2000,
+              "minimum": 1,
+              "description": "Max notes to include",
+              "default": 500,
+              "title": "N"
+            },
+            "description": "Max notes to include"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/GraphData"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -913,113 +1492,18 @@
           "chat"
         ],
         "summary": "Chat",
+        "description": "Stream agent responses as Server-Sent Events.\n\nThe stream always terminates with a 'done' event carrying a status field\nindicating success or error. If status=error, an 'error' event was also\nemitted prior to done with failure details.\n\nEvent types: token | tool_call | note_created | error | done\n\nTracing: Records user and assistant messages as span events for AI Toolkit\nInput/Output column visualization.",
         "operationId": "chat_api_chat_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChatRequest"
               }
             }
-          }
-        }
-      }
-    },
-    "/api/agents/weekly-summary": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Trigger Weekly Summary",
-        "operationId": "trigger_weekly_summary_api_agents_weekly_summary_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/reindex": {
-      "post": {
-        "tags": [
-          "agents"
-        ],
-        "summary": "Trigger Reindex",
-        "operationId": "trigger_reindex_api_agents_reindex_post",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/review": {
-      "get": {
-        "tags": [
-          "review"
-        ],
-        "summary": "List Review",
-        "operationId": "list_review_api_review_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/review/count": {
-      "get": {
-        "tags": [
-          "review"
-        ],
-        "summary": "Review Count",
-        "operationId": "review_count_api_review_count_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/review/{path}/approve": {
-      "patch": {
-        "tags": [
-          "review"
-        ],
-        "summary": "Approve Note",
-        "operationId": "approve_note_api_review__path__approve_patch",
-        "parameters": [
-          {
-            "name": "path",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Path"
-            }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1042,19 +1526,261 @@
         }
       }
     },
-    "/api/review/approve-all": {
+    "/api/agents/weekly-summary": {
       "post": {
         "tags": [
-          "review"
+          "agents"
         ],
-        "summary": "Approve All",
-        "operationId": "approve_all_api_review_approve_all_post",
+        "summary": "Trigger Weekly Summary",
+        "description": "Trigger the weekly summary agent and stream progress via SSE.\n\nEvents emitted:\n  ``start``    \u2014 agent started\n  ``done``     \u2014 summary written; ``data`` contains ``file_path``\n  ``error``    \u2014 agent failed; ``data`` contains ``message``",
+        "operationId": "trigger_weekly_summary_api_agents_weekly_summary_post",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agents/reindex": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Trigger Reindex",
+        "description": "Trigger a full-vault incremental re-index in the background.\n\nReturns 202 Accepted immediately; the re-index runs asynchronously.",
+        "operationId": "trigger_reindex_api_agents_reindex_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "List Review",
+        "description": "Return paginated notes with review_status=pending.\n\nFetches all pending notes from vault (handling pagination internally)\nand returns the requested page.",
+        "operationId": "list_review_api_review_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response List Review Api Review Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review/count": {
+      "get": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Review Count",
+        "description": "Return number of notes currently in the review queue.\n\nReturns the cached value from ``app.state._review_pending_count`` when\navailable (O(1)), falling back to a full vault scan when the cache is\ncold (e.g. after a note write invalidates it).",
+        "operationId": "review_count_api_review_count_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "integer"
+                  },
+                  "type": "object",
+                  "title": "Response Review Count Api Review Count Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review/{path}/approve": {
+      "patch": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Approve Note",
+        "description": "Approve a single note: sets review_status, approval_mode, approved_by, approved_at.",
+        "operationId": "approve_note_api_review__path__approve_patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review/approve-all": {
+      "post": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Approve All",
+        "description": "Approve every note currently in the review queue.\n\nApprovals run concurrently (up to 10 at a time) via ``asyncio.gather``\nso large queues complete significantly faster than a serial loop.",
+        "operationId": "approve_all_api_review_approve_all_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApproveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApproveAllResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/review/{path}/reject": {
+      "patch": {
+        "tags": [
+          "review"
+        ],
+        "summary": "Reject Note",
+        "description": "Reject a pending note: sets review_status=rejected and removes it from the queue.",
+        "operationId": "reject_note_api_review__path__reject_patch",
+        "parameters": [
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -1067,13 +1793,18 @@
           "settings"
         ],
         "summary": "Get Settings",
+        "description": "Return current server settings.  MCP key is masked to last 4 chars.",
         "operationId": "get_settings_api_settings_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Get Settings Api Settings Get"
+                }
               }
             }
           }
@@ -1084,13 +1815,38 @@
           "settings"
         ],
         "summary": "Patch Settings",
+        "description": "Hot-patch runtime settings.  Changes are persisted to config.yaml.\n\nIf AI provider changes, hot-reload is attempted BEFORE persisting.\nIf hot-reload fails, the entire patch is rejected (no partial state).\nTrace filter updates are deferred until after all validations complete\nto ensure atomicity (no partial runtime state on rejection).",
         "operationId": "patch_settings_api_settings_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatch"
+              }
+            }
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Patch Settings Api Settings Patch"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
@@ -1103,13 +1859,18 @@
           "settings"
         ],
         "summary": "Rotate Mcp Key",
+        "description": "Generate a new MCP access key and persist it to .env.",
         "operationId": "rotate_mcp_key_api_settings_rotate_mcp_key_post",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Rotate Mcp Key Api Settings Rotate Mcp Key Post"
+                }
               }
             }
           }
@@ -1138,6 +1899,167 @@
   },
   "components": {
     "schemas": {
+      "AIPatch": {
+        "properties": {
+          "chat_model_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chat Model Key"
+          },
+          "embed_model_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Embed Model Key"
+          },
+          "stt_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stt Key"
+          },
+          "url_reference_timeout_s": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 300.0,
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url Reference Timeout S"
+          },
+          "transcribe_backend": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "native",
+                  "whisper_cpp",
+                  "subprocess"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcribe Backend"
+          },
+          "transcribe_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transcribe Url"
+          },
+          "ollama_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ollama Base Url"
+          },
+          "models": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ModelEntryPatch"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "title": "AIPatch"
+      },
+      "ApprovalResult": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "review_status": {
+            "type": "string",
+            "title": "Review Status"
+          },
+          "approval_mode": {
+            "type": "string",
+            "title": "Approval Mode"
+          },
+          "approved_by": {
+            "type": "string",
+            "title": "Approved By"
+          },
+          "approved_at": {
+            "type": "string",
+            "title": "Approved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "review_status",
+          "approval_mode",
+          "approved_by",
+          "approved_at"
+        ],
+        "title": "ApprovalResult"
+      },
+      "ApproveAllResponse": {
+        "properties": {
+          "approved": {
+            "type": "integer",
+            "title": "Approved"
+          }
+        },
+        "type": "object",
+        "required": [
+          "approved"
+        ],
+        "title": "ApproveAllResponse"
+      },
+      "ApproveRequest": {
+        "properties": {
+          "approved_by": {
+            "type": "string",
+            "title": "Approved By",
+            "default": "user"
+          }
+        },
+        "type": "object",
+        "title": "ApproveRequest"
+      },
       "BacklinkRef": {
         "properties": {
           "source": {
@@ -1245,6 +2167,289 @@
         "type": "object",
         "title": "BrainStats"
       },
+      "ChatMessageRequest": {
+        "properties": {
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": "user"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "ChatMessageRequest"
+      },
+      "ChatRequest": {
+        "properties": {
+          "messages": {
+            "items": {
+              "$ref": "#/components/schemas/ChatMessageRequest"
+            },
+            "type": "array",
+            "title": "Messages"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "tool_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Hint"
+          },
+          "fetch_urls": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fetch Urls"
+          }
+        },
+        "type": "object",
+        "required": [
+          "messages"
+        ],
+        "title": "ChatRequest"
+      },
+      "CountResponse": {
+        "properties": {
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "count"
+        ],
+        "title": "CountResponse"
+      },
+      "DiffPreview": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "before_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before Excerpt"
+          },
+          "after_excerpt": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Excerpt"
+          },
+          "hunks": {
+            "items": {
+              "$ref": "#/components/schemas/DiffPreviewHunk"
+            },
+            "type": "array",
+            "title": "Hunks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "DiffPreview"
+      },
+      "DiffPreviewHunk": {
+        "properties": {
+          "section": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Section"
+          },
+          "before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Before"
+          },
+          "after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After"
+          }
+        },
+        "type": "object",
+        "title": "DiffPreviewHunk"
+      },
+      "GraphData": {
+        "properties": {
+          "focus": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Focus"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "title": "GraphData"
+      },
+      "GraphEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "edge_type": {
+            "type": "string",
+            "enum": [
+              "structured",
+              "wikilink",
+              "co-mention"
+            ],
+            "title": "Edge Type",
+            "default": "wikilink"
+          },
+          "relation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Relation"
+          },
+          "weight": {
+            "type": "integer",
+            "title": "Weight",
+            "default": 1
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "GraphEdge"
+      },
+      "GraphNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "degree": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Degree"
+          },
+          "weight": {
+            "type": "integer",
+            "title": "Weight",
+            "default": 1
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "label",
+          "type"
+        ],
+        "title": "GraphNode"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1328,66 +2533,139 @@
         "type": "object",
         "title": "IndexStats"
       },
-      "IngestConfidence": {
+      "IngestNotification": {
         "properties": {
-          "score": {
-            "type": "number",
-            "title": "Score"
+          "id": {
+            "type": "string",
+            "title": "Id"
           },
-          "template_match": {
-            "type": "number",
-            "title": "Template Match"
+          "kind": {
+            "type": "string",
+            "title": "Kind"
           },
-          "metadata_coverage": {
-            "type": "number",
-            "title": "Metadata Coverage"
-          },
-          "tag_plausibility": {
-            "type": "number",
-            "title": "Tag Plausibility"
-          },
-          "entity_match": {
-            "type": "number",
-            "title": "Entity Match"
-          },
-          "rationale": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+          "status": {
+            "type": "string",
+            "enum": [
+              "unread",
+              "read",
+              "dismissed"
             ],
-            "title": "Rationale"
+            "title": "Status",
+            "default": "unread"
           },
-          "similar_note_detected": {
-            "type": "boolean",
-            "title": "Similar Note Detected",
-            "default": false
-          },
-          "similar_note_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Similar Note Path"
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
           }
         },
         "type": "object",
         "required": [
-          "score",
-          "template_match",
-          "metadata_coverage",
-          "tag_plausibility",
-          "entity_match"
+          "id",
+          "kind",
+          "created_at"
         ],
-        "title": "IngestConfidence",
-        "description": "Deterministic confidence score for an ingested note (no LLM call)."
+        "title": "IngestNotification"
+      },
+      "IngestNotificationSummary": {
+        "properties": {
+          "notification_id": {
+            "type": "string",
+            "title": "Notification Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "unread",
+              "read",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "session_state": {
+            "type": "string",
+            "enum": [
+              "captured",
+              "queued",
+              "preparing",
+              "dormant_ready",
+              "in_review",
+              "awaiting_user",
+              "proposal_ready",
+              "approved_pending_execution",
+              "executing",
+              "completed",
+              "failed",
+              "dismissed"
+            ],
+            "title": "Session State"
+          },
+          "session_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Title"
+          },
+          "session_digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Digest"
+          },
+          "source_names": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Names"
+          },
+          "open_questions_count": {
+            "type": "integer",
+            "title": "Open Questions Count",
+            "default": 0
+          },
+          "contradictions_count": {
+            "type": "integer",
+            "title": "Contradictions Count",
+            "default": 0
+          },
+          "proposed_actions_count": {
+            "type": "integer",
+            "title": "Proposed Actions Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "notification_id",
+          "session_id",
+          "kind",
+          "status",
+          "created_at",
+          "session_state"
+        ],
+        "title": "IngestNotificationSummary"
       },
       "IngestRequest": {
         "properties": {
@@ -1414,10 +2692,21 @@
               "voice",
               "teams",
               "mcp",
-              "import"
+              "import",
+              "agent"
             ],
             "title": "Source",
             "default": "web"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "api",
+              "chat",
+              "inbox"
+            ],
+            "title": "Origin",
+            "default": "api"
           },
           "template_hint": {
             "anyOf": [
@@ -1458,6 +2747,11 @@
             "type": "boolean",
             "title": "Allow Duplicate",
             "default": false
+          },
+          "fast_capture": {
+            "type": "boolean",
+            "title": "Fast Capture",
+            "default": false
           }
         },
         "type": "object",
@@ -1465,20 +2759,268 @@
       },
       "IngestResponse": {
         "properties": {
-          "note": {
-            "$ref": "#/components/schemas/Note"
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
           },
-          "confidence": {
-            "$ref": "#/components/schemas/IngestConfidence"
+          "origin": {
+            "type": "string",
+            "enum": [
+              "api",
+              "chat",
+              "inbox"
+            ],
+            "title": "Origin"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "captured",
+              "queued",
+              "preparing",
+              "dormant_ready",
+              "in_review",
+              "awaiting_user",
+              "proposal_ready",
+              "approved_pending_execution",
+              "executing",
+              "completed",
+              "failed",
+              "dismissed"
+            ],
+            "title": "State"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Ids"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "notification": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngestNotification"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
         "required": [
-          "note",
-          "confidence"
+          "session_id",
+          "origin",
+          "state",
+          "created_at",
+          "updated_at"
         ],
         "title": "IngestResponse",
-        "description": "Response body for POST /api/ingest."
+        "description": "Accepted ingest-session summary returned by POST /api/ingest."
+      },
+      "IngestSession": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "origin": {
+            "type": "string",
+            "enum": [
+              "api",
+              "chat",
+              "inbox"
+            ],
+            "title": "Origin"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "captured",
+              "queued",
+              "preparing",
+              "dormant_ready",
+              "in_review",
+              "awaiting_user",
+              "proposal_ready",
+              "approved_pending_execution",
+              "executing",
+              "completed",
+              "failed",
+              "dismissed"
+            ],
+            "title": "State"
+          },
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Ids"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "digest": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Digest"
+          },
+          "open_questions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Open Questions"
+          },
+          "related_notes": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Related Notes"
+          },
+          "contradictions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Contradictions"
+          },
+          "proposed_actions": {
+            "items": {
+              "$ref": "#/components/schemas/ProposedAction"
+            },
+            "type": "array",
+            "title": "Proposed Actions"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          },
+          "prepared_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prepared At"
+          },
+          "last_true_up_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last True Up At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "origin",
+          "state",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IngestSession"
+      },
+      "IngestSessionDetailResponse": {
+        "properties": {
+          "session": {
+            "$ref": "#/components/schemas/IngestSession"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceRecord"
+            },
+            "type": "array",
+            "title": "Sources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session"
+        ],
+        "title": "IngestSessionDetailResponse"
+      },
+      "IngestTrueUpResponse": {
+        "properties": {
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "job_id": {
+            "type": "string",
+            "title": "Job Id"
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "captured",
+              "queued",
+              "preparing",
+              "dormant_ready",
+              "in_review",
+              "awaiting_user",
+              "proposal_ready",
+              "approved_pending_execution",
+              "executing",
+              "completed",
+              "failed",
+              "dismissed"
+            ],
+            "title": "State"
+          },
+          "last_true_up_at": {
+            "type": "string",
+            "title": "Last True Up At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "session_id",
+          "job_id",
+          "state",
+          "last_true_up_at"
+        ],
+        "title": "IngestTrueUpResponse"
       },
       "KeywordResult": {
         "properties": {
@@ -1533,6 +3075,90 @@
         "title": "LinkRef",
         "description": "A structured link from a note's `links:` frontmatter field."
       },
+      "ModelEntryPatch": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embed",
+              "stt"
+            ],
+            "title": "Role"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "ollama",
+              "foundry_local",
+              "azure"
+            ],
+            "title": "Provider"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "name",
+          "role",
+          "provider"
+        ],
+        "title": "ModelEntryPatch",
+        "description": "A model entry supplied in a PATCH request (full replacement semantics).\n\nSince models list is treated as full-list replacement (not merge-by-key),\nall fields except base_url must be provided; they are required to match\nthe ModelEntry schema and pass AIConfig validation."
+      },
+      "ModelStatus": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "chat",
+              "embed",
+              "transcribe"
+            ],
+            "title": "Role"
+          },
+          "available": {
+            "type": "boolean",
+            "title": "Available"
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "role",
+          "available",
+          "loaded"
+        ],
+        "title": "ModelStatus",
+        "description": "Status of a single configured model role."
+      },
       "Note": {
         "properties": {
           "file_path": {
@@ -1585,6 +3211,7 @@
               "project",
               "action_item",
               "weekly_summary",
+              "organization",
               "other"
             ],
             "title": "Type",
@@ -1621,7 +3248,8 @@
               "voice",
               "teams",
               "mcp",
-              "import"
+              "import",
+              "agent"
             ],
             "title": "Source",
             "default": "web"
@@ -1677,7 +3305,8 @@
             "type": "string",
             "enum": [
               "pending",
-              "approved"
+              "approved",
+              "rejected"
             ],
             "title": "Review Status",
             "default": "approved"
@@ -1805,6 +3434,7 @@
               "project",
               "action_item",
               "weekly_summary",
+              "organization",
               "other"
             ],
             "title": "Type",
@@ -1855,7 +3485,8 @@
             "type": "string",
             "enum": [
               "pending",
-              "approved"
+              "approved",
+              "rejected"
             ],
             "title": "Review Status",
             "default": "approved"
@@ -1914,6 +3545,39 @@
         "title": "NoteWriteRequest",
         "description": "Body for PUT /api/notes/{path} \u2014 full note write."
       },
+      "OmniResult": {
+        "properties": {
+          "file_path": {
+            "type": "string",
+            "title": "File Path"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "excerpt": {
+            "type": "string",
+            "title": "Excerpt"
+          },
+          "match_location": {
+            "type": "string",
+            "enum": [
+              "filename",
+              "frontmatter",
+              "body"
+            ],
+            "title": "Match Location"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file_path",
+          "title",
+          "excerpt",
+          "match_location"
+        ],
+        "title": "OmniResult"
+      },
       "Page_NoteRef_": {
         "properties": {
           "items": {
@@ -1945,6 +3609,115 @@
         ],
         "title": "Page[NoteRef]"
       },
+      "ProposedAction": {
+        "properties": {
+          "action_id": {
+            "type": "string",
+            "title": "Action Id"
+          },
+          "action_type": {
+            "type": "string",
+            "enum": [
+              "create_note",
+              "update_note"
+            ],
+            "title": "Action Type"
+          },
+          "approval_state": {
+            "type": "string",
+            "enum": [
+              "draft",
+              "edited",
+              "approved",
+              "rejected",
+              "executed",
+              "failed"
+            ],
+            "title": "Approval State"
+          },
+          "target_file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target File Path"
+          },
+          "target_note_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Note Type"
+          },
+          "rationale": {
+            "type": "string",
+            "title": "Rationale"
+          },
+          "diff_preview": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DiffPreview"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Diff Preview"
+          },
+          "proposed_content": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Proposed Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "action_id",
+          "action_type",
+          "approval_state",
+          "rationale"
+        ],
+        "title": "ProposedAction"
+      },
+      "ProviderModelsResponse": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "title": "Provider"
+          },
+          "provider_reachable": {
+            "type": "boolean",
+            "title": "Provider Reachable"
+          },
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelStatus"
+            },
+            "type": "array",
+            "title": "Models"
+          }
+        },
+        "type": "object",
+        "required": [
+          "provider",
+          "provider_reachable",
+          "models"
+        ],
+        "title": "ProviderModelsResponse",
+        "description": "Response for GET /api/health/models."
+      },
       "RetryRequest": {
         "properties": {
           "id": {
@@ -1957,6 +3730,38 @@
           "id"
         ],
         "title": "RetryRequest"
+      },
+      "ReviewPatch": {
+        "properties": {
+          "queue_threshold": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 1.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Queue Threshold"
+          },
+          "auto_approve_threshold_pct": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Auto Approve Threshold Pct"
+          }
+        },
+        "type": "object",
+        "title": "ReviewPatch"
       },
       "SearchResult": {
         "properties": {
@@ -1991,6 +3796,160 @@
         ],
         "title": "SearchResult"
       },
+      "SettingsPatch": {
+        "properties": {
+          "review": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ai": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AIPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ui": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UIPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "telemetry": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TelemetryPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "title": "SettingsPatch"
+      },
+      "SourceRecord": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "audio",
+              "file",
+              "url",
+              "chat_text",
+              "chat_upload"
+            ],
+            "title": "Kind"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "captured",
+              "archived",
+              "queued",
+              "processing",
+              "ready",
+              "consumed",
+              "completed",
+              "failed",
+              "dismissed"
+            ],
+            "title": "Status"
+          },
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime Type"
+          },
+          "archive_path": {
+            "type": "string",
+            "title": "Archive Path"
+          },
+          "checksum_sha256": {
+            "type": "string",
+            "title": "Checksum Sha256"
+          },
+          "captured_at": {
+            "type": "string",
+            "title": "Captured At"
+          },
+          "byte_size": {
+            "type": "integer",
+            "title": "Byte Size",
+            "default": 0
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Provenance"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "session_id",
+          "kind",
+          "status",
+          "source_name",
+          "archive_path",
+          "checksum_sha256",
+          "captured_at"
+        ],
+        "title": "SourceRecord"
+      },
+      "TelemetryPatch": {
+        "properties": {
+          "trace_filters": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trace Filters"
+          }
+        },
+        "type": "object",
+        "title": "TelemetryPatch"
+      },
       "TranscribeResponse": {
         "properties": {
           "transcript": {
@@ -2008,6 +3967,27 @@
           "mime_type"
         ],
         "title": "TranscribeResponse"
+      },
+      "UIPatch": {
+        "properties": {
+          "voice_input_backend": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "whisper",
+                  "web_speech"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Voice Input Backend"
+          }
+        },
+        "type": "object",
+        "title": "UIPatch"
       },
       "ValidationError": {
         "properties": {

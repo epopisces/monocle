@@ -9,12 +9,13 @@ import SearchScreen from './components/Search/SearchScreen'
 import GraphScreen from './components/Graph/GraphScreen'
 import StatsScreen from './components/Stats/StatsScreen'
 import VoiceModal from './components/VoiceModal/VoiceModal'
+import IngestInbox from './components/IngestInbox/IngestInbox'
 import ReviewQueue from './components/ReviewQueue/ReviewQueue'
 import FailedCaptures from './components/FailedCaptures/FailedCaptures'
 import CommandPalette, { type PaletteAction } from './components/CommandPalette/CommandPalette'
 import { useHotkeys } from './hooks/useHotkeys'
 import { getReviewCount } from './api/review'
-import { listIngestFailures } from './api/ingest'
+import { countIngestNotifications, listIngestFailures } from './api/ingest'
 import { getSettings } from './api/settings'
 import { triggerWeeklySummary, triggerReindex } from './api/agents'
 
@@ -24,9 +25,11 @@ function AppContent() {
   const navigate = useNavigate()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [voiceOpen, setVoiceOpen] = useState(false)
+  const [ingestOpen, setIngestOpen] = useState(false)
   const [reviewOpen, setReviewOpen] = useState(false)
   const [failedOpen, setFailedOpen] = useState(false)
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false)
+  const [ingestCount, setIngestCount] = useState(0)
   const [reviewCount, setReviewCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
   const [voiceBackend, setVoiceBackend] = useState<'whisper' | 'web_speech'>('whisper')
@@ -45,6 +48,13 @@ function AppContent() {
     } catch { /* non-fatal */ }
   }, [])
 
+  const refreshIngestCount = useCallback(async () => {
+    try {
+      const r = await countIngestNotifications({ status: 'unread', kind: 'ingest_ready' })
+      setIngestCount(r.count)
+    } catch { /* non-fatal */ }
+  }, [])
+
   const refreshFailedCount = useCallback(async () => {
     try {
       const items = await listIngestFailures()
@@ -54,14 +64,16 @@ function AppContent() {
 
   // Poll both counts on mount and every 30 s
   useEffect(() => {
+    refreshIngestCount()
     refreshReviewCount()
     refreshFailedCount()
     const id = setInterval(() => {
+      refreshIngestCount()
       refreshReviewCount()
       refreshFailedCount()
     }, 30_000)
     return () => clearInterval(id)
-  }, [refreshReviewCount, refreshFailedCount])
+  }, [refreshIngestCount, refreshReviewCount, refreshFailedCount])
 
   const handleVoiceSaved = useCallback(() => {
     refreshReviewCount()
@@ -70,6 +82,7 @@ function AppContent() {
   const closeAllModals = useCallback(() => {
     setSettingsOpen(false)
     setVoiceOpen(false)
+    setIngestOpen(false)
     setReviewOpen(false)
     setFailedOpen(false)
     setCommandPaletteOpen(false)
@@ -101,6 +114,13 @@ function AppContent() {
       icon: '🎤',
       keywords: ['voice', 'capture', 'microphone', 'record', 'audio'],
       onExecute: () => { setVoiceOpen(true); setCommandPaletteOpen(false) },
+    },
+    {
+      id: 'open-ingest-inbox',
+      label: 'Open Prepared Ingest Sessions',
+      icon: '📥',
+      keywords: ['ingest', 'prepared', 'dormant', 'session', 'inbox'],
+      onExecute: () => { setIngestOpen(true); setCommandPaletteOpen(false) },
     },
     {
       id: 'open-review',
@@ -136,8 +156,10 @@ function AppContent() {
       <AppShell
         onSettingsOpen={() => setSettingsOpen(true)}
         onVoiceOpen={() => setVoiceOpen(true)}
+        onIngestOpen={() => setIngestOpen(true)}
         onReviewOpen={() => setReviewOpen(true)}
         onFailedOpen={() => setFailedOpen(true)}
+        ingestCount={ingestCount}
         reviewCount={reviewCount}
         failedCount={failedCount}
       >
@@ -155,6 +177,11 @@ function AppContent() {
         onClose={() => setVoiceOpen(false)}
         onSaved={handleVoiceSaved}
         voiceBackend={voiceBackend}
+      />
+      <IngestInbox
+        open={ingestOpen}
+        onClose={() => setIngestOpen(false)}
+        onCountUpdate={setIngestCount}
       />
       <ReviewQueue
         open={reviewOpen}

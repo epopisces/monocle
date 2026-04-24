@@ -259,6 +259,7 @@ Process:
 # References
 - Nate B Jones [Build Your Open Brain](https://promptkit.natebjones.com/20260224_uq1_guide_main)
 - Nate B Jones [Open Brain Companion Prompts](https://promptkit.natebjones.com/20260224_uq1_promptkit_1)
+- Andrej Karpathy [LLM Wiki](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
 
 ---
 
