@@ -152,9 +152,17 @@ def mock_graph_builder(mock_vault):
 @pytest.fixture
 def mcp_state(mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder):
     """Inject all components into the MCP module-level state."""
+    from monocle.config import Settings
     from monocle.mcp_server import init_mcp_state
 
-    init_mcp_state(mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder)
+    init_mcp_state(
+        mock_vault,
+        mock_index,
+        mock_ai,
+        mock_pipeline,
+        mock_graph_builder,
+        settings=Settings(),
+    )
     return mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder
 
 
@@ -221,7 +229,14 @@ def auth_client(tmp_path: Path):
         app.state.watcher = None
         app.state.graph_builder = graph_builder
 
-        init_mcp_state(vault, index, mock_ai_inst, pipeline, graph_builder)
+        init_mcp_state(
+            vault,
+            index,
+            mock_ai_inst,
+            pipeline,
+            graph_builder,
+            settings=settings,
+        )
 
         yield
 

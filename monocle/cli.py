@@ -443,11 +443,10 @@ def watch() -> None:
     configure_telemetry(settings)
 
     async def _run() -> None:
-        from monocle.ingest import IngestPipeline
         from monocle.ingest.failed_registry import FailedIngestRegistry
         from monocle.ingest.plugin import IngestPluginRegistry
         from monocle.ingest.plugins import register_default_plugins
-        from monocle.models import IngestRequest
+        from monocle.services.ingest_sessions import IngestSessionStore
         from monocle.watcher import InboxWatcher
 
         vault_ = _make_vault(settings)
@@ -466,25 +465,31 @@ def watch() -> None:
             register_default_plugins(registry_)
 
         failed_registry_ = FailedIngestRegistry()
-        pipeline_ = IngestPipeline(
-            vault=vault_,
-            index=index_,
-            ai=ai_,
-            settings=settings,
-            registry=registry_,
-            failed_registry=failed_registry_,
-        )
+        ingest_session_store = IngestSessionStore(settings)
+
+        def _infer_source(file_path: str) -> str:
+            suffix = Path(file_path).suffix.lower()
+            if suffix in {".webm", ".mp3", ".wav", ".m4a", ".flac"}:
+                return "voice"
+            return "web"
 
         async def _inbox_callback(file_path: str) -> None:
             from pathlib import Path as _Path
 
             try:
-                content = await asyncio.to_thread(
-                    _Path(file_path).read_text, encoding="utf-8"
+                path = _Path(file_path)
+                if path.suffix.lower() == ".md":
+                    content = await asyncio.to_thread(path.read_text, encoding="utf-8")
+                    if content.startswith("---") and "approval_mode:" in content[:3000]:
+                        logger.info("[WATCHER] Skipped re-ingest of Monocle note: %s", file_path)
+                        return
+
+                await asyncio.to_thread(
+                    ingest_session_store.create_inbox_session,
+                    file_path,
+                    request_source=_infer_source(file_path),
                 )
-                req = IngestRequest(content=content, source="web")
-                await pipeline_.run(req)
-                logger.info("[WATCHER] Ingest complete: %s", file_path)
+                logger.info("[WATCHER] Ingest session captured: %s", file_path)
             except Exception as exc:
                 logger.error(
                     "[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True

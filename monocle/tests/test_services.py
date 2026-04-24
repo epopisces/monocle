@@ -448,6 +448,70 @@ class TestCreateReferenceFromUrl:
         assert "web-reference" in template_data["tags"]
 
     @pytest.mark.asyncio
+    async def test_logs_stage_timings(self):
+        from monocle.services.references import create_reference_from_url
+
+        note = _make_note(type="reference", review_status="pending")
+        vault = MagicMock()
+        vault.create_from_template = MagicMock(return_value=note)
+        vault.write_note = MagicMock()
+        ai = AsyncMock()
+        ai.chat = AsyncMock(return_value="Summary\n```json\n{}\n```")
+
+        with (
+            patch("monocle.services.references.fetch_url_text", AsyncMock(return_value="Page content")),
+            patch("monocle.services.references.logger.info") as info_mock,
+        ):
+            await create_reference_from_url(vault, ai, None, "https://example.com")
+
+        assert info_mock.called
+        assert "create_reference_from_url complete" in info_mock.call_args[0][0]
+
+    @pytest.mark.asyncio
+    async def test_summarize_timeout_uses_fallback_body(self):
+        from monocle.services.references import create_reference_from_url
+
+        note = _make_note(type="reference", review_status="pending")
+        page_text = (
+            "Sentence one explains the article in enough detail to be useful. "
+            "Sentence two adds another key idea worth preserving for later. "
+            "Sentence three gives more detail on the implementation approach. "
+            "Sentence four rounds out the main points for review."
+        )
+
+        async def _slow_chat(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return "late summary"
+
+        vault = MagicMock()
+        vault.create_from_template = MagicMock(return_value=note)
+        vault.write_note = MagicMock()
+        ai = AsyncMock()
+        ai.chat = AsyncMock(side_effect=_slow_chat)
+
+        with (
+            patch("monocle.services.references.fetch_url_text", AsyncMock(return_value=page_text)),
+            patch("monocle.services.references._DEFAULT_URL_SUMMARISE_TIMEOUT_S", 0.01),
+            patch("monocle.services.references.logger.warning") as warning_mock,
+        ):
+            result = await create_reference_from_url(
+                vault,
+                ai,
+                None,
+                "https://example.com/articles/test-post",
+            )
+
+        assert result is note
+        warning_mock.assert_called_once()
+        template_data = vault.create_from_template.call_args[0][1]
+        assert template_data["title"] == "example.com / test post"
+        assert "fallback-summary" in template_data["tags"]
+        body = vault.create_from_template.call_args[0][2]
+        assert body.startswith("> Source: https://example.com/articles/test-post")
+        assert "AI summarization timed out after 0.01s" in body
+        assert "## Extracted Excerpt" in body
+
+    @pytest.mark.asyncio
     async def test_disallowed_scheme_raises(self):
         from monocle.services.references import create_reference_from_url
 

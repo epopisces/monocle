@@ -12,9 +12,9 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from monocle.rate_limit import limiter
-from monocle.telemetry import get_meter, span, add_user_message_event, add_assistant_message_event
 from monocle.agents import create_chat_agent
+from monocle.rate_limit import limiter
+from monocle.telemetry import add_assistant_message_event, add_user_message_event, get_meter, get_tracer
 
 router = APIRouter(tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -81,6 +81,21 @@ def _sse(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+def _sanitize_prefetch_url(url: str) -> str:
+    """Trim trailing prose punctuation from a detected URL."""
+    return url.strip().rstrip('.,;:!?')
+
+
+async def _run_prefetch_url(vault_tools: Any, url: str) -> tuple[str, float, str | Exception]:
+    """Run a single URL prefetch and return URL, duration_ms, and result."""
+    started = time.monotonic()
+    try:
+        result = await vault_tools.create_reference_from_url(url)
+        return url, (time.monotonic() - started) * 1000, result
+    except Exception as exc:
+        return url, (time.monotonic() - started) * 1000, exc
+
+
 async def _iter_stream_with_disconnect(
     request: Request,
     stream_iter: AsyncIterator[Any],
@@ -125,7 +140,8 @@ async def _stream_agent_response(
       token       — text delta from the model
       tool_call   — tool was invoked, with name and call_id
       tool_error  — tool returned an error result (stream continues)
-      note_created — agent created a new note
+    note_created — agent created a new note
+    prefetch_complete — router-level URL prefetch finished, with timing
       error       — fatal or recoverable error (emitted before done)
       done        — stream terminator (always emitted); includes status field:
                     - "success" on normal completion
@@ -173,8 +189,9 @@ async def _stream_agent_response(
         from monocle.agents.tools import VaultTools
         _MAX_PREFETCH = 5  # safety cap
         urls_to_fetch = [
-            u for u in chat_request.fetch_urls[:_MAX_PREFETCH]
-            if isinstance(u, str) and u.startswith(("http://", "https://"))
+            _sanitize_prefetch_url(u)
+            for u in chat_request.fetch_urls[:_MAX_PREFETCH]
+            if isinstance(u, str) and _sanitize_prefetch_url(u).startswith(("http://", "https://"))
         ]
         if urls_to_fetch:
             vault_tools = VaultTools(
@@ -184,14 +201,32 @@ async def _stream_agent_response(
                 reindex_queue=reindex_queue,
             )
             logger.info("[CHAT] Pre-fetching %d URL(s) in parallel", len(urls_to_fetch))
+            prefetch_call_ids = [f"prefetch:{i}" for i in range(len(urls_to_fetch))]
+            for url, call_id in zip(urls_to_fetch, prefetch_call_ids):
+                yield _sse("tool_call", {
+                    "name": "create_reference_from_url",
+                    "call_id": call_id,
+                    "url": url,
+                })
             results = await asyncio.gather(
-                *[vault_tools.create_reference_from_url(url) for url in urls_to_fetch],
-                return_exceptions=True,
+                *[_run_prefetch_url(vault_tools, url) for url in urls_to_fetch],
             )
             context_lines: list[str] = []
-            for url, result in zip(urls_to_fetch, results):
+            for call_id, (url, duration_ms, result) in zip(prefetch_call_ids, results):
                 if isinstance(result, Exception):
                     logger.warning("[CHAT] Pre-fetch failed for %s: %s", url, result)
+                    yield _sse("tool_error", {
+                        "name": "create_reference_from_url",
+                        "call_id": call_id,
+                        "error": str(result),
+                    })
+                    yield _sse("prefetch_complete", {
+                        "name": "create_reference_from_url",
+                        "call_id": call_id,
+                        "url": url,
+                        "status": "error",
+                        "duration_ms": round(duration_ms, 1),
+                    })
                     context_lines.append(f"- {url}: failed to fetch")
                 else:
                     try:
@@ -200,10 +235,25 @@ async def _stream_agent_response(
                             "file_path": data.get("file_path", ""),
                             "type": "reference",
                         })
+                        yield _sse("prefetch_complete", {
+                            "name": "create_reference_from_url",
+                            "call_id": call_id,
+                            "url": url,
+                            "status": "success",
+                            "duration_ms": round(duration_ms, 1),
+                            "file_path": data.get("file_path", ""),
+                        })
                         context_lines.append(
                             f"- {url} → saved as '{data.get('title', '')}' at {data.get('file_path', '')}"
                         )
                     except Exception:
+                        yield _sse("prefetch_complete", {
+                            "name": "create_reference_from_url",
+                            "call_id": call_id,
+                            "url": url,
+                            "status": "success",
+                            "duration_ms": round(duration_ms, 1),
+                        })
                         context_lines.append(f"- {url}: fetched")
             if context_lines:
                 pre_fetch_context = (
@@ -367,7 +417,14 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
     
     async def stream_with_tracing():
         """Wrap streaming response with OTel span for message event recording."""
-        async with span("chat.stream", session_id=body.session_id or "unknown") as trace_span:
+        trace_span = None
+        try:
+            trace_span = get_tracer("monocle.chat").start_span("chat.stream")
+            trace_span.set_attribute("session_id", body.session_id or "unknown")
+        except Exception:
+            trace_span = None
+
+        try:
             # Record the last user message (the one that triggered this request)
             # Request includes full conversation history; new user turn is appended at the end
             user_message = None
@@ -412,11 +469,15 @@ async def chat(body: ChatRequest, request: Request) -> StreamingResponse:
                                     break
                     except (json.JSONDecodeError, ValueError, IndexError):
                         pass  # Silently skip parse errors
-            
+
+        finally:
             # Record accumulated assistant response as a span event
             if trace_span and assistant_tokens:
                 assistant_text = "".join(assistant_tokens)
                 add_assistant_message_event(trace_span, assistant_text)
+            if trace_span:
+                with suppress(Exception):
+                    trace_span.end()
     
     return StreamingResponse(
         stream_with_tracing(),

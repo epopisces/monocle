@@ -2,12 +2,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import html
 import json
 import logging
 import re
 import socket
+import time
 from typing import TYPE_CHECKING
+
+from monocle.telemetry import span
 
 if TYPE_CHECKING:
     from monocle.ai.base import AIProvider
@@ -21,6 +25,10 @@ _MAX_FETCH_BYTES = 500_000  # 500 KB — cap before HTML stripping
 _MAX_TEXT_CHARS = 20_000    # chars fed to the LLM summariser
 _MAX_BODY_LENGTH = 50_000
 _MAX_REDIRECTS = 5
+_DEFAULT_URL_SUMMARISE_TIMEOUT_S = 120.0
+_FALLBACK_SUMMARY_CHARS = 1_200
+_FALLBACK_EXCERPT_CHARS = 4_000
+_FALLBACK_BULLETS = 4
 
 _URL_SUMMARISE_PROMPT = """\
 You are a knowledge assistant. Summarise the following web page content into a concise Markdown reference note.
@@ -38,6 +46,84 @@ Web page URL: {url}
 Content:
 {content}
 """
+
+
+def _truncate_text(text: str, max_chars: int) -> str:
+    """Return *text* capped to *max_chars* with a plain ASCII suffix."""
+    text = text.strip()
+    if len(text) <= max_chars:
+        return text
+    return text[: max_chars - 3].rstrip() + "..."
+
+
+def _fallback_reference_title(url: str) -> str:
+    """Generate a readable title when AI summarisation times out."""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    host = parsed.netloc or url
+    path_tail = parsed.path.strip("/").rsplit("/", 1)[-1] if parsed.path else ""
+    if not path_tail:
+        return host
+    path_tail = re.sub(r"\.[A-Za-z0-9]{1,6}$", "", path_tail)
+    path_tail = re.sub(r"[-_]+", " ", path_tail).strip()
+    if not path_tail:
+        return host
+    return f"{host} / {path_tail}"
+
+
+def _build_timeout_fallback_response(url: str, page_text: str, timeout_s: float) -> str:
+    """Build a deterministic fallback response when AI summarisation times out."""
+    timeout_label = f"{timeout_s:g}"
+    sentences = [
+        sentence.strip(" -")
+        for sentence in re.split(r"(?<=[.!?])\s+", page_text)
+        if sentence.strip()
+    ]
+    if not sentences:
+        sentences = ["No extractable page text was available."]
+
+    summary = _truncate_text(" ".join(sentences[:3]), _FALLBACK_SUMMARY_CHARS)
+    key_points: list[str] = []
+    seen: set[str] = set()
+    for sentence in sentences:
+        candidate = _truncate_text(sentence, 220)
+        if len(candidate) < 30:
+            continue
+        lowered = candidate.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        key_points.append(candidate)
+        if len(key_points) >= _FALLBACK_BULLETS:
+            break
+    if not key_points:
+        key_points = [_truncate_text(sentences[0], 220)]
+
+    excerpt = _truncate_text(page_text, _FALLBACK_EXCERPT_CHARS)
+    body_lines = [
+        "## Summary",
+        summary,
+        "",
+        "## Key Points",
+        *[f"- {point}" for point in key_points],
+        "",
+        "## Extracted Excerpt",
+        f"_AI summarization timed out after {timeout_label}s. This fallback note preserves the extracted page text for later review._",
+        "",
+        "```text",
+        excerpt,
+        "```",
+        "",
+        "```json",
+        json.dumps({
+            "title": _fallback_reference_title(url),
+            "tags": ["fallback-summary"],
+            "domain": "personal",
+        }),
+        "```",
+    ]
+    return "\n".join(body_lines)
 
 
 def _strip_html(raw_html: str) -> str:
@@ -165,6 +251,8 @@ async def create_reference_from_url(
     reindex_queue: "ReindexQueue | None",
     url: str,
     extra_context: str | None = None,
+    *,
+    summarize_timeout_s: float | None = None,
 ) -> "Note":
     """Fetch a URL, AI-summarise it, and create a reference note.
 
@@ -182,65 +270,105 @@ async def create_reference_from_url(
         RuntimeError: If *ai* is ``None`` or if fetching / summarisation fails.
         ValueError: If *url* has a disallowed scheme.
     """
-    # 1. Fetch and strip the page
-    page_text = await fetch_url_text(url)
+    timeout_s = summarize_timeout_s or _DEFAULT_URL_SUMMARISE_TIMEOUT_S
+    async with span("tool.create_reference_from_url", tool_name="create_reference_from_url", url=url) as trace_span:
+        fetch_started = time.monotonic()
+        async with span("reference.fetch_url", url=url):
+            page_text = await fetch_url_text(url)
+        fetch_ms = (time.monotonic() - fetch_started) * 1000
 
-    # 2. Build summarisation prompt
-    prompt_content = _URL_SUMMARISE_PROMPT.format(url=url, content=page_text)
-    if extra_context:
-        prompt_content += f"\n\nAdditional instructions: {extra_context}"
+        # 2. Build summarisation prompt
+        prompt_content = _URL_SUMMARISE_PROMPT.format(url=url, content=page_text)
+        if extra_context:
+            prompt_content += f"\n\nAdditional instructions: {extra_context}"
 
-    # 3. Ask AI to summarise
-    raw_response = await ai.chat(
-        [{"role": "user", "content": prompt_content}],
-        stream=False,
-    )
-    if not isinstance(raw_response, str):
-        # Consume the async generator if the provider returned one
-        parts: list[str] = []
-        async for chunk in raw_response:
-            parts.append(chunk)
-        raw_response = "".join(parts)
+        # 3. Ask AI to summarise
+        summarize_started = time.monotonic()
+        used_fallback = False
+        async with span("reference.summarize_url", url=url, content_chars=len(page_text)):
+            try:
+                async with asyncio.timeout(timeout_s):
+                    raw_response = await ai.chat(
+                        [{"role": "user", "content": prompt_content}],
+                        stream=False,
+                    )
+                    if not isinstance(raw_response, str):
+                        # Consume the async generator if the provider returned one.
+                        parts: list[str] = []
+                        async for chunk in raw_response:
+                            parts.append(chunk)
+                        raw_response = "".join(parts)
+            except TimeoutError:
+                used_fallback = True
+                raw_response = _build_timeout_fallback_response(url, page_text, timeout_s)
+                logger.warning(
+                    "[REF] URL summarization timed out after %ss; using fallback summary for %s",
+                    f"{timeout_s:g}",
+                    url,
+                )
+        summarize_ms = (time.monotonic() - summarize_started) * 1000
 
-    # 4. Extract the embedded JSON metadata block (last ```json ... ``` fence)
-    json_matches = list(re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, re.DOTALL))
-    if json_matches:
-        json_match = json_matches[-1]
-        try:
-            meta = json.loads(json_match.group(1))
-        except json.JSONDecodeError:
+        # 4. Extract the embedded JSON metadata block (last ```json ... ``` fence)
+        json_matches = list(re.finditer(r"```json\s*(\{.*?\})\s*```", raw_response, re.DOTALL))
+        if json_matches:
+            json_match = json_matches[-1]
+            try:
+                meta = json.loads(json_match.group(1))
+            except json.JSONDecodeError:
+                meta = {}
+            body = raw_response[:json_match.start()].strip()
+        else:
             meta = {}
-        body = raw_response[:json_match.start()].strip()
-    else:
-        meta = {}
-        body = raw_response.strip()
+            body = raw_response.strip()
 
-    title = meta.get("title") or url
-    tags = _normalize_tags(meta.get("tags")) or []
-    domain = meta.get("domain") or "personal"
+        title = meta.get("title") or url
+        tags = _normalize_tags(meta.get("tags")) or []
+        domain = meta.get("domain") or "personal"
 
-    # Prepend source URL to body
-    body = f"> Source: {url}\n\n{body}"
-    if len(body) > _MAX_BODY_LENGTH:
-        body = body[:_MAX_BODY_LENGTH]
+        # Prepend source URL to body
+        body = f"> Source: {url}\n\n{body}"
+        if len(body) > _MAX_BODY_LENGTH:
+            body = body[:_MAX_BODY_LENGTH]
 
-    # 5. Create the note
-    from monocle.models import NoteMetadata
+        # 5. Create the note
+        from monocle.models import NoteMetadata
 
-    metadata = NoteMetadata(
-        type="reference",
-        domain=domain,
-        tags=["web-reference"] + tags,
-        review_status="pending",
-        source="web",
-    )
-    note = await asyncio.to_thread(
-        vault.create_from_template,
-        "reference",
-        {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
-        body,
-    )
-    await asyncio.to_thread(vault.write_note, note.file_path, note)
-    if reindex_queue is not None:
-        reindex_queue.push(note.file_path)
-    return note
+        metadata = NoteMetadata(
+            type="reference",
+            domain=domain,
+            tags=["web-reference"] + tags,
+            review_status="pending",
+            source="web",
+        )
+        write_started = time.monotonic()
+        async with span("reference.write_note", url=url, title=title):
+            note = await asyncio.to_thread(
+                vault.create_from_template,
+                "reference",
+                {"title": title, **metadata.model_dump(exclude={"template"}, exclude_none=True)},
+                body,
+            )
+            await asyncio.to_thread(vault.write_note, note.file_path, note)
+        write_ms = (time.monotonic() - write_started) * 1000
+        if reindex_queue is not None:
+            reindex_queue.push(note.file_path)
+        if trace_span is not None:
+            with contextlib.suppress(Exception):
+                trace_span.set_attribute("reference.summarize_fallback", used_fallback)
+                trace_span.set_attribute("reference.summarize_timeout_s", timeout_s)
+                trace_span.set_attribute("reference.fetch_ms", round(fetch_ms, 1))
+                trace_span.set_attribute("reference.summarize_ms", round(summarize_ms, 1))
+                trace_span.set_attribute("reference.write_ms", round(write_ms, 1))
+                trace_span.set_attribute("reference.content_chars", len(page_text))
+                trace_span.set_attribute("reference.response_chars", len(raw_response))
+                trace_span.set_attribute("reference.file_path", note.file_path)
+                trace_span.set_attribute("reference.total_ms", round(fetch_ms + summarize_ms + write_ms, 1))
+        logger.info(
+            "[REF] create_reference_from_url complete url=%s fetch=%.1fms summarize=%.1fms write=%.1fms file=%s",
+            url,
+            fetch_ms,
+            summarize_ms,
+            write_ms,
+            note.file_path,
+        )
+        return note

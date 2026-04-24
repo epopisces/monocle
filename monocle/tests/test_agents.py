@@ -380,6 +380,25 @@ class TestCreateChatAgent:
         agent = create_chat_agent(ai=mock_ai, vault=vault, index=memory_index, settings=settings)
         assert hasattr(agent, "run_stream") and callable(agent.run_stream)
 
+    def test_skips_agent_otel_reconfigure_when_app_providers_exist(self, monkeypatch):
+        from monocle.agents import _configure_agent_otel
+        from monocle.config import Settings
+        import monocle.agents as agents_mod
+
+        settings = Settings()
+        monkeypatch.setattr(agents_mod, "_otel_configured", False)
+        monkeypatch.setattr(agents_mod, "_otel_providers_already_configured", lambda: True)
+        disable_mock = MagicMock()
+        monkeypatch.setattr(agents_mod, "_disable_agent_framework_otel", disable_mock)
+
+        configure_mock = MagicMock()
+        with patch("agent_framework.observability.configure_otel_providers", configure_mock):
+            _configure_agent_otel(settings)
+
+        configure_mock.assert_not_called()
+        disable_mock.assert_called_once()
+        assert agents_mod._otel_configured is True
+
 
 #endregion
 
@@ -444,6 +463,26 @@ class TestVaultToolsExecution:
         result = await vault_tools.create_note(title="No Tags", body="Content.")
         parsed = json.loads(result)
         assert parsed["status"] == "created"
+
+    @pytest.mark.asyncio
+    async def test_create_reference_from_url_passes_configured_timeout(self, tmp_vault, memory_index, mock_ai):
+        from types import SimpleNamespace
+
+        from monocle.agents.tools import VaultTools
+        from monocle.config import Settings
+        from monocle.vault import VaultLayer
+
+        vault = VaultLayer(str(tmp_vault))
+        settings = Settings(ai={"url_reference_timeout_s": 120.0})
+        vt = VaultTools(vault=vault, index=memory_index, ai=mock_ai, settings=settings)
+        note = SimpleNamespace(file_path="reference/test.md", title="Test Reference")
+
+        with patch("monocle.services.references.create_reference_from_url", AsyncMock(return_value=note)) as create_ref_mock:
+            result = await vt.create_reference_from_url("https://example.com")
+
+        parsed = json.loads(result)
+        assert parsed["status"] == "created"
+        assert create_ref_mock.await_args.kwargs["summarize_timeout_s"] == 120.0
 
     @pytest.mark.asyncio
     async def test_get_graph_no_graph_builder_returns_error_json(self, vault_tools):
@@ -518,6 +557,20 @@ class TestVaultToolsExecution:
         content = (tmp_vault / "people" / "alice-example.md").read_text()
         # Both old and new content should appear in the merged body
         assert "She now leads the infra guild." in content
+
+    @pytest.mark.asyncio
+    async def test_merge_body_prompt_preserves_existing_structure(self, tmp_vault, memory_index, mock_ai):
+        """AI merge instructions should preserve useful scaffold headings and tables."""
+        from monocle.agents.tools import VaultTools
+        from monocle.vault import VaultLayer
+
+        vault = VaultLayer(str(tmp_vault))
+        tools = VaultTools(vault=vault, index=memory_index, ai=mock_ai)
+
+        await tools._merge_body("## Relationship Snapshot\n- Existing\n", "New information")
+
+        prompt = mock_ai.chat.await_args.args[0][0]["content"]
+        assert "Preserve existing section headings, tables, and checklist structure" in prompt
 
     @pytest.mark.asyncio
     async def test_update_note_rejects_low_similarity_search_results(self, tmp_vault, memory_index, mock_ai):
@@ -996,9 +1049,47 @@ class TestFetchUrlsPreFetch:
 
         assert resp.status_code == 200
         events = _parse_sse(resp.text)
+        tool_events = [e for e in events if e.get("event") == "tool_call"]
+        assert len(tool_events) == 1
+        assert tool_events[0]["data"]["name"] == "create_reference_from_url"
+        assert tool_events[0]["data"]["url"] == "https://example.com"
+        complete_events = [e for e in events if e.get("event") == "prefetch_complete"]
+        assert len(complete_events) == 1
+        assert complete_events[0]["data"]["status"] == "success"
+        assert complete_events[0]["data"]["url"] == "https://example.com"
         nc_events = [e for e in events if e.get("event") == "note_created"]
         assert len(nc_events) == 1
         assert nc_events[0]["data"]["file_path"] == "technologies/example-ref.md"
+
+    def test_fetch_urls_failed_prefetch_emits_tool_error(self, api_client):
+        """A failed pre-fetch emits tool_error so URL work is visible in the stream."""
+        update = _fake_update([_text_content("continuing")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch(
+                "monocle.agents.tools.VaultTools.create_reference_from_url",
+                new=AsyncMock(side_effect=RuntimeError("network error")),
+            ),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "what is this?"}],
+                    "fetch_urls": ["https://unreachable.example"],
+                },
+            )
+
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        tool_errors = [e for e in events if e.get("event") == "tool_error"]
+        assert len(tool_errors) == 1
+        assert tool_errors[0]["data"]["name"] == "create_reference_from_url"
+        complete_events = [e for e in events if e.get("event") == "prefetch_complete"]
+        assert len(complete_events) == 1
+        assert complete_events[0]["data"]["status"] == "error"
 
     def test_fetch_urls_context_injected_into_last_user_message(self, api_client):
         """Pre-fetch context prefix is prepended to the last user message text."""
@@ -1121,6 +1212,34 @@ class TestFetchUrlsPreFetch:
         assert resp.status_code == 200
         # create_reference_from_url should NOT be called for invalid schemes
         mock_fetch.assert_not_called()
+
+    def test_fetch_urls_trailing_punctuation_sanitized(self, api_client):
+        """Trailing prose punctuation is stripped before pre-fetching URLs."""
+        prefetch_result = json.dumps({
+            "file_path": "technologies/example-ref.md",
+            "title": "Example Site",
+            "url": "https://github.com/github/awesome-copilot",
+            "status": "created",
+        })
+        update = _fake_update([_text_content("ok")])
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
+
+        mock_fetch = AsyncMock(return_value=prefetch_result)
+        with (
+            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
+            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
+        ):
+            resp = api_client.post(
+                "/api/chat",
+                json={
+                    "messages": [{"role": "user", "content": "summarize this"}],
+                    "fetch_urls": ["https://github.com/github/awesome-copilot,"],
+                },
+            )
+
+        assert resp.status_code == 200
+        mock_fetch.assert_awaited_once_with("https://github.com/github/awesome-copilot")
 
     def test_fetch_urls_capped_at_five(self, api_client):
         """More than 5 fetch_urls are silently capped to the first 5."""

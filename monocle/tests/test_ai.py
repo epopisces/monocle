@@ -1359,6 +1359,15 @@ class TestAIConfigValidation:
         settings = _make_settings(ai={"provider": "ollama", "transcribe_backend": "subprocess"})
         assert settings.ai.transcribe_backend == "subprocess"
 
+    def test_url_reference_timeout_default_and_override(self):
+        default_settings = _make_settings(ai={"provider": "ollama"})
+        assert default_settings.ai.url_reference_timeout_s == 120.0
+
+        custom_settings = _make_settings(
+            ai={"provider": "ollama", "url_reference_timeout_s": 90.0}
+        )
+        assert custom_settings.ai.url_reference_timeout_s == 90.0
+
 
 class TestGetTranscriptionProvider:
     """Tests for the get_transcription_provider factory."""

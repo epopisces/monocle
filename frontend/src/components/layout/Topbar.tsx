@@ -129,8 +129,6 @@ export default function Topbar({
   // Build detailed tooltip text for the health indicator
   const chatModel = modelStatus?.models.find(m => m.role === 'chat')
   const embedModel = modelStatus?.models.find(m => m.role === 'embed')
-  const chatNotLoaded = modelStatus?.provider_reachable && chatModel && !chatModel.loaded
-  const embedNotLoaded = modelStatus?.provider_reachable && embedModel && !embedModel.loaded
   const modelTooltip = modelStatus
     ? modelStatus.provider_reachable
       ? modelStatus.models

@@ -106,6 +106,14 @@ describe('ChatInput', () => {
     expect(screen.getByTestId('url-pill-active')).toBeInTheDocument()
   })
 
+  it('strips trailing punctuation from detected URL pills', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'Check out https://github.com/github/awesome-copilot,' } })
+    expect(screen.getByTestId('url-pills')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /github\.com/ })).toBeInTheDocument()
+  })
+
   it('does not show URL pills when message has no URL', () => {
     render(<ChatInput onSend={mockSend} />)
     const textarea = screen.getByTestId('chat-input-textarea')
@@ -160,6 +168,18 @@ describe('ChatInput', () => {
     fireEvent.change(textarea, { target: { value: 'Check this https://example.com' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
     expect(mockSend).toHaveBeenCalledWith('Check this https://example.com', undefined, ['https://example.com'])
+  })
+
+  it('Send button strips trailing punctuation from fetchUrls', () => {
+    render(<ChatInput onSend={mockSend} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'See https://github.com/github/awesome-copilot,' } })
+    fireEvent.click(screen.getByTestId('send-btn'))
+    expect(mockSend).toHaveBeenCalledWith(
+      'See https://github.com/github/awesome-copilot,',
+      undefined,
+      ['https://github.com/github/awesome-copilot'],
+    )
   })
 
   it('opting out a URL removes it from fetchUrls', () => {
@@ -317,6 +337,27 @@ describe('ChatMessage', () => {
     expect(tools?.textContent).toContain('4 results')
   })
 
+  it('renders explicit URL prefetch progress', () => {
+    const msg: ThreadMessage = {
+      role: 'assistant',
+      content: '',
+      isStreaming: true,
+      toolCalls: [{ name: 'create_reference_from_url', url: 'https://example.com', status: 'running' }],
+    }
+    render(<ChatMessage message={msg} />)
+    expect(screen.getByText('Prefetching URL: https://example.com', { selector: 'p' })).toBeInTheDocument()
+  })
+
+  it('renders completed URL prefetch timing', () => {
+    const msg: ThreadMessage = {
+      role: 'assistant',
+      content: '',
+      toolCalls: [{ name: 'create_reference_from_url', url: 'https://example.com', status: 'success', durationMs: 2450 }],
+    }
+    render(<ChatMessage message={msg} />)
+    expect(screen.getByText('Prefetched URL: https://example.com in 2.5s')).toBeInTheDocument()
+  })
+
   it('renders tool call with singular result count', () => {
     const msg: ThreadMessage = {
       role: 'assistant',
@@ -376,6 +417,13 @@ describe('ChatMessage', () => {
     const msg: ThreadMessage = { role: 'assistant', content: '', isStreaming: true }
     const { container } = render(<ChatMessage message={msg} />)
     expect(container.querySelector('.chat-message__cursor')).toBeTruthy()
+    expect(screen.getByText('Thinking...')).toBeInTheDocument()
+  })
+
+  it('shows empty response placeholder when assistant content is empty and not streaming', () => {
+    const msg: ThreadMessage = { role: 'assistant', content: '', isStreaming: false }
+    render(<ChatMessage message={msg} />)
+    expect(screen.getByText('(empty response)')).toBeInTheDocument()
   })
 
   it('does not show cursor when not streaming', () => {

@@ -50,6 +50,7 @@ class AIPatch(BaseModel):
     chat_model_key: str | None = None
     embed_model_key: str | None = None
     stt_key: str | None = None
+    url_reference_timeout_s: float | None = Field(None, gt=0.0, le=300.0)
     # Transcription settings
     transcribe_backend: Literal["native", "whisper_cpp", "subprocess"] | None = None
     transcribe_url: str | None = None

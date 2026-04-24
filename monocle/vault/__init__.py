@@ -120,6 +120,55 @@ def _load_template_schema(template_name: str) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
+def _load_template_body(template_root: str, template_name: str) -> str:
+    """Load a user-facing Markdown scaffold from ``<vault>/.templates``.
+
+    Returns an empty string when no scaffold exists.
+    """
+    template_file = Path(template_root) / ".templates" / f"{template_name}.md"
+    if not template_file.exists():
+        return ""
+    return template_file.read_text(encoding="utf-8")
+
+
+def _render_template_body(
+    template_text: str,
+    metadata: dict[str, Any],
+    title: str,
+    body: str = "",
+) -> str:
+    """Replace simple ``{field}`` placeholders with note metadata values.
+
+    ``{body}`` is treated specially: when present, user-supplied note text is
+    inserted into the scaffold instead of replacing it entirely.
+    """
+    if not template_text:
+        return ""
+
+    pattern = re.compile(r"\{([a-zA-Z_][a-zA-Z0-9_]*)\}")
+    name_value = metadata.get("name") or title
+    user_body = body.strip()
+
+    def _replace(match: re.Match[str]) -> str:
+        key = match.group(1)
+        if key in {"title", "person_name", "name", "org_name"}:
+            return str(name_value)
+        if key == "body":
+            return user_body or "[Add note content here.]"
+
+        value = metadata.get(key)
+        if value is None:
+            return match.group(0)
+        if isinstance(value, list):
+            return ", ".join(str(item) for item in value)
+        return str(value)
+
+    rendered = pattern.sub(_replace, template_text)
+    if user_body and "{body}" not in template_text:
+        return rendered.rstrip() + "\n\n" + user_body
+    return rendered
+
+
 def _parse_note_file(path: Path, relative_path: str) -> Note:
     """Parse a Markdown file at *path* into a :class:`Note` model.
 
@@ -545,6 +594,15 @@ class VaultLayer:
         slug = _slugify(str(title))
         file_path = f"{default_folder}/{slug}.md"
 
+        rendered_body = body
+        if not rendered_body.strip():
+            template_body = _load_template_body(str(self.root), schema_name)
+            rendered_body = _render_template_body(template_body, metadata, str(title), body)
+        else:
+            template_body = _load_template_body(str(self.root), schema_name)
+            if template_body:
+                rendered_body = _render_template_body(template_body, metadata, str(title), body)
+
         # Build merged frontmatter dict
         now = datetime.now(timezone.utc)
         fm: dict[str, Any] = {
@@ -565,6 +623,8 @@ class VaultLayer:
         }
         fm.update(metadata)
         fm.pop("title", None)  # title lives on Note, not NoteMetadata
+        if note_type == "person_note" and not fm.get("people"):
+            fm["people"] = [str(title)]
 
         raw_links = fm.pop("links", None) or []
         parsed_links = parse_links_field(raw_links)
@@ -578,7 +638,7 @@ class VaultLayer:
         return Note(
             file_path=file_path,
             title=str(title),
-            body=body,
+            body=rendered_body,
             metadata=note_metadata,
         )
 

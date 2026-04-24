@@ -4,6 +4,29 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-24
+
+### GPT-5.4
+- Added M34 `Conversational Ingest Processing` to `docs/build-plan.md` and updated the milestone tracker to queue a discuss-first ingest workflow after M33
+- Captured the new ingest direction as explicit deliverables: ingest session staging, digest/questions/contradiction checks, approval-gated MCP create/update execution, non-indexed raw `sources/` archival, post-apply validation, reindex trigger, and Document Viewer follow-through
+- Added acceptance criteria covering inbox/chat/upload/URL inputs and the concrete Charles Brig / gmd scenario so the milestone is anchored to a user-visible workflow instead of a generic ingest refactor
+- Replaced the single M34 ingest milestone with incremental milestones M34-M37 in `docs/build-plan.md`: ingest session schema/persistence, background session preparation/notifications, dedicated ingest-review workflow with per-action editable approvals and visible diffs, then MCP execution/validation plus source UX integration
+- Added M38 `Fast-Capture Path`, M39 `File History, Revert & Diff Viewer`, and M40 `Add Documents & Snippets To Chat Context` to the milestone tracker and roadmap details
+- Captured key design decisions in the milestone scopes: inbox-generated dormant ingest sessions, idle-time background preparation, SQLite-plus-file-backed persistence recommendation, immutable out-of-vault sources with provenance metadata, contradiction warnings with linked documents, true-up reruns, collapsed `Sources` sections in docs, and explicit add-to-chat context affordances from Docs and Document Viewer surfaces
+- Updated `docs/srs.md` to version 2.4 for the ingest-session architecture: system overview/architecture, config surface, watcher behavior, ingest/session schemas and lifecycle states, ingest APIs, settings fields, source/archive behavior, file-history retention, dedicated ingest-review UI, and add-to-chat context flows
+- Tightened the ingest roadmap split in `docs/build-plan.md` by breaking the original M34 into M34 `Ingest Session Schema & Persistence` and M35 `Background Session Preparation & Notifications`, then shifting downstream ingest/context milestones to M36-M40; also embedded draft ingest-session, source-record, and proposed-action schemas plus lifecycle transitions in the build plan
+- Turned M34 into an implementation-ready spec in `docs/build-plan.md` by adding concrete `data/ingest/` and `data/sources/` layout, proposed SQLite tables, JSON artifact split, API payload sketches for `POST /api/ingest` and `GET /api/ingest/sessions/{id}`, transport-neutral `diff_preview` shape, and a background-prep decision table comparing in-process scheduling, persisted SQLite jobs, and a separate worker process
+- Recommended the Phase 1.5 background-prep approach explicitly: persist jobs in SQLite, execute them in the main process with bounded concurrency, and gate dispatch on a simple interactive-idle heuristic instead of introducing a second worker process immediately
+- Implemented M34 in code: added canonical ingest-session/source/action models, new `monocle/services/ingest_sessions.py` SQLite-backed persistence layer, immutable `data/sources/` archival, and normalized watcher voice MIME handling
+- Rewired `POST /api/ingest`, `POST /api/ingest/stream`, the unified inbox watcher, and the standalone `monocle watch` entry point to capture persisted queued ingest sessions instead of writing notes directly
+- Added `GET /api/ingest/sessions` and `GET /api/ingest/sessions/{session_id}` plus new persistence-focused tests in `monocle/tests/test_ingest_sessions.py`; updated API/security/rate-limit tests to the new `202 Accepted` session contract
+- Validation: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 961 passed, 8 deselected, EXIT 0; archived M34 details to `docs/milestones.md` and marked M34 complete in `docs/build-plan.md`
+- Remediated two post-review findings: `VaultLayer` no longer caches user-editable `<vault>/.templates/*.md` scaffold bodies across calls, and the API ingest routers now override client-supplied `origin` to `api` before persisting sessions
+- Added focused regressions in `monocle/tests/test_vault.py` and `monocle/tests/test_api.py`; validation: targeted pytest slice `3 passed`, then `uv run python -m pytest monocle/tests/test_vault.py monocle/tests/test_api.py -x --tb=short -q` → 167 passed, EXIT 0
+- Refactored `IngestSessionStore` list/detail hydration to bulk-load sources and proposed actions per request, removing the list-route N+1 query pattern and reusing preloaded sources in `get_session()` instead of querying them twice
+- Added query-count regressions in `monocle/tests/test_ingest_sessions.py`, tightened the ingest rate-limit integration test to the current `202 Accepted` contract while handling `NoOpLimiter` test mode explicitly, and simplified a redundant streaming branch in `frontend/src/components/Chat/ChatMessage.tsx`
+- Validation: `uv run python -m pytest monocle/tests/test_ingest_sessions.py -x --tb=short -q` → 5 passed; `uv run python -m pytest monocle/tests/test_rate_limit.py::TestMainAppRateLimits::test_ingest_returns_429_after_30_requests -m integration -x --tb=short -q` → 1 passed; `cd frontend && npm run test -- --run src/Chat.test.tsx` → 49 passed; combined backend slice via absolute paths → 20 passed, 59 deselected
+
 ## 2026-04-22
 
 ### Claude Sonnet 4.6
@@ -17,6 +40,33 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Fixed `monocle/tests/test_ai.py` `TestAIConfigValidation` / `TestGetTranscriptionProvider` tests that passed `provider="foundry_local"` — added `_FL_AI_NATIVE` constant with proper `ModelEntry` fixture
   - Fixed pre-existing bug in `test_agents.py`: `error_events[0]["data"]["message"]` → `["error"]` (key name mismatch with chat router SSE payload)
   - Final state: 903 backend tests passing, 437 frontend tests passing
+
+### GPT-5.4
+- Refined the person note schema in `monocle/vault/templates/person.yaml` to cover relationship context, organizational affiliations, family context, life stage, prayer requests, care topics, and conversation topics
+- Reworked `vault/.templates/person.md` into a clearer Obsidian-friendly scaffold with an explicit frontmatter contract comment and sections for relationship snapshot, personal context, work/org history, conversations, and next steps
+- Updated `monocle/vault/__init__.py` so `VaultLayer.create_from_template()` loads `<vault>/.templates/<template>.md` when `body` is blank, renders `{title}` placeholders, and auto-populates `people: [title]` for person notes
+- Updated `monocle/agents/tools.py` merge instructions so scaffolded notes keep useful headings, tables, and checklists during AI merge
+- Added focused regression tests in `monocle/tests/test_vault.py` and `monocle/tests/test_agents.py`; validation: `12 passed` for the targeted vault slice and `2 passed` for the targeted agent merge slice
+- Updated scaffolded create behavior so non-empty create bodies are injected into template Markdown via `{body}` instead of bypassing the scaffold; added `org_name` scaffold alias support and updated `vault/.templates/organization.md` to use the same pattern
+- Added targeted renderer coverage in `monocle/tests/test_vault.py`; validation: `14 passed` for the targeted create-from-template slice and `1 passed` for the organization template path
+- Fixed chat/telemetry streaming context issues by disabling Agent Framework reconfiguration when Monocle already owns OTel setup, and by changing streaming spans to use non-current spans instead of `start_as_current_span()` across async generator yields
+- Updated `monocle/routers/chat.py`, `monocle/ai/base.py`, and `monocle/main.py` so `/api/chat` keeps explicit chat tracing without cross-context detach errors during streamed Ollama responses
+- Fixed frontend/runtime support around chat visibility and production bundles: added visible `Thinking...` streaming placeholder, unblocked frontend production build, and refreshed backend-served `frontend/dist`
+- Validation: `66 passed` in `monocle/tests/test_agents.py`, `60 passed` in `monocle/tests/test_api.py`, `70 passed` in `monocle/tests/test_ai.py`, plus a live `/api/chat` request on port `8003` completed successfully with no detach-context errors in server logs
+- Clarified URL-prefetch observability in `/api/chat`: pre-fetched URLs now emit `tool_call` and `tool_error` SSE events named `create_reference_from_url` even though the prefetch runs before `agent.run_stream()` rather than through the normal agent tool loop
+- Added an explicit `tool.create_reference_from_url` trace span in `monocle/services/references.py` so traces show the canonical reference-creation operation instead of only the nested outbound HTTP GET span
+- Added focused regression coverage in `monocle/tests/test_agents.py`; validation: `67 passed` in the agent slice, and a live URL chat request on port `8004` emitted `event: tool_call` with `name: create_reference_from_url`
+- Added router-level `prefetch_complete` SSE events with per-URL total duration, and frontend chat handling/UI fields so URL prefetch tool rows can show status, URL, and elapsed time once prefetch finishes
+- Broke `create_reference_from_url` tracing into stage-level spans (`reference.fetch_url`, `reference.summarize_url`, `reference.write_note`) plus a `[REF]` completion log carrying fetch/summarize/write timings and total file output
+- Validation: `67 passed` in `monocle/tests/test_agents.py`, `14 passed` in `monocle/tests/test_services.py::TestCreateReferenceFromUrl`, frontend type-check passed, and a live URL chat request on port `8005` still showed the early `tool_call` immediately while remaining incomplete after the outbound GET, narrowing the bottleneck to post-fetch summarization/write work
+- Made URL prefetch feedback explicit in the chat UI: the initial `tool_call` now includes the URL, the assistant pending line switches from generic `Thinking...` to `Prefetching URL: <url>` while reference creation is in flight, and the tool row shows `Prefetched URL: ... in Xs` once complete
+- Validation: `67 passed` in `monocle/tests/test_agents.py`, `46 passed` in `frontend/src/Chat.test.tsx`, and frontend type-check passed
+- Fixed trailing-punctuation URL capture in chat by normalizing detected URLs in `frontend/src/components/Chat/ChatInput.tsx` and sanitizing `/api/chat` prefetch URLs in `monocle/routers/chat.py`, so prose like `https://github.com/github/awesome-copilot,` no longer produces a 404 against the comma-suffixed URL
+- Added focused regression coverage in `frontend/src/Chat.test.tsx` and `monocle/tests/test_agents.py`; validation: `68 passed` in the agent slice, `48 passed` in the focused frontend chat file, and frontend type-check passed
+- Added a hard timeout around URL-reference summarization in `monocle/services/references.py` and fall back to a deterministic excerpt-based Markdown reference when the AI summary exceeds the limit, so slow local models no longer block chat URL prefetch indefinitely
+- Added focused timeout regression coverage in `monocle/tests/test_services.py`; validation: `15 passed` in `TestCreateReferenceFromUrl` and `9 passed` in the fetch-URL agent slice
+- Made the URL-reference summarization timeout configurable via `ai.url_reference_timeout_s` in `monocle/config.py` and `config.yaml.example`, raised the default wait budget to 120s, and threaded that setting through the chat-agent and MCP wrappers into `create_reference_from_url()`
+- Added focused validation for config, service, agent, MCP, and settings surfaces: `6 passed` in `TestAIConfigValidation`, `15 passed` in `TestCreateReferenceFromUrl`, `10 passed` in the configured-timeout/fetch-URL agent slice, `11 passed` in the MCP init/reference slice, and `71 passed` in `test_settings.py`
 
 ## 2026-04-21
 

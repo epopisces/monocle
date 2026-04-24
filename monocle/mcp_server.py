@@ -46,6 +46,7 @@ from pydantic import BeforeValidator
 
 if TYPE_CHECKING:
     from monocle.ai.base import AIProvider
+    from monocle.config import Settings
     from monocle.graph import GraphBuilder
     from monocle.index.base import IndexLayer
     from monocle.ingest import IngestPipeline
@@ -77,6 +78,7 @@ class _MCPState:
         self.vault: "VaultLayer | None" = None
         self.index: "IndexLayer | None" = None
         self.ai: "AIProvider | None" = None
+        self.settings: "Settings | None" = None
         self.ingest_pipeline: "IngestPipeline | None" = None
         self.graph_builder: "GraphBuilder | None" = None
         self.reindex_queue: "ReindexQueue | None" = None
@@ -100,6 +102,8 @@ def init_mcp_state(
     ai: "AIProvider | None",
     ingest_pipeline: "IngestPipeline",
     graph_builder: "GraphBuilder",
+    *,
+    settings: "Settings | None" = None,
     reindex_queue: "ReindexQueue | None" = None,
 ) -> None:
     """Inject shared application state so MCP tool functions can access it.
@@ -109,6 +113,7 @@ def init_mcp_state(
     _state.vault = vault
     _state.index = index
     _state.ai = ai
+    _state.settings = settings
     _state.ingest_pipeline = ingest_pipeline
     _state.graph_builder = graph_builder
     _state.reindex_queue = reindex_queue
@@ -346,7 +351,14 @@ async def create_reference_from_url(
     from monocle.services.references import create_reference_from_url as _create_ref
 
     note = await _create_ref(
-        _state.vault, _state.ai, _state.reindex_queue, url, extra_context,
+        _state.vault,
+        _state.ai,
+        _state.reindex_queue,
+        url,
+        extra_context,
+        summarize_timeout_s=(
+            _state.settings.ai.url_reference_timeout_s if _state.settings is not None else None
+        ),
     )
     return json.dumps(
         {"file_path": note.file_path, "title": note.title, "url": url, "status": "created"}

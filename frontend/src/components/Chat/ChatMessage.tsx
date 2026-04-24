@@ -39,19 +39,50 @@ function VaultLink({ href, children }: { href?: string; children?: React.ReactNo
 
 const MARKDOWN_COMPONENTS: Components = { a: VaultLink }
 
+function isRunningUrlPrefetch(call: ToolCallEntry): boolean {
+  return call.name === 'create_reference_from_url' && call.status === 'running'
+}
+
+function getPendingStatus(message: ThreadMessage): string {
+  const toolCalls = message.toolCalls ?? []
+  const activePrefetches = toolCalls.filter(isRunningUrlPrefetch)
+  if (activePrefetches.length === 0) {
+    return 'Thinking...'
+  }
+  if (activePrefetches.length === 1) {
+    const url = activePrefetches[0].url
+    return url ? `Prefetching URL: ${url}` : 'Prefetching URL...'
+  }
+  return `Prefetching ${activePrefetches.length} URLs...`
+}
+
 function ToolCallDisclosure({ call }: { call: ToolCallEntry }) {
   const hasError = Boolean(call.error)
+  const durationLabel =
+    call.durationMs !== undefined
+      ? ` in ${(call.durationMs / 1000).toFixed(call.durationMs >= 10000 ? 0 : 1)}s`
+      : ''
   const countLabel =
     call.resultCount !== undefined
       ? ` — ${call.resultCount} result${call.resultCount === 1 ? '' : 's'}`
       : ''
-  const label = hasError
-    ? `⚠ \`${call.name}\` failed`
-    : `Used \`${call.name}\`${countLabel}`
+  const isPrefetch = call.name === 'create_reference_from_url'
+  let label = hasError
+    ? `⚠ \`${call.name}\` failed${durationLabel}`
+    : `Used \`${call.name}\`${countLabel}${durationLabel}`
+
+  if (isPrefetch && call.status === 'running') {
+    label = call.url ? `Prefetching URL: ${call.url}` : 'Prefetching URL...'
+  } else if (isPrefetch && call.status === 'success') {
+    label = call.url ? `Prefetched URL: ${call.url}${durationLabel}` : `Prefetched URL${durationLabel}`
+  } else if (isPrefetch && hasError) {
+    label = call.url ? `⚠ Failed to prefetch URL: ${call.url}${durationLabel}` : `⚠ Failed to prefetch URL${durationLabel}`
+  }
 
   return (
     <details className={`tool-call${hasError ? ' tool-call--error' : ''}`}>
       <summary className="tool-call__summary">{label}</summary>
+      {call.url && !isPrefetch && <div className="tool-call__meta">URL: {call.url}</div>}
       {call.error && <pre className="tool-call__error-detail">{call.error}</pre>}
     </details>
   )
@@ -103,7 +134,9 @@ export default function ChatMessage({ message }: Props) {
               {linkifyVaultPaths(message.content)}
             </ReactMarkdown>
           </div>
-        ) : message.isStreaming ? null : (
+        ) : message.isStreaming ? (
+          <p className="chat-message__text chat-message__text--pending">{getPendingStatus(message)}</p>
+        ) : (
           <p className="chat-message__text chat-message__text--empty">(empty response)</p>
         )}
 

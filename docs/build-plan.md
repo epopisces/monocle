@@ -2,7 +2,7 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-09
+last-updated: 2026-04-24
 active-milestone: M33
 ---
 
@@ -27,9 +27,14 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M25 — Voice Feature Hardening & Cross-Browser Compatibility (2026-04-20)
-**Note:** M24 (OneNote) and M26 (Teams) are queued; M25 is now complete.
+**Last Completed:** M34 — Ingest Session Schema & Persistence (2026-04-24)
+**Note:** M34 was completed out of sequence to unblock the ingest-review architecture; M33, M35, and later ingest milestones remain queued.
 **Blocked By:** None
+**Session Notes (M34 — Ingest Session Schema & Persistence):**
+- **Status:** COMPLETE (2026-04-24)
+- Implemented a SQLite-backed `IngestSessionStore`, immutable out-of-vault `data/sources/` archival, session/source/proposed-action schemas, `GET /api/ingest/sessions` and `GET /api/ingest/sessions/{id}`, and switched `/api/ingest`, `/api/ingest/stream`, and the inbox watcher to capture persisted ingest sessions instead of writing pending notes directly.
+- Persisted queued notification/job scaffolding for the M35 handoff, normalized archived voice MIME types for watcher captures, and added focused persistence/security/API coverage.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 961 passed, 8 deselected, EXIT 0.
 **Session Notes (M29-M32 Post-Completion Validation & Security Hardening):**
 - **Status:** COMPLETE (2026-04-09)
 - Conducted comprehensive security audit and quality review of MCP-First milestones (M29-M32). Identified and fixed 8 issues: 1 HIGH (SSRF in URL fetcher), 2 MEDIUM (exception disclosure in SSE stream, stale docs), 2 LOW (hard limit on note discovery, invalid note_type accepted), 3 coverage gaps (SSRF boundary tests, confidence=None path, MCP auth non-HTTP scope).
@@ -154,6 +159,13 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M31 | MCP-First: MCP Canonicalization                                | COMPLETE    |
 | M32 | MCP-First: Chat Tool Adapter & Orchestration Cleanup           | COMPLETE    |
 | M33 | MCP-First: Third-Party MCP Composition                         | NOT STARTED |
+| M34 | Ingest Session Schema & Persistence                            | COMPLETE    |
+| M35 | Background Session Preparation & Notifications                 | NOT STARTED |
+| M36 | Ingest Review Workspace & Proposal Flow                        | NOT STARTED |
+| M37 | Ingest Execution, Validation & Source UX                       | NOT STARTED |
+| M38 | Fast-Capture Path                                              | NOT STARTED |
+| M39 | File History, Revert & Diff Viewer                             | NOT STARTED |
+| M40 | Add Documents & Snippets To Chat Context                       | NOT STARTED |
 
 ---
 
@@ -787,6 +799,186 @@ Add explicit support for agent composition across internal Monocle and external 
 - [ ] External MCP server configuration in `config.yaml`
 - [ ] At least one third-party MCP integration tested E2E
 - [ ] Documentation: how to add external MCP servers
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M34: Ingest Session Schema & Persistence
+
+**Status:** COMPLETE (2026-04-24)
+
+SQLite-backed ingest sessions, immutable `data/sources/` archival, session/source/action schemas, and the initial list/detail APIs are now implemented. `/api/ingest`, `/api/ingest/stream`, and the inbox watcher all capture durable queued sessions instead of writing pending notes directly, while queued notification/job scaffolding preserves the M35 handoff.
+
+**Full details:** [docs/milestones.md#m34-ingest-session-schema--persistence](milestones.md#m34-ingest-session-schema--persistence)
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M35: Background Session Preparation & Notifications
+
+**Status:** NOT STARTED — depends on M34
+
+Turn persisted ingest sessions into dormant, review-ready work items by polling the inbox, preparing sessions during idle time, and surfacing notifications to the user.
+
+**Deliverables:**
+
+- [ ] Add inbox polling that creates background ingest sessions plus notification items for later review, rather than writing notes immediately
+- [ ] Add dormant-session background processing/queueing so inbox-originated sessions can be pre-digested during application idle time and be ready for user review when opened
+- [ ] Ensure background preparation yields digest, linked-note candidates, contradiction warnings, and draft proposed actions without requiring the user to keep a session open
+- [ ] Add notification/list surfaces so users can launch dormant ingest sessions from the app shell
+
+**Acceptance Criteria:**
+
+- Inbox-derived sessions are prepared in the background and can be opened later without rerunning the initial digest from scratch
+- Background preparation occurs only during app idle windows and does not compete with actively used user sessions
+- Users see a notification/count/list of dormant ingest sessions ready for review
+- Prepared sessions remain dormant on disk until opened and can later be refreshed with a true-up action
+
+**Design Notes:**
+
+- Background-prep approach options and tradeoffs:
+  1. In-process APScheduler/async queue driven by app activity state
+    Best for: simplest Phase 1 implementation, lowest operational complexity.
+    Upside: no extra worker/service to manage; easy access to app state and provider instances.
+    Downside: weaker isolation; background prep pauses when the app is down; idle detection must be approximated.
+  2. Persistent SQLite-backed job queue executed by the main process
+    Best for: resumability and deterministic retries without adding a second service.
+    Upside: jobs survive restart; easy to inspect/debug; supports bounded concurrency and fairness.
+    Downside: still tied to the main process for execution throughput.
+  3. Separate worker process consuming persisted jobs
+    Best for: stronger isolation and future scale.
+    Upside: background prep can continue independently; cleaner CPU/latency isolation from interactive sessions.
+    Downside: more operational complexity now; requires cross-process coordination and health management.
+- Recommended Phase 1.5 choice: option 2. Persist jobs in SQLite, execute them in the main process with bounded concurrency, and gate dispatch on a simple `active_interactive_sessions == 0` or low-load heuristic. This gives restart safety and controllable resource use without forcing multi-process orchestration yet.
+- Idle gating recommendation: treat the system as `busy` when an ingest-review session is open, a chat stream is active, or a foreground document save is in progress; otherwise allow up to `ingest.max_idle_prepare_jobs` background prepares.
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M36: Ingest Review Workspace & Proposal Flow
+
+**Status:** NOT STARTED — depends on M35
+
+Build the dedicated ingest-review workflow where users inspect a prepared ingest session, answer follow-up questions, review contradictions, and edit or approve proposed deltas.
+
+**Deliverables:**
+
+- [ ] Dedicated ingest-review UI/workflow separate from standard chat, with session loading, review state, and ingest-specific controls
+- [ ] Agent digest step that summarizes key takeaways, asks focused follow-up questions for missing context, and proposes links to existing knowledge-base content
+- [ ] Contradiction detection with warning explanations and links to the contradicting note(s), without blocking review completion
+- [ ] Proposal model with per-action approval semantics, editable proposed changes, and an `approve all` option for the current ingest session
+- [ ] User-visible update previews for changed documents, with proposed deltas and diff rendering for existing-note edits
+- [ ] User-triggered validation / true-up action that reruns initial ingest processing on a dormant session to account for drift before approval
+
+**Acceptance Criteria:**
+
+- Users review ingest sessions in a dedicated workflow rather than cluttering the general chat interface
+- Proposed updates to existing documents are displayed as explicit deltas with a visible diff, not just prose descriptions
+- Users can approve actions individually, edit them before approval, or approve all actions for the current session
+- Contradiction warnings include explanations plus links to the relevant conflicting note(s)
+- A dormant session can be refreshed with a true-up action before the user approves changes
+
+**Scenario Anchor:**
+
+- Given chat input such as "Met with Charles Brig today...", the review workflow can ask for a gmd reference link or extra details, ask whether the user plans to experiment with gmd, warn if any existing notes conflict, propose updating `people/Charles Brig.md`, propose creating `technologies/gmd.md`, and optionally propose a `projects/` note if experimentation is planned
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M37: Ingest Execution, Validation & Source UX
+
+**Status:** NOT STARTED — depends on M36
+
+Execute approved ingest proposals through the canonical MCP tool plane, validate the resulting writes, and surface source/document affordances in the document UI.
+
+**Deliverables:**
+
+- [ ] Execute approved create/update actions only through the canonical MCP server/tool plane, not a parallel direct-write ingest path
+- [ ] Post-apply validation that confirms expected document changes exist via readback / grep-style checks, then queues reindex for all touched notes
+- [ ] Execution summary that reports which approved actions succeeded, failed, or were skipped, and offers to open affected notes in the Document Viewer
+- [ ] Add a collapsed `Sources` section to vault documents, linking back to archived raw sources with label text including source name and author when known
+- [ ] Add source-opening behavior in the document UI: text-based sources open in the Document Browser by default; other file types can be opened with system defaults
+- [ ] Add Docs/File Explorer support for browsing archived sources under a collapsed dropdown without making them part of the normal semantic knowledge base
+
+**Acceptance Criteria:**
+
+- Approved actions are applied through MCP-owned create/update operations only
+- The system validates that the expected document edits occurred before reporting success and triggers reindexing for touched notes
+- Users can open created/updated notes in the Document Viewer immediately after execution
+- Archived sources are discoverable manually in the docs UI and from a document's collapsed `Sources` section, but remain excluded from default search and embedding flows
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M38: Fast-Capture Path
+
+**Status:** NOT STARTED — depends on M34 architecture
+
+Provide a low-friction path for users who are highly confident in the source state and want to bypass the full ingest-review workflow while preserving provenance and compatibility with the ingest-session model.
+
+**Deliverables:**
+
+- [ ] Add a fast-capture mode that reuses the ingest-session/source architecture but short-circuits the full review workflow when the user opts in
+- [ ] Support direct create/update execution with lighter confirmation semantics for high-confidence captures
+- [ ] Preserve provenance, source archival, reindex, and post-write validation behavior even when using fast-capture
+
+**Acceptance Criteria:**
+
+- Fast-capture is clearly separate from the full ingest-review workflow
+- The ingest architecture does not require duplicate storage or write paths to support fast-capture
+- Users can still trace resulting notes back to their raw source and revert later if needed
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M39: File History, Revert & Diff Viewer
+
+**Status:** NOT STARTED — queued after M36
+
+Add first-class document history so users can inspect prior versions, open diffs in the Document Viewer, and undo ingest-driven or manual edits.
+
+**Deliverables:**
+
+- [ ] Persist file history snapshots with configurable retention limits (for example, keep the last `x` versions)
+- [ ] Add revert / undo operations for prior document versions
+- [ ] Add diff viewing in the Document Viewer for historical versions and ingest-proposed changes
+- [ ] Ensure ingest execution records history entries in a way that supports targeted rollback
+
+**Acceptance Criteria:**
+
+- Retention is configurable in settings/config
+- Users can open historical diffs for a document in the Document Viewer
+- Users can revert a document to a prior retained version after ingest or manual changes
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M40: Add Documents & Snippets To Chat Context
+
+**Status:** NOT STARTED — queued after M33
+
+Let users explicitly add documents or document snippets into a new or existing chat session from the Docs explorer or Document Viewer.
+
+**Deliverables:**
+
+- [ ] Docs file explorer drag-and-drop support for adding a document into a chat session as context
+- [ ] Document Viewer context menu actions for adding the current document, section, or sentence to a new or existing chat session when nothing is selected
+- [ ] Document Viewer context menu actions for adding the current selection to a new or existing chat session when text is selected
+- [ ] Chat/session plumbing that records the inserted context as explicit user-added grounding rather than implicit vault retrieval
+
+**Acceptance Criteria:**
+
+- Users can add whole documents from the Docs explorer to a new or existing chat session
+- Right-click in the Document Viewer exposes add-to-chat actions for document/section/sentence when no text is selected
+- Right-click on a selection exposes add-selection-to-chat actions for a new or existing session
+- Added context is clearly represented as user-provided context inside the destination chat session
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 

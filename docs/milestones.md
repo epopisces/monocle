@@ -2,12 +2,12 @@
 type: milestone-archive
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-09
+last-updated: 2026-04-24
 ---
 
 # Monocle – Completed Milestones & Technical Spike Resolutions
 
-This document archives full details for completed milestones (M1–M11, M19–M20, M23, M25, M27–M32) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
+This document archives full details for completed milestones (M1–M11, M19–M20, M23, M25, M27–M32, M34) and resolved technical spikes. For active work, refer to `docs/build-plan.md`.
 
 ---
 
@@ -1057,4 +1057,53 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - `frontend/src/VoiceCapture.test.tsx` — 14 new Web Speech API tests
 
 **Test Results:** 432 frontend tests passing (80 in `VoiceCapture.test.tsx`, up from 62), EXIT 0.
+
+---
+
+### M34: Ingest Session Schema & Persistence
+
+**Goal:** Replace direct ingest-note creation with a durable ingest-session capture model that archives raw sources outside the vault and survives app restarts.
+
+**Completed:** 2026-04-24
+
+**Deliverables completed:**
+
+- [x] Added canonical session-side models in `monocle/models.py`: `IngestSession`, `SourceRecord`, `ProposedAction`, `DiffPreview`, `IngestNotification`, `IngestSessionDetailResponse`, plus lifecycle enums for session/source/action state.
+- [x] Added `monocle/services/ingest_sessions.py` with a SQLite-backed `IngestSessionStore` and managed filesystem layout under `data/ingest/` and `data/sources/`.
+- [x] Implemented immutable source archival for API and inbox captures, including `payload` binary/text storage, `metadata.json` provenance mirrors, SHA-256 checksums, and normalized voice MIME types.
+- [x] Created persistent tables and indexes for `ingest_sessions`, `source_records`, `proposed_actions`, `ingest_notifications`, and `background_prepare_jobs` so later M35/M36 work can layer on preparation without schema churn.
+- [x] Rewired `POST /api/ingest` to return `202 Accepted` with an ingest-session summary instead of a created note.
+- [x] Rewired `POST /api/ingest/stream` to emit capture-progress SSE events for source archival and session persistence rather than note-pipeline steps.
+- [x] Added `GET /api/ingest/sessions` and `GET /api/ingest/sessions/{session_id}` for review-workspace and notification consumers.
+- [x] Switched the unified-process inbox watcher in `monocle/main.py` and the standalone `monocle watch` CLI entry to archive inbox items into persisted ingest sessions instead of running the note pipeline directly.
+- [x] Updated the shared test app lifespan fixture in `monocle/tests/conftest.py` so API tests run against the new ingest-session store with isolated temporary persistence roots.
+
+**Acceptance Criteria met:**
+
+- Inbox items and API-originated ingest requests now produce persisted ingest sessions rather than directly creating pending notes.
+- Raw sources are archived outside the vault under `data/sources/` and are not indexed into the semantic note corpus.
+- Session and source lifecycle states are queryable through the canonical models and the new list/detail APIs.
+- Persisted sessions survive restarts; verified by re-opening the same SQLite/db-backed store in tests and reloading the captured session.
+
+**Implementation notes:**
+
+- `IngestSessionStore` keeps small, queryable state in SQLite and stores the immutable payload + metadata mirror on disk. This keeps M34 low-memory while avoiding premature coupling to later digest/proposal artifacts.
+- Session origin is currently captured as `api`, `chat`, or `inbox`, with `api` used as the default to avoid forcing an immediate client migration while keeping the explicit `chat` path available for future callers.
+- Duplicate detection is intentionally deferred beyond M34. `/api/ingest` now captures sessions quickly and durably instead of running the full AI pipeline synchronously; later ingest-review milestones can surface duplicate/contradiction analysis against the persisted session.
+- The store records queued notification and background-job rows now, but execution of those jobs is still deferred to M35.
+
+**Files modified:**
+
+- `monocle/models.py`
+- `monocle/services/ingest_sessions.py`
+- `monocle/routers/ingest.py`
+- `monocle/main.py`
+- `monocle/cli.py`
+- `monocle/tests/conftest.py`
+- `monocle/tests/test_api.py`
+- `monocle/tests/test_security.py`
+- `monocle/tests/test_rate_limit.py`
+- `monocle/tests/test_ingest_sessions.py`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 961 passed, 8 deselected, EXIT 0.
 

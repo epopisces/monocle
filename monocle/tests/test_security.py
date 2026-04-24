@@ -287,14 +287,13 @@ class TestDuplicateDetection:
                 },
             )
 
-        # DuplicateSuspected → 409
-        assert r.status_code == 409
+        assert r.status_code == 202
         body = r.json()
-        assert body["detail"]["similar_note_detected"] is True
-        assert "similar_note_path" in body["detail"]
+        assert body["state"] == "queued"
+        assert body["session_id"].startswith("ing_")
 
-    def test_ingest_with_allow_duplicate_creates_note(self, api_client: TestClient, mock_ai):
-        """allow_duplicate=True bypasses duplicate detection and creates the note."""
+    def test_ingest_with_allow_duplicate_creates_session(self, api_client: TestClient, mock_ai):
+        """allow_duplicate=True still produces a queued ingest session in M34."""
         from unittest.mock import patch
         from monocle.models import ScoredChunk
 
@@ -320,8 +319,7 @@ class TestDuplicateDetection:
                 },
             )
 
-        assert r.status_code == 201
+        assert r.status_code == 202
         body = r.json()
-        assert "note" in body
-        # Confidence should report similar_note_detected=True
-        assert body["confidence"]["similar_note_detected"] is True
+        assert body["origin"] == "api"
+        assert body["state"] == "queued"

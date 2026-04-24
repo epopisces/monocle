@@ -11,6 +11,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -70,6 +71,13 @@ def _strip_frontmatter(raw: str) -> str:
     if end == -1:
         return raw
     return raw[end + 4:].lstrip("\n")
+
+
+def _infer_inbox_request_source(file_path: str) -> str:
+    suffix = Path(file_path).suffix.lower()
+    if suffix in {".webm", ".mp3", ".wav", ".m4a", ".flac"}:
+        return "voice"
+    return "web"
 
 # ---------------------------------------------------------------------------
 #region #*   Application state (shared across requests)
@@ -255,9 +263,11 @@ async def lifespan(app: FastAPI):
     # Failed-ingest registry
     # ------------------------------------------------------------------
     from monocle.ingest.failed_registry import FailedIngestRegistry
+    from monocle.services.ingest_sessions import IngestSessionStore
 
     failed_registry = FailedIngestRegistry()
     app.state.failed_registry = failed_registry
+    app.state.ingest_session_store = IngestSessionStore(cfg)
 
     # ------------------------------------------------------------------
     # Ingest pipeline singleton
@@ -356,7 +366,7 @@ async def lifespan(app: FastAPI):
 
         # Wire ingest callback for inbox file captures
         async def _inbox_ingest_callback(file_path: str) -> bool:
-            """Run the ingest pipeline for a newly stable inbox file.
+            """Archive a stable inbox file and persist an ingest session.
 
             Files already written by the Monocle pipeline or agent tools have
             full Monocle frontmatter (detected via ``_is_monocle_note``).
@@ -364,32 +374,35 @@ async def lifespan(app: FastAPI):
             IngestPipeline again creates spurious duplicates (e.g.
             ``people/person.md``) when the LLM cannot extract the title.
 
-            Raw content (no frontmatter, or non-Monocle frontmatter) is passed
-            to IngestPipeline with the YAML block stripped so the router sees
-            only the note body.
+            All other inbox files are archived outside the vault and captured
+            as persisted ingest sessions for later preparation and review.
 
             Returns:
-                True if ingest pipeline was triggered (file should be deleted).
+                True if the file was archived into a persisted ingest session
+                (file should be deleted).
                 False if ingest was skipped (file should NOT be deleted).
             """
             import asyncio as _asyncio
             from pathlib import Path as _Path
 
             try:
-                raw = await _asyncio.to_thread(_Path(file_path).read_text, encoding="utf-8")
+                path = _Path(file_path)
+                if path.suffix.lower() == ".md":
+                    raw = await _asyncio.to_thread(path.read_text, encoding="utf-8")
 
-                if _is_monocle_note(raw):
-                    reindex_queue.push(file_path)
-                    logger.info(
-                        "[WATCHER] Skipped re-ingest of already-processed note %s", file_path
-                    )
-                    return False  # Do NOT delete; this file was intentionally queued for re-index only
+                    if _is_monocle_note(raw):
+                        reindex_queue.push(file_path)
+                        logger.info(
+                            "[WATCHER] Skipped re-ingest of already-processed note %s", file_path
+                        )
+                        return False  # Do NOT delete; this file was intentionally queued for re-index only
 
-                from monocle.models import IngestRequest
-
-                req = IngestRequest(content=_strip_frontmatter(raw), source="web")
-                await ingest_pipeline.run(req)
-                logger.info("[WATCHER] Ingest complete for %s", file_path)
+                await _asyncio.to_thread(
+                    app.state.ingest_session_store.create_inbox_session,
+                    file_path,
+                    request_source=_infer_inbox_request_source(file_path),
+                )
+                logger.info("[WATCHER] Ingest session captured for %s", file_path)
                 return True  # Ingest succeeded; file can be deleted
             except Exception as exc:  # noqa: BLE001
                 logger.error("[WATCHER] Ingest failed for %s: %s", file_path, exc, exc_info=True)
@@ -419,7 +432,15 @@ async def lifespan(app: FastAPI):
     # ------------------------------------------------------------------
     from monocle.mcp_server import init_mcp_state
 
-    init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue=reindex_queue)
+    init_mcp_state(
+        vault,
+        index,
+        ai,
+        ingest_pipeline,
+        graph_builder,
+        settings=cfg,
+        reindex_queue=reindex_queue,
+    )
 
     # ------------------------------------------------------------------
     # Startup re-index (runs if index is empty and vault has notes)
@@ -504,7 +525,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # ------------------------------------------------------------------
     try:
         from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        FastAPIInstrumentor.instrument_app(app)
+
+        # /api/chat streams SSE responses. Keeping the request span open across
+        # that async stream lifecycle triggers cross-context detach errors, so
+        # chat uses its own explicit span in the router instead.
+        FastAPIInstrumentor.instrument_app(app, excluded_urls="/api/chat")
     except Exception as exc:  # pragma: no cover
         logger.warning("[API] OTel FastAPI instrumentation skipped: %s", exc)
 

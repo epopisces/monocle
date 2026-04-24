@@ -36,9 +36,9 @@ logger = logging.getLogger(__name__)
 def _open_span(name: str, provider: str = "", model: str = ""):
     """Return a synchronous OTel span context manager.
 
-    This is safe to use inside async generator functions where ``async with``
-    is incompatible with ``@asynccontextmanager``-based helpers.  Falls back
-    to :class:`contextlib.nullcontext` when OTel is unavailable.
+    This avoids attaching the span as the current context, which is important
+    for async generator functions that yield across task/context boundaries.
+    Falls back to :class:`contextlib.nullcontext` when OTel is unavailable.
     """
     from contextlib import nullcontext
 
@@ -46,24 +46,21 @@ def _open_span(name: str, provider: str = "", model: str = ""):
         from opentelemetry import trace
 
         tracer = trace.get_tracer("monocle")
-        ctx = tracer.start_as_current_span(name)
-        # Wrap to inject attributes on entry without subclassing
-        return _AttrSpanContext(ctx, provider=provider, model=model)
+        span = tracer.start_span(name)
+        return _AttrSpanContext(span, provider=provider, model=model)
     except Exception:  # noqa: BLE001
         return nullcontext()
 
 
 class _AttrSpanContext:
-    """Thin wrapper that sets standard AI attributes when entering an OTel span."""
+    """Thin wrapper that sets attributes and ends spans without context attach."""
 
-    def __init__(self, ctx, provider: str, model: str) -> None:
-        self._ctx = ctx
+    def __init__(self, span, provider: str, model: str) -> None:
+        self._span = span
         self._provider = provider
         self._model = model
-        self._span = None
 
     def __enter__(self):
-        self._span = self._ctx.__enter__()
         try:
             if self._provider:
                 self._span.set_attribute("ai.provider", self._provider)
@@ -73,8 +70,20 @@ class _AttrSpanContext:
             pass
         return self._span
 
-    def __exit__(self, *args):
-        return self._ctx.__exit__(*args)
+    def __exit__(self, exc_type, exc, tb):
+        if exc is not None:
+            try:
+                from opentelemetry import trace
+
+                self._span.record_exception(exc)
+                self._span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc)))
+            except Exception:  # noqa: BLE001
+                pass
+        try:
+            self._span.end()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
 
 
 #endregion
