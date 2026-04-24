@@ -8,8 +8,10 @@ interface TopbarProps {
   onMenuToggle: () => void
   onSettingsOpen?: () => void
   onVoiceOpen?: () => void
+  onIngestOpen?: () => void
   onReviewOpen?: () => void
   onFailedOpen?: () => void
+  ingestCount?: number
   reviewCount?: number
   failedCount?: number
 }
@@ -36,8 +38,10 @@ export default function Topbar({
   onMenuToggle,
   onSettingsOpen,
   onVoiceOpen,
+  onIngestOpen,
   onReviewOpen,
   onFailedOpen,
+  ingestCount = 0,
   reviewCount = 0,
   failedCount = 0,
 }: TopbarProps) {
@@ -269,6 +273,19 @@ export default function Topbar({
         >
           🎤
         </button>
+
+        {ingestCount > 0 && (
+          <button
+            className="topbar-menu-btn topbar-badge-btn topbar-badge-btn--info"
+            onClick={onIngestOpen}
+            aria-label={`Prepared ingest sessions: ${ingestCount}`}
+            title={`${ingestCount} prepared ingest session(s) ready for review`}
+            data-testid="ingest-inbox-btn"
+          >
+            📥
+            <span className="topbar-badge topbar-badge--info" data-testid="ingest-badge">{ingestCount}</span>
+          </button>
+        )}
 
         {/* Review queue badge button — always visible when count > 0 */}
         {reviewCount > 0 && (

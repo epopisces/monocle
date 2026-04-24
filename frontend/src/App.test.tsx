@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import App from './App'
 import { getReviewCount } from './api/review'
-import { listIngestFailures } from './api/ingest'
+import { countIngestNotifications, listIngestFailures } from './api/ingest'
 import { getSettings } from './api/settings'
 
 // react-force-graph pulls in aframe-extras which requires a global AFRAME.
@@ -17,7 +17,10 @@ vi.mock('./api/notes', () => ({ listNotes: vi.fn().mockResolvedValue({ items: []
 
 // Review and ingest polled by App on mount every 30 s
 vi.mock('./api/review', () => ({ getReviewCount: vi.fn().mockResolvedValue({ count: 0 }) }))
-vi.mock('./api/ingest', () => ({ listIngestFailures: vi.fn().mockResolvedValue([]) }))
+vi.mock('./api/ingest', () => ({
+  countIngestNotifications: vi.fn().mockResolvedValue({ count: 0 }),
+  listIngestFailures: vi.fn().mockResolvedValue([]),
+}))
 
 // Health polled by Topbar
 vi.mock('./api/health', () => ({
@@ -105,6 +108,7 @@ describe('App — polling and server settings', () => {
 describe('App — polling lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    vi.mocked(countIngestNotifications).mockResolvedValue({ count: 0 })
     vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
     vi.mocked(listIngestFailures).mockResolvedValue([])
     vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
@@ -127,6 +131,12 @@ describe('App — polling lifecycle', () => {
     expect(vi.mocked(listIngestFailures)).toHaveBeenCalledTimes(1)
   })
 
+  it('calls countIngestNotifications once on mount', async () => {
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    expect(vi.mocked(countIngestNotifications)).toHaveBeenCalledTimes(1)
+  })
+
   it('polls getReviewCount again after 30 seconds', async () => {
     render(<App />)
     await act(async () => { await Promise.resolve() })
@@ -144,6 +154,16 @@ describe('App — polling lifecycle', () => {
 
     await act(async () => { vi.advanceTimersByTime(30_000) })
     const callsAfter = vi.mocked(listIngestFailures).mock.calls.length
+    expect(callsAfter).toBeGreaterThan(callsBefore)
+  })
+
+  it('polls countIngestNotifications again after 30 seconds', async () => {
+    render(<App />)
+    await act(async () => { await Promise.resolve() })
+    const callsBefore = vi.mocked(countIngestNotifications).mock.calls.length
+
+    await act(async () => { vi.advanceTimersByTime(30_000) })
+    const callsAfter = vi.mocked(countIngestNotifications).mock.calls.length
     expect(callsAfter).toBeGreaterThan(callsBefore)
   })
 

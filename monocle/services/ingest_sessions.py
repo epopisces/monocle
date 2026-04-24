@@ -1,6 +1,7 @@
 """Persistent ingest-session storage and immutable source archival."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import hashlib
 import json
 import mimetypes
@@ -13,11 +14,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Iterator
 
 from monocle.models import (
+    IngestNotificationSummary,
     IngestNotification,
     IngestRequest,
     IngestResponse,
     IngestSession,
     IngestSessionDetailResponse,
+    IngestTrueUpResponse,
     IngestSessionOrigin,
     ProposedAction,
     SourceRecord,
@@ -50,6 +53,26 @@ def _new_id(prefix: str) -> str:
 def _guess_mime_type(path: Path) -> str:
     guessed, _ = mimetypes.guess_type(path.name)
     return guessed or "application/octet-stream"
+
+
+@dataclass(frozen=True)
+class BackgroundPrepareJob:
+    job_id: str
+    session_id: str
+    job_type: str
+    status: str
+    run_after: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class IngestSessionPrepareContext:
+    session: IngestSession
+    sources: list[SourceRecord]
+    request_source: str
+    template_hint: str | None
+    artifact_dir: Path
 
 
 def _normalise_inbox_mime_type(mime_type: str, request_source: "NoteSource", path: Path) -> str:
@@ -227,6 +250,382 @@ class IngestSessionStore:
             actions = self._get_actions_for_sessions(conn, [session_id]).get(session_id, [])
             session = self._build_session(row, sources=sources, actions=actions)
             return IngestSessionDetailResponse(session=session, sources=sources)
+
+    def get_prepare_context(self, session_id: str) -> IngestSessionPrepareContext | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, origin, state, title, digest,
+                       open_questions_json, related_notes_json, contradictions_json,
+                       created_at, updated_at, prepared_at, last_true_up_at,
+                       request_source, template_hint, artifact_dir
+                FROM ingest_sessions
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            sources = self._get_sources_for_sessions(conn, [session_id]).get(session_id, [])
+            actions = self._get_actions_for_sessions(conn, [session_id]).get(session_id, [])
+            session = self._build_session(row, sources=sources, actions=actions)
+            return IngestSessionPrepareContext(
+                session=session,
+                sources=sources,
+                request_source=row["request_source"],
+                template_hint=row["template_hint"],
+                artifact_dir=(self._ingest_root / (row["artifact_dir"] or f"artifacts/{session_id}")).resolve(),
+            )
+
+    def claim_prepare_jobs(self, *, limit: int = 1, run_after: str | None = None) -> list[BackgroundPrepareJob]:
+        due_at = run_after or _utcnow_iso()
+        max_jobs = max(1, min(limit, 8))
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            rows = conn.execute(
+                """
+                SELECT job_id, session_id, job_type, status, run_after, created_at, updated_at
+                FROM background_prepare_jobs
+                WHERE status = 'queued' AND run_after <= ?
+                ORDER BY run_after ASC, created_at ASC
+                LIMIT ?
+                """,
+                (due_at, max_jobs),
+            ).fetchall()
+            job_ids = [row["job_id"] for row in rows]
+            now = _utcnow_iso()
+            for job_id in job_ids:
+                conn.execute(
+                    """
+                    UPDATE background_prepare_jobs
+                    SET status = 'running', updated_at = ?
+                    WHERE job_id = ?
+                    """,
+                    (now, job_id),
+                )
+                conn.execute(
+                    """
+                    UPDATE ingest_sessions
+                    SET state = 'preparing', updated_at = ?
+                    WHERE session_id = (SELECT session_id FROM background_prepare_jobs WHERE job_id = ?)
+                    """,
+                    (now, job_id),
+                )
+
+            return [
+                BackgroundPrepareJob(
+                    job_id=row["job_id"],
+                    session_id=row["session_id"],
+                    job_type=row["job_type"],
+                    status="running",
+                    run_after=row["run_after"],
+                    created_at=row["created_at"],
+                    updated_at=now,
+                )
+                for row in rows
+            ]
+
+    def complete_prepare_job(
+        self,
+        job_id: str,
+        session_id: str,
+        *,
+        title: str | None,
+        digest: str | None,
+        open_questions: list[dict[str, Any]],
+        related_notes: list[dict[str, Any]],
+        contradictions: list[dict[str, Any]],
+        proposed_actions: list[ProposedAction],
+        artifact_payload: dict[str, Any],
+    ) -> str:
+        now = _utcnow_iso()
+        notification_id = _new_id("notif")
+        artifact_dir = self._ingest_root / "artifacts" / session_id
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        (artifact_dir / "prepare_result.json").write_text(
+            _json_dumps(artifact_payload),
+            encoding="utf-8",
+        )
+
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE ingest_sessions
+                SET state = 'dormant_ready',
+                    title = ?,
+                    digest = ?,
+                    open_questions_json = ?,
+                    related_notes_json = ?,
+                    contradictions_json = ?,
+                    updated_at = ?,
+                    prepared_at = ?
+                WHERE session_id = ?
+                """,
+                (
+                    title,
+                    digest,
+                    _json_dumps(open_questions),
+                    _json_dumps(related_notes),
+                    _json_dumps(contradictions),
+                    now,
+                    now,
+                    session_id,
+                ),
+            )
+            conn.execute(
+                """
+                UPDATE background_prepare_jobs
+                SET status = 'completed', updated_at = ?
+                WHERE job_id = ?
+                """,
+                (now, job_id),
+            )
+            conn.execute(
+                """
+                UPDATE source_records
+                SET status = 'ready'
+                WHERE session_id = ? AND status IN ('archived', 'queued', 'processing')
+                """,
+                (session_id,),
+            )
+            conn.execute("DELETE FROM proposed_actions WHERE session_id = ?", (session_id,))
+            for action in proposed_actions:
+                conn.execute(
+                    """
+                    INSERT INTO proposed_actions (
+                        action_id, session_id, action_type, approval_state,
+                        target_file_path, target_note_type, rationale, diff_preview_json,
+                        proposed_content_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        action.action_id,
+                        session_id,
+                        action.action_type,
+                        action.approval_state,
+                        action.target_file_path,
+                        action.target_note_type,
+                        action.rationale,
+                        _json_dumps(
+                            action.diff_preview.model_dump(mode="json")
+                            if hasattr(action.diff_preview, "model_dump")
+                            else action.diff_preview
+                        )
+                        if action.diff_preview is not None
+                        else None,
+                        _json_dumps(action.proposed_content),
+                    ),
+                )
+            conn.execute(
+                """
+                UPDATE ingest_notifications
+                SET status = 'read'
+                WHERE session_id = ? AND kind = 'ingest_captured' AND status = 'unread'
+                """,
+                (session_id,),
+            )
+            conn.execute(
+                """
+                INSERT INTO ingest_notifications (
+                    notification_id, session_id, kind, status, created_at, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    notification_id,
+                    session_id,
+                    'ingest_ready',
+                    'unread',
+                    now,
+                    _json_dumps(
+                        {
+                            'open_questions_count': len(open_questions),
+                            'contradictions_count': len(contradictions),
+                            'proposed_actions_count': len(proposed_actions),
+                        }
+                    ),
+                ),
+            )
+        return notification_id
+
+    def fail_prepare_job(self, job_id: str, session_id: str, error_message: str) -> str:
+        now = _utcnow_iso()
+        notification_id = _new_id("notif")
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE background_prepare_jobs
+                SET status = 'failed', updated_at = ?
+                WHERE job_id = ?
+                """,
+                (now, job_id),
+            )
+            conn.execute(
+                """
+                UPDATE ingest_sessions
+                SET state = 'failed', updated_at = ?
+                WHERE session_id = ?
+                """,
+                (now, session_id),
+            )
+            conn.execute(
+                """
+                INSERT INTO ingest_notifications (
+                    notification_id, session_id, kind, status, created_at, payload_json
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    notification_id,
+                    session_id,
+                    'ingest_prepare_failed',
+                    'unread',
+                    now,
+                    _json_dumps({'error': error_message}),
+                ),
+            )
+        return notification_id
+
+    def list_notifications(
+        self,
+        *,
+        status: str | None = None,
+        kind: str | None = None,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[IngestNotificationSummary]:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if status:
+            clauses.append("n.status = ?")
+            params.append(status)
+        if kind:
+            clauses.append("n.kind = ?")
+            params.append(kind)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        params.extend([max(1, min(limit, 200)), max(offset, 0)])
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT n.notification_id, n.session_id, n.kind, n.status, n.created_at,
+                       n.payload_json, s.state AS session_state, s.title AS session_title,
+                       s.digest AS session_digest, s.open_questions_json,
+                       s.contradictions_json
+                FROM ingest_notifications n
+                JOIN ingest_sessions s ON s.session_id = n.session_id
+                {where_sql}
+                ORDER BY n.created_at DESC
+                LIMIT ? OFFSET ?
+                """,
+                params,
+            ).fetchall()
+            session_ids = [row["session_id"] for row in rows]
+            sources_by_session = self._get_sources_for_sessions(conn, session_ids)
+            actions_by_session = self._get_actions_for_sessions(conn, session_ids)
+
+        summaries: list[IngestNotificationSummary] = []
+        for row in rows:
+            sources = sources_by_session.get(row["session_id"], [])
+            actions = actions_by_session.get(row["session_id"], [])
+            payload = _json_loads(row["payload_json"], {})
+            summaries.append(
+                IngestNotificationSummary(
+                    notification_id=row["notification_id"],
+                    session_id=row["session_id"],
+                    kind=row["kind"],
+                    status=row["status"],
+                    created_at=row["created_at"],
+                    session_state=row["session_state"],
+                    session_title=row["session_title"],
+                    session_digest=row["session_digest"],
+                    source_names=[source.source_name for source in sources],
+                    open_questions_count=len(_json_loads(row["open_questions_json"], [])),
+                    contradictions_count=len(_json_loads(row["contradictions_json"], [])),
+                    proposed_actions_count=payload.get("proposed_actions_count", len(actions)),
+                )
+            )
+        return summaries
+
+    def count_notifications(self, *, status: str | None = None, kind: str | None = None) -> int:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if kind:
+            clauses.append("kind = ?")
+            params.append(kind)
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS count FROM ingest_notifications {where_sql}",
+                params,
+            ).fetchone()
+        return int(row["count"] if row is not None else 0)
+
+    def set_notification_status(self, notification_id: str, status: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "UPDATE ingest_notifications SET status = ? WHERE notification_id = ?",
+                (status, notification_id),
+            )
+            return row.rowcount > 0
+
+    def enqueue_true_up(self, session_id: str) -> IngestTrueUpResponse | None:
+        now = _utcnow_iso()
+        job_id = _new_id("job")
+        with self._connect() as conn:
+            exists = conn.execute(
+                "SELECT session_id FROM ingest_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if exists is None:
+                return None
+
+            existing_job = conn.execute(
+                """
+                SELECT job_id FROM background_prepare_jobs
+                WHERE session_id = ? AND status IN ('queued', 'running')
+                ORDER BY created_at DESC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+            if existing_job is not None:
+                job_id = existing_job["job_id"]
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO background_prepare_jobs (
+                        job_id, session_id, job_type, status, run_after, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (job_id, session_id, 'prepare_session', 'queued', now, now, now),
+                )
+
+            conn.execute(
+                """
+                UPDATE ingest_sessions
+                SET state = 'queued', updated_at = ?, last_true_up_at = ?
+                WHERE session_id = ?
+                """,
+                (now, now, session_id),
+            )
+            conn.execute(
+                """
+                UPDATE ingest_notifications
+                SET status = 'dismissed'
+                WHERE session_id = ? AND kind = 'ingest_ready' AND status != 'dismissed'
+                """,
+                (session_id,),
+            )
+
+        return IngestTrueUpResponse(
+            session_id=session_id,
+            job_id=job_id,
+            state='queued',
+            last_true_up_at=now,
+        )
 
     def _create_session(
         self,

@@ -7,8 +7,10 @@ interface AppShellProps {
   children: React.ReactNode
   onSettingsOpen?: () => void
   onVoiceOpen?: () => void
+  onIngestOpen?: () => void
   onReviewOpen?: () => void
   onFailedOpen?: () => void
+  ingestCount?: number
   reviewCount?: number
   failedCount?: number
 }
@@ -17,8 +19,10 @@ export default function AppShell({
   children,
   onSettingsOpen,
   onVoiceOpen,
+  onIngestOpen,
   onReviewOpen,
   onFailedOpen,
+  ingestCount = 0,
   reviewCount = 0,
   failedCount = 0,
 }: AppShellProps) {
@@ -30,8 +34,10 @@ export default function AppShell({
         onMenuToggle={() => setNavOpen(o => !o)}
         onSettingsOpen={onSettingsOpen}
         onVoiceOpen={onVoiceOpen}
+        onIngestOpen={onIngestOpen}
         onReviewOpen={onReviewOpen}
         onFailedOpen={onFailedOpen}
+        ingestCount={ingestCount}
         reviewCount={reviewCount}
         failedCount={failedCount}
       />

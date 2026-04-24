@@ -26,6 +26,10 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Refactored `IngestSessionStore` list/detail hydration to bulk-load sources and proposed actions per request, removing the list-route N+1 query pattern and reusing preloaded sources in `get_session()` instead of querying them twice
 - Added query-count regressions in `monocle/tests/test_ingest_sessions.py`, tightened the ingest rate-limit integration test to the current `202 Accepted` contract while handling `NoOpLimiter` test mode explicitly, and simplified a redundant streaming branch in `frontend/src/components/Chat/ChatMessage.tsx`
 - Validation: `uv run python -m pytest monocle/tests/test_ingest_sessions.py -x --tb=short -q` → 5 passed; `uv run python -m pytest monocle/tests/test_rate_limit.py::TestMainAppRateLimits::test_ingest_returns_429_after_30_requests -m integration -x --tb=short -q` → 1 passed; `cd frontend && npm run test -- --run src/Chat.test.tsx` → 49 passed; combined backend slice via absolute paths → 20 passed, 59 deselected
+- Completed M35 end to end: added idle-gated `IngestPreparationWorker`, persisted prepare-job claiming/completion/failure flows, notification count/list/read/dismiss APIs, and true-up requeue support on top of the existing ingest-session store
+- Added the separate prepared-session app-shell surface with topbar badge, `IngestInbox` drawer, unread-count polling, detail rendering, dismiss/read flows, and true-up action wiring; refreshed `openapi.json` and `frontend/src/api/schema.d.ts`
+- Added focused M35 coverage in `monocle/tests/test_ingest_prepare.py`, extended `monocle/tests/test_api.py`, and added frontend coverage in `frontend/src/IngestInbox.test.tsx` and `frontend/src/App.test.tsx`
+- Archived M35 details to `docs/milestones.md`, marked M35 complete in `docs/build-plan.md`, and validated the full milestone: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 971 passed, 8 deselected; `cd frontend && npm run test -- --run` → 448 passed; `cd frontend && npx tsc --noEmit` → EXIT 0
 
 ## 2026-04-22
 

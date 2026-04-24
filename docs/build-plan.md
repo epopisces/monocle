@@ -27,9 +27,14 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M34 — Ingest Session Schema & Persistence (2026-04-24)
-**Note:** M34 was completed out of sequence to unblock the ingest-review architecture; M33, M35, and later ingest milestones remain queued.
+**Last Completed:** M35 — Background Session Preparation & Notifications (2026-04-24)
+**Note:** M34 and M35 were completed out of sequence to unblock the ingest-review architecture; M33 and later ingest milestones remain queued.
 **Blocked By:** None
+**Session Notes (M35 — Background Session Preparation & Notifications):**
+- **Status:** COMPLETE (2026-04-24)
+- Added idle-gated background preparation for persisted ingest sessions using the SQLite-backed job queue, with prepared digest, related-note candidates, contradiction warnings, draft proposed actions, and true-up requeue support.
+- Added ingest-ready notification APIs plus a separate app-shell badge and drawer so dormant sessions can be opened later without re-running initial preparation.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 971 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 448 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 **Session Notes (M34 — Ingest Session Schema & Persistence):**
 - **Status:** COMPLETE (2026-04-24)
 - Implemented a SQLite-backed `IngestSessionStore`, immutable out-of-vault `data/sources/` archival, session/source/proposed-action schemas, `GET /api/ingest/sessions` and `GET /api/ingest/sessions/{id}`, and switched `/api/ingest`, `/api/ingest/stream`, and the inbox watcher to capture persisted ingest sessions instead of writing pending notes directly.
@@ -160,7 +165,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M32 | MCP-First: Chat Tool Adapter & Orchestration Cleanup           | COMPLETE    |
 | M33 | MCP-First: Third-Party MCP Composition                         | NOT STARTED |
 | M34 | Ingest Session Schema & Persistence                            | COMPLETE    |
-| M35 | Background Session Preparation & Notifications                 | NOT STARTED |
+| M35 | Background Session Preparation & Notifications                 | COMPLETE    |
 | M36 | Ingest Review Workspace & Proposal Flow                        | NOT STARTED |
 | M37 | Ingest Execution, Validation & Source UX                       | NOT STARTED |
 | M38 | Fast-Capture Path                                              | NOT STARTED |
@@ -818,41 +823,11 @@ SQLite-backed ingest sessions, immutable `data/sources/` archival, session/sourc
 
 ### M35: Background Session Preparation & Notifications
 
-**Status:** NOT STARTED — depends on M34
+**Status:** COMPLETE (2026-04-24)
 
-Turn persisted ingest sessions into dormant, review-ready work items by polling the inbox, preparing sessions during idle time, and surfacing notifications to the user.
-
-**Deliverables:**
-
-- [ ] Add inbox polling that creates background ingest sessions plus notification items for later review, rather than writing notes immediately
-- [ ] Add dormant-session background processing/queueing so inbox-originated sessions can be pre-digested during application idle time and be ready for user review when opened
-- [ ] Ensure background preparation yields digest, linked-note candidates, contradiction warnings, and draft proposed actions without requiring the user to keep a session open
-- [ ] Add notification/list surfaces so users can launch dormant ingest sessions from the app shell
-
-**Acceptance Criteria:**
-
-- Inbox-derived sessions are prepared in the background and can be opened later without rerunning the initial digest from scratch
-- Background preparation occurs only during app idle windows and does not compete with actively used user sessions
-- Users see a notification/count/list of dormant ingest sessions ready for review
-- Prepared sessions remain dormant on disk until opened and can later be refreshed with a true-up action
-
-**Design Notes:**
-
-- Background-prep approach options and tradeoffs:
-  1. In-process APScheduler/async queue driven by app activity state
-    Best for: simplest Phase 1 implementation, lowest operational complexity.
-    Upside: no extra worker/service to manage; easy access to app state and provider instances.
-    Downside: weaker isolation; background prep pauses when the app is down; idle detection must be approximated.
-  2. Persistent SQLite-backed job queue executed by the main process
-    Best for: resumability and deterministic retries without adding a second service.
-    Upside: jobs survive restart; easy to inspect/debug; supports bounded concurrency and fairness.
-    Downside: still tied to the main process for execution throughput.
-  3. Separate worker process consuming persisted jobs
-    Best for: stronger isolation and future scale.
-    Upside: background prep can continue independently; cleaner CPU/latency isolation from interactive sessions.
-    Downside: more operational complexity now; requires cross-process coordination and health management.
-- Recommended Phase 1.5 choice: option 2. Persist jobs in SQLite, execute them in the main process with bounded concurrency, and gate dispatch on a simple `active_interactive_sessions == 0` or low-load heuristic. This gives restart safety and controllable resource use without forcing multi-process orchestration yet.
-- Idle gating recommendation: treat the system as `busy` when an ingest-review session is open, a chat stream is active, or a foreground document save is in progress; otherwise allow up to `ingest.max_idle_prepare_jobs` background prepares.
+Idle-gated background preparation now turns queued ingest sessions into dormant-ready review items with persisted digest, related-note candidates, contradiction warnings, draft proposed actions, and true-up requeue support.
+Separate ingest-ready notifications now surface through the app-shell badge and drawer plus the supporting notification APIs consumed by the frontend.
+**Full details:** [docs/milestones.md#m35-background-session-preparation--notifications](milestones.md#m35-background-session-preparation--notifications)
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 
