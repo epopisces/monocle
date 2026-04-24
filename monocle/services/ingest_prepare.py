@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from monocle.ai.base import _parse_json_response
+from monocle.models import IngestSessionDetailResponse
 from monocle.models import ProposedAction
 from monocle.prompts import load_prompt
 from monocle.services.search import search_vault
@@ -94,6 +95,32 @@ class IngestPreparationWorker:
 
         await asyncio.gather(*(self._prepare_job(job) for job in jobs))
         return len(jobs)
+
+    async def prepare_session_now(self, session_id: str) -> IngestSessionDetailResponse | None:
+        from monocle.services.ingest_review import load_review_session
+
+        job = await asyncio.to_thread(self._store.claim_prepare_job_for_session, session_id)
+        if job is None:
+            detail = await load_review_session(self._store, self._vault, session_id)
+            if detail is None or detail.session.state != "preparing":
+                return detail
+            return await self._wait_for_preparing_session(session_id)
+
+        await self._prepare_job(job)
+        return await load_review_session(self._store, self._vault, session_id)
+
+    async def _wait_for_preparing_session(self, session_id: str) -> IngestSessionDetailResponse | None:
+        from monocle.services.ingest_review import load_review_session
+
+        timeout_s = max(0.25, float(self._settings.ingest.prepare_poll_interval_s))
+        deadline = asyncio.get_running_loop().time() + timeout_s
+        while True:
+            detail = await load_review_session(self._store, self._vault, session_id)
+            if detail is None or detail.session.state != "preparing":
+                return detail
+            if asyncio.get_running_loop().time() >= deadline:
+                return detail
+            await asyncio.sleep(0.05)
 
     async def _run_loop(self) -> None:
         interval = self._settings.ingest.prepare_poll_interval_s

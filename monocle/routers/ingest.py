@@ -34,7 +34,7 @@ from monocle.services.ingest_review import (
     start_review_session,
     update_review_action,
 )
-from monocle.services.ingest_execute import execute_review_session
+from monocle.services.ingest_execute import execute_fast_capture_session, execute_review_session
 
 router = APIRouter(tags=["ingest"])
 logger = logging.getLogger(__name__)
@@ -70,6 +70,18 @@ def _api_ingest_request(request: IngestRequest) -> IngestRequest:
     return request.model_copy(update={"origin": "api"})
 
 
+def _session_to_ingest_response(session: IngestSession, *, notification=None) -> IngestResponse:
+    return IngestResponse(
+        session_id=session.session_id,
+        origin=session.origin,
+        state=session.state,
+        source_ids=session.source_ids,
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        notification=notification,
+    )
+
+
 @router.post("/ingest", response_model=IngestResponse, status_code=202)
 @limiter.limit("30/minute")
 async def ingest(req: IngestRequest, request: Request) -> IngestResponse:
@@ -78,9 +90,25 @@ async def ingest(req: IngestRequest, request: Request) -> IngestResponse:
     _check_audio_size(api_req)
 
     store = request.app.state.ingest_session_store
+    prepare_worker = getattr(request.app.state, "ingest_prepare_worker", None)
+    vault = request.app.state.vault
+    reindex_queue = getattr(request.app.state, "reindex_queue", None)
 
     try:
-        return await asyncio.to_thread(store.create_api_session, api_req)
+        response = await asyncio.to_thread(store.create_api_session, api_req)
+        if not api_req.fast_capture or prepare_worker is None:
+            return response
+
+        detail = await execute_fast_capture_session(
+            store,
+            prepare_worker,
+            vault,
+            reindex_queue,
+            response.session_id,
+        )
+        if detail is None:
+            return response
+        return _session_to_ingest_response(detail.session, notification=response.notification)
     except Exception as exc:
         logger.error("[INGEST] Session capture error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Ingest session capture failed. See server logs for details.")

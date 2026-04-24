@@ -907,6 +907,190 @@
         }
       }
     },
+    "/api/ingest/sources": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "List Archived Sources",
+        "operationId": "list_archived_sources_api_ingest_sources_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SourceRecord"
+                  },
+                  "title": "Response List Archived Sources Api Ingest Sources Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/sources/{source_id}": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Get Archived Source",
+        "operationId": "get_archived_source_api_ingest_sources__source_id__get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceRecord"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/sources/{source_id}/content": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Get Archived Source Content",
+        "operationId": "get_archived_source_content_api_ingest_sources__source_id__content_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArchivedSourceContentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/sources/{source_id}/download": {
+      "get": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Download Archived Source",
+        "operationId": "download_archived_source_api_ingest_sources__source_id__download_get",
+        "parameters": [
+          {
+            "name": "source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/ingest/sessions/{session_id}/start-review": {
       "post": {
         "tags": [
@@ -1180,6 +1364,48 @@
         ],
         "summary": "Approve All Actions",
         "operationId": "approve_all_actions_api_ingest_sessions__session_id__approve_all_post",
+        "parameters": [
+          {
+            "name": "session_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Session Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IngestSessionDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/ingest/sessions/{session_id}/execute": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Execute Actions",
+        "operationId": "execute_actions_api_ingest_sessions__session_id__execute_post",
         "parameters": [
           {
             "name": "session_id",
@@ -2368,6 +2594,28 @@
         "type": "object",
         "title": "ApproveRequest"
       },
+      "ArchivedSourceContentResponse": {
+        "properties": {
+          "source": {
+            "$ref": "#/components/schemas/SourceRecord"
+          },
+          "text": {
+            "type": "string",
+            "title": "Text"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "text"
+        ],
+        "title": "ArchivedSourceContentResponse"
+      },
       "BacklinkRef": {
         "properties": {
           "source": {
@@ -2841,6 +3089,71 @@
         "type": "object",
         "title": "IndexStats"
       },
+      "IngestExecutionSummary": {
+        "properties": {
+          "total_actions": {
+            "type": "integer",
+            "title": "Total Actions",
+            "default": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "title": "Succeeded",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped",
+            "default": 0
+          },
+          "affected_file_paths": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Affected File Paths"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "title": "IngestExecutionSummary"
+      },
+      "IngestExecutionValidation": {
+        "properties": {
+          "title_match": {
+            "type": "boolean",
+            "title": "Title Match",
+            "default": false
+          },
+          "body_match": {
+            "type": "boolean",
+            "title": "Body Match",
+            "default": false
+          },
+          "sources_attached": {
+            "type": "boolean",
+            "title": "Sources Attached",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "IngestExecutionValidation"
+      },
       "IngestNotification": {
         "properties": {
           "id": {
@@ -3183,6 +3496,11 @@
             ],
             "title": "State"
           },
+          "fast_capture": {
+            "type": "boolean",
+            "title": "Fast Capture",
+            "default": false
+          },
           "source_ids": {
             "items": {
               "type": "string"
@@ -3272,6 +3590,16 @@
               }
             ],
             "title": "Last True Up At"
+          },
+          "execution_summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngestExecutionSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -3679,6 +4007,13 @@
             "type": "array",
             "title": "Links"
           },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/SourceLink"
+            },
+            "type": "array",
+            "title": "Sources"
+          },
           "org": {
             "anyOf": [
               {
@@ -3846,7 +4181,8 @@
               "action_items": [],
               "confidence": 1.0,
               "review_status": "approved",
-              "links": []
+              "links": [],
+              "sources": []
             }
           },
           "if_mtime": {
@@ -4003,6 +4339,21 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Proposed Content"
+          },
+          "execution_result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProposedActionExecutionResult"
+              },
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Result"
           }
         },
         "type": "object",
@@ -4014,27 +4365,69 @@
         ],
         "title": "ProposedAction"
       },
-      "ProposedActionPatchRequest": {
+      "ProposedActionExecutionResult": {
         "properties": {
-          "approval_state": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "succeeded",
+              "failed",
+              "skipped"
+            ],
+            "title": "Status"
+          },
+          "message": {
             "anyOf": [
               {
-                "type": "string",
-                "enum": [
-                  "draft",
-                  "edited",
-                  "approved",
-                  "rejected",
-                  "executed",
-                  "failed"
-                ]
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Approval State"
+            "title": "Message"
           },
+          "file_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Path"
+          },
+          "executed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Executed At"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IngestExecutionValidation"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ProposedActionExecutionResult"
+      },
+      "ProposedActionPatchRequest": {
+        "properties": {
           "target_file_path": {
             "anyOf": [
               {
@@ -4049,7 +4442,20 @@
           "target_note_type": {
             "anyOf": [
               {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "person_note",
+                  "decision",
+                  "idea",
+                  "observation",
+                  "reference",
+                  "meeting_note",
+                  "project",
+                  "action_item",
+                  "weekly_summary",
+                  "organization",
+                  "other"
+                ]
               },
               {
                 "type": "null"
@@ -4081,6 +4487,7 @@
             "title": "Proposed Content"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "ProposedActionPatchRequest"
       },
@@ -4234,6 +4641,87 @@
         },
         "type": "object",
         "title": "SettingsPatch"
+      },
+      "SourceLink": {
+        "properties": {
+          "source_id": {
+            "type": "string",
+            "title": "Source Id"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Id"
+          },
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "archive_path": {
+            "type": "string",
+            "title": "Archive Path"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "text",
+              "audio",
+              "file",
+              "url",
+              "chat_text",
+              "chat_upload"
+            ],
+            "title": "Kind"
+          },
+          "mime_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mime Type"
+          },
+          "captured_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captured At"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_id",
+          "source_name",
+          "archive_path",
+          "kind"
+        ],
+        "title": "SourceLink",
+        "description": "A provenance link from a note back to an archived raw source."
       },
       "SourceRecord": {
         "properties": {

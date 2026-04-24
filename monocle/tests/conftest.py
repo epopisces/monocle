@@ -236,6 +236,8 @@ def api_client(tmp_path: Path, mock_ai):
         from monocle.ingest.plugin import IngestPluginRegistry
         from monocle.ingest.plugins import register_default_plugins
         from monocle.mcp_server import init_mcp_state
+        from monocle.services.activity import ActivityMonitor
+        from monocle.services.ingest_prepare import IngestPreparationWorker
         from monocle.services.ingest_sessions import IngestSessionStore
 
         _reg = IngestPluginRegistry.get()
@@ -273,8 +275,19 @@ def api_client(tmp_path: Path, mock_ai):
         app.state.ingest_session_store = ingest_session_store
         app.state.failed_registry = failed_reg
         app.state.watcher = None
+        app.state.activity_monitor = ActivityMonitor()
         app.state._review_pending_count = None  # lazy count cache; see review.py
         app.state.route_filter_processor = None  # no OTel in tests
+
+        app.state.ingest_prepare_worker = IngestPreparationWorker(
+            store=ingest_session_store,
+            pipeline=pipeline,
+            vault=vault,
+            index=index,
+            ai=mock_ai,
+            settings=settings,
+            activity=app.state.activity_monitor,
+        )
 
         from monocle.graph import GraphBuilder
         app.state.graph_builder = GraphBuilder(vault)

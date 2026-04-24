@@ -584,6 +584,156 @@ class TestIngest:
         assert count_after.status_code == 200
         assert count_after.json()["count"] == 0
 
+    def test_fast_capture_executes_clean_session_without_review_handoff(self, api_client: TestClient):
+        created = api_client.post(
+            "/api/ingest",
+            json={
+                "content": "Capture this directly into the vault as a clean fast-capture note.",
+                "source": "voice",
+                "fast_capture": True,
+            },
+        )
+        assert created.status_code == 202
+        body = created.json()
+        assert body["state"] == "completed"
+
+        detail = api_client.get(f"/api/ingest/sessions/{body['session_id']}")
+        assert detail.status_code == 200
+        session = detail.json()["session"]
+        assert session["fast_capture"] is True
+        assert session["state"] == "completed"
+        assert session["execution_summary"]["succeeded"] == 1
+        assert session["execution_summary"]["failed"] == 0
+        assert session["proposed_actions"][0]["approval_state"] == "executed"
+        written_path = session["proposed_actions"][0]["execution_result"]["file_path"]
+
+        note = api_client.get(f"/api/notes/{written_path}")
+        assert note.status_code == 200
+        note_body = note.json()
+        assert note_body["metadata"]["sources"][0]["session_id"] == body["session_id"]
+
+        unread_ready = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
+        assert unread_ready.status_code == 200
+        assert unread_ready.json()["count"] == 0
+
+    def test_fast_capture_falls_back_to_review_when_open_questions_exist(self, api_client: TestClient):
+        async def _chat_with_fast_capture_blockers(messages, **kwargs):
+            content = messages[-1].get("content", "") if messages else ""
+            if '"routing_decision"' in content and '"source_excerpt"' in content:
+                return json.dumps(
+                    {
+                        "title": "Needs clarification",
+                        "digest": "Fast capture surfaced an unanswered question.",
+                        "open_questions": [{"question": "Who owns this follow-up?", "reason": "Missing owner."}],
+                        "contradictions": [],
+                        "proposed_actions": [
+                            {
+                                "action_type": "create_note",
+                                "target_note_type": "observation",
+                                "rationale": "Prepared for manual review.",
+                                "proposed_content": {"title": "Needs clarification", "body": "Question remains open."},
+                            }
+                        ],
+                    }
+                )
+            return '{"type": "other", "domain": "personal", "tags": []}'
+
+        api_client.app.state.ai.chat = AsyncMock(side_effect=_chat_with_fast_capture_blockers)
+
+        created = api_client.post(
+            "/api/ingest",
+            json={
+                "content": "Fast capture should stop and ask a question here.",
+                "source": "voice",
+                "fast_capture": True,
+            },
+        )
+        assert created.status_code == 202
+        body = created.json()
+        assert body["state"] == "awaiting_user"
+
+        detail = api_client.get(f"/api/ingest/sessions/{body['session_id']}")
+        assert detail.status_code == 200
+        session = detail.json()["session"]
+        assert session["fast_capture"] is True
+        assert session["state"] == "awaiting_user"
+        assert session["open_questions"][0]["question"] == "Who owns this follow-up?"
+
+    def test_fast_capture_preserves_failed_prepare_state(self, api_client: TestClient):
+        api_client.app.state.ingest_prepare_worker._build_prepared_session = AsyncMock(
+            side_effect=RuntimeError("prep exploded")
+        )
+
+        created = api_client.post(
+            "/api/ingest",
+            json={
+                "content": "This fast capture should stay failed when preparation explodes.",
+                "source": "voice",
+                "fast_capture": True,
+            },
+        )
+        assert created.status_code == 202
+        body = created.json()
+        assert body["state"] == "failed"
+
+        detail = api_client.get(f"/api/ingest/sessions/{body['session_id']}")
+        assert detail.status_code == 200
+        session = detail.json()["session"]
+        assert session["fast_capture"] is True
+        assert session["state"] == "failed"
+        assert session["proposed_actions"] == []
+
+        failed_notifications = api_client.get(
+            "/api/ingest/notifications/count?status=unread&kind=ingest_prepare_failed"
+        )
+        assert failed_notifications.status_code == 200
+        assert failed_notifications.json()["count"] == 1
+
+        unread_ready = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
+        assert unread_ready.status_code == 200
+        assert unread_ready.json()["count"] == 0
+
+    def test_fast_capture_returns_to_proposal_ready_when_execution_fails(
+        self,
+        api_client: TestClient,
+        monkeypatch: pytest.MonkeyPatch,
+    ):
+        from monocle import mcp_server
+
+        original_create_note = mcp_server.create_note
+        vault = api_client.app.state.vault
+
+        async def corrupting_create_note(*args, **kwargs):
+            result = await original_create_note(*args, **kwargs)
+            created = json.loads(result)
+            note = vault.read_note(created["file_path"])
+            note.body = "Corrupted after write."
+            vault.write_note(created["file_path"], note)
+            return result
+
+        monkeypatch.setattr(mcp_server, "create_note", corrupting_create_note)
+
+        created = api_client.post(
+            "/api/ingest",
+            json={
+                "content": "This fast capture should recover into proposal review after execution failure.",
+                "source": "voice",
+                "fast_capture": True,
+            },
+        )
+        assert created.status_code == 202
+        body = created.json()
+        assert body["state"] == "proposal_ready"
+
+        detail = api_client.get(f"/api/ingest/sessions/{body['session_id']}")
+        assert detail.status_code == 200
+        session = detail.json()["session"]
+        assert session["state"] == "proposal_ready"
+        assert session["execution_summary"]["succeeded"] == 0
+        assert session["execution_summary"]["failed"] == 1
+        assert session["proposed_actions"][0]["approval_state"] == "failed"
+        assert "validation failed" in session["proposed_actions"][0]["execution_result"]["message"].lower()
+
     def test_ingest_session_true_up_requeues_prepared_session(self, api_client: TestClient):
         created = api_client.post(
             "/api/ingest",

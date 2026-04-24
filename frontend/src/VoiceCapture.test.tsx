@@ -115,6 +115,19 @@ const FAILED_ITEM = {
   retried: false,
 }
 
+function makeIngestResponse(overrides: Record<string, unknown> = {}) {
+  return {
+    session_id: 'ing_test_1',
+    origin: 'api',
+    state: 'completed',
+    source_ids: ['src_test_1'],
+    created_at: '2026-04-24T00:00:00Z',
+    updated_at: '2026-04-24T00:00:00Z',
+    notification: null,
+    ...overrides,
+  }
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function renderInRouter(ui: React.ReactElement) {
@@ -172,10 +185,7 @@ describe('VoiceModal — review state (direct dispatch)', () => {
   beforeEach(() => {
     onClose = vi.fn()
     onSaved = vi.fn()
-    mockIngest.mockResolvedValue({
-      note: NOTE_LOW_CONFIDENCE as never,
-      confidence: { score: 0.42, template_match: 0.4, metadata_coverage: 0.4, tag_plausibility: 0.4, entity_match: 0.4, similar_note_detected: false, similar_note_path: null },
-    })
+    mockIngest.mockResolvedValue(makeIngestResponse() as never)
   })
 
   afterEach(() => vi.clearAllMocks())
@@ -214,6 +224,7 @@ describe('VoiceModal — template options', () => {
 describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
   const mockTranscribeAudio = vi.mocked(transcribeAudio)
   const mockIngestFn = vi.mocked(ingest)
+  const mockNavigate = vi.fn()
 
   // Mock MediaRecorder instance shared across tests
   let mockRecorderInstance: {
@@ -228,6 +239,8 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
   const mockStream = { getTracks: () => [{ stop: vi.fn() }] }
 
   beforeEach(() => {
+    vi.mocked(useNavigate).mockReturnValue(mockNavigate)
+
     // Remove SpeechRecognition so the component always uses the MediaRecorder path
     vi.stubGlobal('SpeechRecognition', undefined)
     vi.stubGlobal('webkitSpeechRecognition', undefined)
@@ -258,10 +271,7 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
 
     // Default mocks
     mockTranscribeAudio.mockResolvedValue({ transcript: 'hello from whisper', mime_type: 'audio/wav' })
-    mockIngestFn.mockResolvedValue({
-      note: NOTE_LOW_CONFIDENCE as never,
-      confidence: { score: 0.7, template_match: 0.7, metadata_coverage: 0.7, tag_plausibility: 0.7, entity_match: 0.7, similar_note_detected: false, similar_note_path: null },
-    })
+    mockIngestFn.mockResolvedValue(makeIngestResponse() as never)
   })
 
   afterEach(() => {
@@ -291,6 +301,13 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
     expect(options).toHaveLength(8)
   })
 
+  it('shows a separate fast-capture action in review state', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} />)
+    await startAndStop()
+    await waitFor(() => expect(screen.getByTestId('fast-capture-btn')).toBeInTheDocument())
+    expect(screen.getByTestId('fast-capture-hint')).toBeInTheDocument()
+  })
+
   it('save button calls ingest with source=voice and the transcript', async () => {
     const onClose = vi.fn()
     const onSaved = vi.fn()
@@ -305,6 +322,41 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
     })
     await waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
     await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+  })
+
+  it('fast capture calls ingest with fast_capture=true', async () => {
+    render(<VoiceModal open={true} onClose={vi.fn()} />)
+    await startAndStop()
+    await waitFor(() => expect(screen.getByTestId('fast-capture-btn')).toBeInTheDocument())
+
+    await act(async () => { fireEvent.click(screen.getByTestId('fast-capture-btn')) })
+
+    await waitFor(() => {
+      expect(mockIngestFn).toHaveBeenCalledWith(
+        expect.objectContaining({ content: 'hello from whisper', source: 'voice', fast_capture: true })
+      )
+    })
+  })
+
+  it('fast capture navigates to ingest review when backend falls back to review', async () => {
+    const onClose = vi.fn()
+    const onSaved = vi.fn()
+    mockIngestFn.mockResolvedValueOnce({
+      ...makeIngestResponse(),
+      session_id: 'ing_fast_1',
+      state: 'awaiting_user',
+      source_ids: ['src_fast_1'],
+    } as never)
+
+    render(<VoiceModal open={true} onClose={onClose} onSaved={onSaved} />)
+    await startAndStop()
+    await waitFor(() => expect(screen.getByTestId('fast-capture-btn')).toBeInTheDocument())
+
+    await act(async () => { fireEvent.click(screen.getByTestId('fast-capture-btn')) })
+
+    await waitFor(() => expect(onSaved).toHaveBeenCalledOnce())
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
+    await waitFor(() => expect(mockNavigate).toHaveBeenCalledWith('/ingest-review?session=ing_fast_1'))
   })
 
   it('discard button calls onClose without saving', async () => {
@@ -718,10 +770,7 @@ describe('FailedCaptures — loaded state', () => {
   })
 
   it('retry button calls retryIngestFailure and removes item', async () => {
-    vi.mocked(retryIngestFailure).mockResolvedValue({
-      note: NOTE_LOW_CONFIDENCE as never,
-      confidence: { score: 0.7, template_match: 0.7, metadata_coverage: 0.7, tag_plausibility: 0.7, entity_match: 0.7, similar_note_detected: false, similar_note_path: null },
-    })
+    vi.mocked(retryIngestFailure).mockResolvedValue(makeIngestResponse() as never)
     const onUpdate = vi.fn()
     render(<FailedCaptures open={true} onClose={vi.fn()} onUpdate={onUpdate} />)
     const retryBtn = await screen.findByTestId('retry-btn')

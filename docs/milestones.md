@@ -1272,3 +1272,50 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 
 **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 992 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 450+ passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 
+---
+
+### M38: Fast-Capture Path
+
+**Goal:** Provide a low-friction path for users who are highly confident in the source state and want to bypass the full ingest-review workflow while preserving provenance and compatibility with the ingest-session model.
+
+**Completed:** 2026-04-24
+
+**Deliverables completed:**
+
+- [x] Added fast-capture orchestration on top of the existing ingest-session lifecycle: `POST /api/ingest` now honors `fast_capture=true`, persists the session/source archive exactly once, synchronously prepares the captured source through the existing preparation worker, and then either falls back to review or advances into the existing approve-and-execute path.
+- [x] Added lighter confirmation semantics for high-confidence captures: the voice modal now exposes a distinct `Fast Capture` action alongside the standard review path, and clean sessions auto-approve their prepared actions and execute immediately through the canonical MCP-backed `create_note` / `update_note` flow.
+- [x] Preserved provenance, source archival, reindex, and post-write validation for fast-capture by reusing the existing `metadata.sources` linkage, archived `data/sources/` payloads, deterministic execution validation, and reindex queue instead of introducing a second write implementation.
+
+**Acceptance Criteria met:**
+
+- Fast-capture is clearly separate from the full ingest-review workflow: the capture UI presents a dedicated `Fast Capture` action and fast-capture fallbacks are labeled in the ingest review workspace.
+- The ingest architecture does not require duplicate storage or write paths to support fast-capture: the feature reuses persisted ingest sessions, the background preparation worker, the review-state model, and the existing MCP execution service.
+- Users can still trace resulting notes back to their raw source and revert later if needed: successful fast-capture writes still attach `metadata.sources` backrefs to archived source payloads, and the notes remain compatible with the existing document history/versioning mechanisms.
+
+**Implementation notes:**
+
+- `IngestSession.fast_capture` is now surfaced through the session API so the frontend can distinguish standard review sessions from fast-capture fallbacks without inventing a parallel DTO.
+- Fast-capture follows the safer fallback rule chosen during implementation: if preparation returns open questions, contradiction warnings, or no actionable proposal, the session is moved back into the normal review-state machine instead of forcing execution.
+- Clean fast-capture sessions dismiss the intermediate `ingest_ready` notification after successful execution so the user does not see a stale review badge for work that already completed.
+- If fast-capture execution fails validation, the session is returned to `proposal_ready` for manual recovery instead of being stranded in a terminal failed state.
+
+**Files modified:**
+
+- `monocle/models.py`
+- `monocle/routers/ingest.py`
+- `monocle/services/ingest_execute.py`
+- `monocle/services/ingest_prepare.py`
+- `monocle/services/ingest_review.py`
+- `monocle/services/ingest_sessions.py`
+- `monocle/tests/conftest.py`
+- `monocle/tests/test_api.py`
+- `openapi.json`
+- `frontend/src/App.tsx`
+- `frontend/src/api/ingest.ts`
+- `frontend/src/api/schema.d.ts`
+- `frontend/src/components/IngestReview/IngestReviewScreen.tsx`
+- `frontend/src/components/VoiceModal/VoiceModal.tsx`
+- `frontend/src/VoiceCapture.test.tsx`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 994 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 457 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+

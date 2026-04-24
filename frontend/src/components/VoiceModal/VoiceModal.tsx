@@ -20,6 +20,7 @@
  *    live transcript.
  */
 import React, { useCallback, useEffect, useReducer, useRef } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { ingest } from '../../api/ingest'
 import { transcribeAudio } from '../../api/transcribe'
 import './VoiceModal.css'
@@ -135,6 +136,7 @@ interface Props {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whisper' }: Props) {
+  const navigate = useNavigate()
   const [state, dispatch] = useReducer(reducer, INITIAL)
   const overlayRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -310,7 +312,7 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
     }
   }, [])
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(async (fastCapture: boolean) => {
     const trimmed = state.transcript.trim()
     if (!trimmed) return
     if (trimmed.length > 50_000) {
@@ -319,21 +321,24 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
     }
     dispatch({ type: 'SAVING' })
     try {
-      await ingest({
+      const response = await ingest({
         content: trimmed,
         content_type: 'text/plain',
         source: 'voice',
         origin: 'api',
         template_hint: state.template,
         allow_duplicate: false,
-        fast_capture: false,
+        fast_capture: fastCapture,
       })
       onSaved?.()
       onClose()
+      if (fastCapture && response.state !== 'completed') {
+        navigate(`/ingest-review?session=${encodeURIComponent(response.session_id)}`)
+      }
     } catch {
       dispatch({ type: 'SAVE_ERROR', message: 'Failed to save note. Please try again.' })
     }
-  }, [state.transcript, state.template, onSaved, onClose])
+  }, [state.transcript, state.template, onSaved, onClose, navigate])
 
   const handleOverlayClick = useCallback((e: React.MouseEvent) => {
     if (e.target === overlayRef.current) handleDiscard()
@@ -472,6 +477,10 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
                 </p>
               )}
 
+              <p className="voice-modal__hint" data-testid="fast-capture-hint">
+                Fast capture skips the full review workspace only when preparation finds no open questions or contradiction warnings.
+              </p>
+
               <div className="voice-modal__actions">
                 <button
                   className="voice-modal__btn voice-modal__btn--secondary"
@@ -483,11 +492,19 @@ export default function VoiceModal({ open, onClose, onSaved, voiceBackend = 'whi
                 </button>
                 <button
                   className="voice-modal__btn voice-modal__btn--primary"
-                  onClick={handleSave}
+                  onClick={() => void handleSave(false)}
                   disabled={recordingState === 'saving' || !transcript.trim()}
                   data-testid="save-btn"
                 >
-                  {recordingState === 'saving' ? 'Saving…' : 'Save Note'}
+                  {recordingState === 'saving' ? 'Saving…' : 'Save For Review'}
+                </button>
+                <button
+                  className="voice-modal__btn voice-modal__btn--primary"
+                  onClick={() => void handleSave(true)}
+                  disabled={recordingState === 'saving' || !transcript.trim()}
+                  data-testid="fast-capture-btn"
+                >
+                  {recordingState === 'saving' ? 'Saving…' : 'Fast Capture'}
                 </button>
               </div>
             </div>

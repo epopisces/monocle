@@ -27,9 +27,18 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M37 — Ingest Execution, Validation & Source UX (2026-04-24)
-**Note:** M34-M36 were completed out of sequence to unblock the ingest-review architecture; M33 and later ingest milestones remain queued.
+**Last Completed:** M38 — Fast-Capture Path (2026-04-24)
+**Note:** M34-M38 were completed out of sequence to unblock and streamline the ingest workflow; M33 remains queued.
 **Blocked By:** None
+**Session Notes (M38 — Fast-Capture Path):**
+- **Status:** COMPLETE (2026-04-24)
+- Added fast-capture orchestration on top of persisted ingest sessions so `fast_capture=true` runs synchronous prepare → fallback-or-approve → execute using the existing ingest-session, MCP execution, provenance, validation, and reindex paths.
+- Added an explicit `Fast Capture` action in the voice modal plus fast-capture labeling in the ingest review workspace; clean captures complete immediately, while sessions with open questions or contradiction warnings fall back into the normal review flow.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 994 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 457 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+**Session Notes (M38 post-review hardening):**
+- Preserved `failed` fast-capture sessions instead of remapping them into review states, and made synchronous fast capture wait briefly when a background prepare job already owns the same session so the request does not race into a stale fallback.
+- Added regression coverage for prepare failure, execution-failure recovery back to `proposal_ready`, and the running-prepare wait path; aligned `VoiceCapture.test.tsx` ingest mocks to the current session-based `POST /api/ingest` contract.
+- **Test Results:** `uv run python -m pytest e:\development\_agents\monocle\monocle\tests\test_api.py -k "fast_capture" -x --tb=short -q` → 4 passed, 77 deselected, EXIT 0; `uv run python -m pytest e:\development\_agents\monocle\monocle\tests\test_ingest_prepare.py -k "prepare_session_now_waits_for_running_job_completion" -x --tb=short -q` → 1 passed, 6 deselected, EXIT 0; `cd frontend && npm run test -- --run src/VoiceCapture.test.tsx` → 83 passed, EXIT 0.
 **Session Notes (M36 — Ingest Review Workspace & Proposal Flow):**
 - **Status:** COMPLETE (2026-04-24)
 - Added the dedicated `/ingest-review` workflow with prepared-session loading, explicit review state transitions, question answering, contradiction cards with document links, editable proposed deltas, per-action approve/reject controls, visible diff previews, and approve-all semantics that stop at `approved_pending_execution` for M37.
@@ -173,7 +182,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M35 | Background Session Preparation & Notifications                 | COMPLETE    |
 | M36 | Ingest Review Workspace & Proposal Flow                        | COMPLETE    |
 | M37 | Ingest Execution, Validation & Source UX                       | COMPLETE    |
-| M38 | Fast-Capture Path                                              | NOT STARTED |
+| M38 | Fast-Capture Path                                              | COMPLETE    |
 | M39 | File History, Revert & Diff Viewer                             | NOT STARTED |
 | M40 | Add Documents & Snippets To Chat Context                       | NOT STARTED |
 
@@ -864,21 +873,11 @@ Approved ingest proposals now execute through the canonical MCP tool plane with 
 
 ### M38: Fast-Capture Path
 
-**Status:** NOT STARTED — depends on M34 architecture
+**Status:** COMPLETE (2026-04-24)
 
-Provide a low-friction path for users who are highly confident in the source state and want to bypass the full ingest-review workflow while preserving provenance and compatibility with the ingest-session model.
-
-**Deliverables:**
-
-- [ ] Add a fast-capture mode that reuses the ingest-session/source architecture but short-circuits the full review workflow when the user opts in
-- [ ] Support direct create/update execution with lighter confirmation semantics for high-confidence captures
-- [ ] Preserve provenance, source archival, reindex, and post-write validation behavior even when using fast-capture
-
-**Acceptance Criteria:**
-
-- Fast-capture is clearly separate from the full ingest-review workflow
-- The ingest architecture does not require duplicate storage or write paths to support fast-capture
-- Users can still trace resulting notes back to their raw source and revert later if needed
+Fast-capture now provides an explicit opt-in path that auto-executes clean ingest sessions through the existing prepare/approve/execute lifecycle while falling back to the ingest review workspace whenever preparation surfaces blockers.
+The implementation stays on the persisted ingest-session/source architecture, preserving provenance, source archival, validation, and reindex behavior without introducing a second write path.
+**Full details:** [docs/milestones.md#m38-fast-capture-path](milestones.md#m38-fast-capture-path)
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 

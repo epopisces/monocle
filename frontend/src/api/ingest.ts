@@ -117,6 +117,7 @@ export interface IngestSession {
   session_id: string
   origin: 'api' | 'chat' | 'inbox'
   state: string
+  fast_capture?: boolean
   source_ids: string[]
   title: string | null
   digest: string | null

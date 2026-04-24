@@ -40,6 +40,10 @@ function buildActionDraft(action: ProposedAction): ActionDraft {
   }
 }
 
+function fastCaptureLabel(session: IngestSession) {
+  return session.fast_capture ? 'Fast capture' : null
+}
+
 export default function IngestReviewScreen() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [sessions, setSessions] = useState<IngestSession[]>([])
@@ -241,6 +245,7 @@ export default function IngestReviewScreen() {
                 >
                   <span className="ingest-review__session-title">{summarizeSession(session)}</span>
                   <span className="ingest-review__session-state">{formatStateLabel(session.state)}</span>
+                  {fastCaptureLabel(session) && <span className="ingest-review__session-state">{fastCaptureLabel(session)}</span>}
                   <span className="ingest-review__session-digest">{session.digest ?? 'Prepared session ready for review.'}</span>
                 </button>
               </li>
@@ -260,6 +265,9 @@ export default function IngestReviewScreen() {
                 <p className="ingest-review__eyebrow">{formatStateLabel(detail.session.state)}</p>
                 <h2>{detail.session.title ?? summarizeSession(detail.session)}</h2>
                 <p className="ingest-review__digest">{detail.session.digest ?? 'Prepared session ready for review.'}</p>
+                {detail.session.fast_capture && (
+                  <p className="ingest-review__muted">Fast-capture session. Automatic execution was skipped because preparation surfaced review blockers or needs confirmation.</p>
+                )}
               </div>
               <div className="ingest-review__hero-actions">
                 <button

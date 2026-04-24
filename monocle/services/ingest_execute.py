@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from monocle.models import IngestExecutionSummary, IngestExecutionValidation, IngestSessionDetailResponse, ProposedAction
 
 if TYPE_CHECKING:
+    from monocle.services.ingest_prepare import IngestPreparationWorker
     from monocle.services.ingest_sessions import IngestSessionStore
     from monocle.vault import VaultLayer
     from monocle.watcher import ReindexQueue
@@ -241,3 +242,45 @@ async def execute_review_session(
         state="failed" if failed else "completed",
     )
     return await load_review_session(store, vault, session_id)
+
+
+async def execute_fast_capture_session(
+    store: "IngestSessionStore",
+    prepare_worker: "IngestPreparationWorker",
+    vault: "VaultLayer",
+    reindex_queue: "ReindexQueue | None",
+    session_id: str,
+) -> IngestSessionDetailResponse | None:
+    from monocle.services.ingest_review import approve_all_review_actions, load_review_session, sync_review_state
+
+    detail = await prepare_worker.prepare_session_now(session_id)
+    if detail is None:
+        return None
+
+    if detail.session.state in {"failed", "completed", "executing"}:
+        return detail
+
+    if detail.session.state == "preparing":
+        return detail
+
+    if detail.session.open_questions or detail.session.contradictions or not detail.session.proposed_actions:
+        await sync_review_state(store, session_id)
+        return await load_review_session(store, vault, session_id)
+
+    detail = await approve_all_review_actions(store, vault, session_id)
+    if detail is None:
+        return None
+
+    detail = await execute_review_session(store, vault, reindex_queue, session_id)
+    if detail is None:
+        return None
+
+    if detail.session.state == "completed":
+        await asyncio.to_thread(store.set_session_notification_status, session_id, "ingest_ready", "dismissed")
+        return await load_review_session(store, vault, session_id)
+
+    if detail.session.state == "failed":
+        await asyncio.to_thread(store.set_session_state, session_id, "proposal_ready")
+        return await load_review_session(store, vault, session_id)
+
+    return detail

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
@@ -161,6 +162,38 @@ class TestIngestPreparationWorker:
         notifications = store.list_notifications(kind="ingest_prepare_failed")
         assert len(notifications) == 1
         assert notifications[0].session_id == created.session_id
+
+    @pytest.mark.asyncio
+    async def test_prepare_session_now_waits_for_running_job_completion(self, prep_fixture):
+        store, worker, _activity = prep_fixture
+        created = store.create_api_session(IngestRequest(content="Wait for the running prepare job.", source="web"))
+        job = store.claim_prepare_jobs(limit=1)[0]
+
+        original_build = worker._build_prepared_session
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _delayed_build(context):
+            started.set()
+            await release.wait()
+            return await original_build(context)
+
+        worker._build_prepared_session = AsyncMock(side_effect=_delayed_build)
+
+        prepare_task = asyncio.create_task(worker._prepare_job(job))
+        await started.wait()
+
+        detail_task = asyncio.create_task(worker.prepare_session_now(created.session_id))
+        await asyncio.sleep(0)
+        assert detail_task.done() is False
+        release.set()
+
+        detail = await detail_task
+        await prepare_task
+
+        assert detail is not None
+        assert detail.session.state == "dormant_ready"
+        assert detail.session.digest == "Met with Alice and captured follow-up work."
 
     @pytest.mark.asyncio
     async def test_generate_prep_payload_uses_local_prompt_override_without_frontmatter(

@@ -210,7 +210,7 @@ class IngestSessionStore:
         with self._connect() as conn:
             rows = conn.execute(
                 f"""
-                SELECT session_id, origin, state, title, digest,
+                SELECT session_id, origin, state, fast_capture, title, digest,
                        open_questions_json, related_notes_json, contradictions_json,
                        created_at, updated_at, prepared_at, last_true_up_at,
                        execution_summary_json
@@ -240,7 +240,7 @@ class IngestSessionStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT session_id, origin, state, title, digest,
+                SELECT session_id, origin, state, fast_capture, title, digest,
                        open_questions_json, related_notes_json, contradictions_json,
                        created_at, updated_at, prepared_at, last_true_up_at,
                        execution_summary_json
@@ -261,7 +261,7 @@ class IngestSessionStore:
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT session_id, origin, state, title, digest,
+                SELECT session_id, origin, state, fast_capture, title, digest,
                        open_questions_json, related_notes_json, contradictions_json,
                        created_at, updated_at, prepared_at, last_true_up_at,
                        execution_summary_json,
@@ -332,6 +332,50 @@ class IngestSessionStore:
                 )
                 for row in rows
             ]
+
+    def claim_prepare_job_for_session(self, session_id: str) -> BackgroundPrepareJob | None:
+        now = _utcnow_iso()
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            row = conn.execute(
+                """
+                SELECT job_id, session_id, job_type, status, run_after, created_at, updated_at
+                FROM background_prepare_jobs
+                WHERE session_id = ? AND status = 'queued'
+                ORDER BY created_at ASC
+                LIMIT 1
+                """,
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            conn.execute(
+                """
+                UPDATE background_prepare_jobs
+                SET status = 'running', updated_at = ?
+                WHERE job_id = ?
+                """,
+                (now, row["job_id"]),
+            )
+            conn.execute(
+                """
+                UPDATE ingest_sessions
+                SET state = 'preparing', updated_at = ?
+                WHERE session_id = ?
+                """,
+                (now, session_id),
+            )
+
+            return BackgroundPrepareJob(
+                job_id=row["job_id"],
+                session_id=row["session_id"],
+                job_type=row["job_type"],
+                status="running",
+                run_after=row["run_after"],
+                created_at=row["created_at"],
+                updated_at=now,
+            )
 
     def complete_prepare_job(
         self,
@@ -579,6 +623,14 @@ class IngestSessionStore:
                 (status, notification_id),
             )
             return row.rowcount > 0
+
+    def set_session_notification_status(self, session_id: str, kind: str, status: str) -> int:
+        with self._connect() as conn:
+            row = conn.execute(
+                "UPDATE ingest_notifications SET status = ? WHERE session_id = ? AND kind = ?",
+                (status, session_id, kind),
+            )
+            return int(row.rowcount)
 
     def enqueue_true_up(self, session_id: str) -> IngestTrueUpResponse | None:
         now = _utcnow_iso()
@@ -1050,6 +1102,7 @@ class IngestSessionStore:
             session_id=session_id,
             origin=row["origin"],
             state=row["state"],
+            fast_capture=bool(row["fast_capture"]),
             source_ids=[source.source_id for source in sources],
             title=row["title"],
             digest=row["digest"],

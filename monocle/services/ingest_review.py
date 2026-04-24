@@ -151,6 +151,13 @@ async def approve_all_review_actions(
     return await load_review_session(store, vault, session_id)
 
 
+async def sync_review_state(
+    store: "IngestSessionStore",
+    session_id: str,
+) -> None:
+    await _sync_review_state(store, session_id)
+
+
 async def _hydrate_detail(
     vault: "VaultLayer",
     detail: IngestSessionDetailResponse,

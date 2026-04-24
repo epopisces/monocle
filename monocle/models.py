@@ -405,6 +405,7 @@ class IngestSession(BaseModel):
     session_id: str
     origin: IngestSessionOrigin
     state: IngestSessionState
+    fast_capture: bool = False
     source_ids: list[str] = Field(default_factory=list)
     title: str | None = None
     digest: str | None = None

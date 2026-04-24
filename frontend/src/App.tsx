@@ -75,8 +75,9 @@ function AppContent() {
   }, [refreshIngestCount, refreshReviewCount, refreshFailedCount])
 
   const handleVoiceSaved = useCallback(() => {
+    refreshIngestCount()
     refreshReviewCount()
-  }, [refreshReviewCount])
+  }, [refreshIngestCount, refreshReviewCount])
 
   const closeAllModals = useCallback(() => {
     setSettingsOpen(false)
