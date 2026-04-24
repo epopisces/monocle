@@ -27,9 +27,14 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M35 — Background Session Preparation & Notifications (2026-04-24)
-**Note:** M34 and M35 were completed out of sequence to unblock the ingest-review architecture; M33 and later ingest milestones remain queued.
+**Last Completed:** M36 — Ingest Review Workspace & Proposal Flow (2026-04-24)
+**Note:** M34-M36 were completed out of sequence to unblock the ingest-review architecture; M33 and later ingest milestones remain queued.
 **Blocked By:** None
+**Session Notes (M36 — Ingest Review Workspace & Proposal Flow):**
+- **Status:** COMPLETE (2026-04-24)
+- Added the dedicated `/ingest-review` workflow with prepared-session loading, explicit review state transitions, question answering, contradiction cards with document links, editable proposed deltas, per-action approve/reject controls, visible diff previews, and approve-all semantics that stop at `approved_pending_execution` for M37.
+- Added backend review orchestration over persisted ingest sessions: hydrated contradiction metadata, diff-preview generation against current vault notes, editable proposal mutations, question-answer persistence, review-state transitions, and new ingest review APIs under `/api/ingest/sessions/{id}`.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 973 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 449 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 **Session Notes (M35 — Background Session Preparation & Notifications):**
 - **Status:** COMPLETE (2026-04-24)
 - Added idle-gated background preparation for persisted ingest sessions using the SQLite-backed job queue, with prepared digest, related-note candidates, contradiction warnings, draft proposed actions, and true-up requeue support.
@@ -166,7 +171,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M33 | MCP-First: Third-Party MCP Composition                         | NOT STARTED |
 | M34 | Ingest Session Schema & Persistence                            | COMPLETE    |
 | M35 | Background Session Preparation & Notifications                 | COMPLETE    |
-| M36 | Ingest Review Workspace & Proposal Flow                        | NOT STARTED |
+| M36 | Ingest Review Workspace & Proposal Flow                        | COMPLETE    |
 | M37 | Ingest Execution, Validation & Source UX                       | NOT STARTED |
 | M38 | Fast-Capture Path                                              | NOT STARTED |
 | M39 | File History, Revert & Diff Viewer                             | NOT STARTED |
@@ -835,30 +840,11 @@ Separate ingest-ready notifications now surface through the app-shell badge and 
 
 ### M36: Ingest Review Workspace & Proposal Flow
 
-**Status:** NOT STARTED — depends on M35
+**Status:** COMPLETE (2026-04-24)
 
-Build the dedicated ingest-review workflow where users inspect a prepared ingest session, answer follow-up questions, review contradictions, and edit or approve proposed deltas.
-
-**Deliverables:**
-
-- [ ] Dedicated ingest-review UI/workflow separate from standard chat, with session loading, review state, and ingest-specific controls
-- [ ] Agent digest step that summarizes key takeaways, asks focused follow-up questions for missing context, and proposes links to existing knowledge-base content
-- [ ] Contradiction detection with warning explanations and links to the contradicting note(s), without blocking review completion
-- [ ] Proposal model with per-action approval semantics, editable proposed changes, and an `approve all` option for the current ingest session
-- [ ] User-visible update previews for changed documents, with proposed deltas and diff rendering for existing-note edits
-- [ ] User-triggered validation / true-up action that reruns initial ingest processing on a dormant session to account for drift before approval
-
-**Acceptance Criteria:**
-
-- Users review ingest sessions in a dedicated workflow rather than cluttering the general chat interface
-- Proposed updates to existing documents are displayed as explicit deltas with a visible diff, not just prose descriptions
-- Users can approve actions individually, edit them before approval, or approve all actions for the current session
-- Contradiction warnings include explanations plus links to the relevant conflicting note(s)
-- A dormant session can be refreshed with a true-up action before the user approves changes
-
-**Scenario Anchor:**
-
-- Given chat input such as "Met with Charles Brig today...", the review workflow can ask for a gmd reference link or extra details, ask whether the user plans to experiment with gmd, warn if any existing notes conflict, propose updating `people/Charles Brig.md`, propose creating `technologies/gmd.md`, and optionally propose a `projects/` note if experimentation is planned
+Dedicated route-based ingest review now lets users inspect prepared sessions, answer follow-up questions, review contradiction warnings with linked notes, edit draft proposal content, and approve or reject actions without using the general chat surface.
+Backend review orchestration now hydrates contradiction metadata and diff previews against current vault notes while persisting question answers, review-state transitions, editable proposals, per-action approvals, and `approve all` handoff state for M37.
+**Full details:** [docs/milestones.md#m36-ingest-review-workspace--proposal-flow](milestones.md#m36-ingest-review-workspace--proposal-flow)
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 

@@ -11,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Iterator, get_args
 
 from monocle.models import (
     IngestNotificationSummary,
@@ -22,6 +22,7 @@ from monocle.models import (
     IngestSessionDetailResponse,
     IngestTrueUpResponse,
     IngestSessionOrigin,
+    IngestSessionState,
     ProposedAction,
     SourceRecord,
     SourceRecordKind,
@@ -53,6 +54,9 @@ def _new_id(prefix: str) -> str:
 def _guess_mime_type(path: Path) -> str:
     guessed, _ = mimetypes.guess_type(path.name)
     return guessed or "application/octet-stream"
+
+
+_INGEST_SESSION_STATES = frozenset(get_args(IngestSessionState))
 
 
 @dataclass(frozen=True)
@@ -342,13 +346,14 @@ class IngestSessionStore:
         now = _utcnow_iso()
         notification_id = _new_id("notif")
         artifact_dir = self._ingest_root / "artifacts" / session_id
-        artifact_dir.mkdir(parents=True, exist_ok=True)
-        (artifact_dir / "prepare_result.json").write_text(
-            _json_dumps(artifact_payload),
-            encoding="utf-8",
-        )
 
         with self._connect() as conn:
+            self._assert_prepare_job_matches_session(conn, job_id, session_id)
+            artifact_dir.mkdir(parents=True, exist_ok=True)
+            (artifact_dir / "prepare_result.json").write_text(
+                _json_dumps(artifact_payload),
+                encoding="utf-8",
+            )
             conn.execute(
                 """
                 UPDATE ingest_sessions
@@ -452,6 +457,7 @@ class IngestSessionStore:
         now = _utcnow_iso()
         notification_id = _new_id("notif")
         with self._connect() as conn:
+            self._assert_prepare_job_matches_session(conn, job_id, session_id)
             conn.execute(
                 """
                 UPDATE background_prepare_jobs
@@ -626,6 +632,157 @@ class IngestSessionStore:
             state='queued',
             last_true_up_at=now,
         )
+
+    def set_session_state(self, session_id: str, state: IngestSessionState) -> bool:
+        if state not in _INGEST_SESSION_STATES:
+            raise ValueError(f"Invalid ingest session state: {state}")
+        now = _utcnow_iso()
+        with self._connect() as conn:
+            row = conn.execute(
+                "UPDATE ingest_sessions SET state = ?, updated_at = ? WHERE session_id = ?",
+                (state, now, session_id),
+            )
+            return row.rowcount > 0
+
+    def answer_open_question(
+        self,
+        session_id: str,
+        question_id: str,
+        answer: str,
+    ) -> list[dict[str, Any]] | None:
+        now = _utcnow_iso()
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT open_questions_json FROM ingest_sessions WHERE session_id = ?",
+                (session_id,),
+            ).fetchone()
+            if row is None:
+                return None
+
+            questions = _json_loads(row["open_questions_json"], [])
+            updated = False
+            for item in questions:
+                if str(item.get("id")) != question_id:
+                    continue
+                item["answer"] = answer
+                item["answered_at"] = now
+                updated = True
+                break
+
+            if not updated:
+                return None
+
+            next_state = "proposal_ready"
+            if any(not str(item.get("answer") or "").strip() for item in questions):
+                next_state = "awaiting_user"
+
+            conn.execute(
+                """
+                UPDATE ingest_sessions
+                SET open_questions_json = ?, state = ?, updated_at = ?
+                WHERE session_id = ?
+                """,
+                (_json_dumps(questions), next_state, now, session_id),
+            )
+            return questions
+
+    def update_proposed_action(
+        self,
+        session_id: str,
+        action_id: str,
+        *,
+        approval_state: str | None = None,
+        target_file_path: str | None = None,
+        target_note_type: str | None = None,
+        rationale: str | None = None,
+        diff_preview: dict[str, Any] | None = None,
+        proposed_content: dict[str, Any] | None = None,
+    ) -> ProposedAction | None:
+        updates: list[str] = []
+        params: list[Any] = []
+
+        if approval_state is not None:
+            updates.append("approval_state = ?")
+            params.append(approval_state)
+        if target_file_path is not None:
+            updates.append("target_file_path = ?")
+            params.append(target_file_path)
+        if target_note_type is not None:
+            updates.append("target_note_type = ?")
+            params.append(target_note_type)
+        if rationale is not None:
+            updates.append("rationale = ?")
+            params.append(rationale)
+        if diff_preview is not None:
+            updates.append("diff_preview_json = ?")
+            params.append(_json_dumps(diff_preview))
+        if proposed_content is not None:
+            updates.append("proposed_content_json = ?")
+            params.append(_json_dumps(proposed_content))
+
+        if not updates:
+            with self._connect() as conn:
+                return self._get_action(conn, session_id, action_id)
+
+        now = _utcnow_iso()
+        with self._connect() as conn:
+            result = conn.execute(
+                f"""
+                UPDATE proposed_actions
+                SET {', '.join(updates)}
+                WHERE session_id = ? AND action_id = ?
+                """,
+                (*params, session_id, action_id),
+            )
+            if result.rowcount == 0:
+                return None
+            conn.execute(
+                """
+                UPDATE ingest_sessions
+                SET state = 'in_review', updated_at = ?
+                WHERE session_id = ? AND state IN ('dormant_ready', 'awaiting_user', 'proposal_ready')
+                """,
+                (now, session_id),
+            )
+            return self._get_action(conn, session_id, action_id)
+
+    def set_proposed_action_approval_state(
+        self,
+        session_id: str,
+        action_id: str,
+        approval_state: str,
+    ) -> ProposedAction | None:
+        return self.update_proposed_action(
+            session_id,
+            action_id,
+            approval_state=approval_state,
+        )
+
+    def approve_all_proposed_actions(self, session_id: str) -> list[ProposedAction]:
+        now = _utcnow_iso()
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE proposed_actions
+                SET approval_state = 'approved'
+                WHERE session_id = ? AND approval_state IN ('draft', 'edited')
+                """,
+                (session_id,),
+            )
+            actions = self._get_actions(conn, session_id)
+            if actions and all(action.approval_state in ('approved', 'rejected') for action in actions):
+                next_state = 'approved_pending_execution' if any(
+                    action.approval_state == 'approved' for action in actions
+                ) else 'proposal_ready'
+                conn.execute(
+                    """
+                    UPDATE ingest_sessions
+                    SET state = ?, updated_at = ?
+                    WHERE session_id = ?
+                    """,
+                    (next_state, now, session_id),
+                )
+            return actions
 
     def _create_session(
         self,
@@ -846,6 +1003,23 @@ class IngestSessionStore:
     def _get_sources(self, conn: sqlite3.Connection, session_id: str) -> list[SourceRecord]:
         return self._get_sources_for_sessions(conn, [session_id]).get(session_id, [])
 
+    def _assert_prepare_job_matches_session(
+        self,
+        conn: sqlite3.Connection,
+        job_id: str,
+        session_id: str,
+    ) -> None:
+        row = conn.execute(
+            "SELECT session_id FROM background_prepare_jobs WHERE job_id = ?",
+            (job_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Background prepare job not found: {job_id}")
+        if row["session_id"] != session_id:
+            raise ValueError(
+                f"Background prepare job {job_id} does not belong to session {session_id}"
+            )
+
     def _get_actions_for_sessions(
         self,
         conn: sqlite3.Connection,
@@ -884,6 +1058,34 @@ class IngestSessionStore:
 
     def _get_actions(self, conn: sqlite3.Connection, session_id: str) -> list[ProposedAction]:
         return self._get_actions_for_sessions(conn, [session_id]).get(session_id, [])
+
+    def _get_action(
+        self,
+        conn: sqlite3.Connection,
+        session_id: str,
+        action_id: str,
+    ) -> ProposedAction | None:
+        row = conn.execute(
+            """
+            SELECT session_id, action_id, action_type, approval_state, target_file_path,
+                   target_note_type, rationale, diff_preview_json, proposed_content_json
+            FROM proposed_actions
+            WHERE session_id = ? AND action_id = ?
+            """,
+            (session_id, action_id),
+        ).fetchone()
+        if row is None:
+            return None
+        return ProposedAction(
+            action_id=row["action_id"],
+            action_type=row["action_type"],
+            approval_state=row["approval_state"],
+            target_file_path=row["target_file_path"],
+            target_note_type=row["target_note_type"],
+            rationale=row["rationale"],
+            diff_preview=_json_loads(row["diff_preview_json"], None),
+            proposed_content=_json_loads(row["proposed_content_json"], {}),
+        )
 
     def _default_source_name(
         self,

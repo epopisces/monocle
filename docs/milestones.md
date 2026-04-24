@@ -1170,3 +1170,54 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 
 **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 971 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 448 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 
+---
+
+### M36: Ingest Review Workspace & Proposal Flow
+
+**Goal:** Build the dedicated ingest-review workflow where users inspect a prepared ingest session, answer follow-up questions, review contradictions, and edit or approve proposed deltas.
+
+**Completed:** 2026-04-24
+
+**Deliverables completed:**
+
+- [x] Added `monocle/services/ingest_review.py` to hydrate prepared ingest sessions for review, enrich contradiction metadata from the vault, generate diff previews for create/update proposals, and coordinate M36 review-state transitions.
+- [x] Extended `IngestSessionStore` in `monocle/services/ingest_sessions.py` with review-session mutation helpers for question answering, editable proposed-action persistence, per-action approval state changes, session-state transitions, and approve-all handoff state.
+- [x] Exposed dedicated review APIs in `monocle/routers/ingest.py`: `POST /api/ingest/sessions/{session_id}/start-review`, `PATCH /api/ingest/sessions/{session_id}/questions/{question_id}`, `PATCH /api/ingest/sessions/{session_id}/actions/{action_id}`, `POST /api/ingest/sessions/{session_id}/actions/{action_id}/approve`, `POST /api/ingest/sessions/{session_id}/actions/{action_id}/reject`, and `POST /api/ingest/sessions/{session_id}/approve-all`.
+- [x] Updated `GET /api/ingest/sessions/{session_id}` to return hydrated review detail with contradiction titles/excerpts and generated diff previews instead of raw prepared-session rows alone.
+- [x] Added a dedicated frontend review workspace at `/ingest-review` with session list, review-state aware header, follow-up question answering, contradiction cards with links to `/docs`, editable proposal drafts, visible diff rendering, per-action approve/reject controls, approve-all, and true-up refresh.
+- [x] Switched the prepared-session app-shell affordance to launch the dedicated review route and refreshed the typed frontend ingest client plus generated OpenAPI/schema artifacts.
+
+**Acceptance Criteria met:**
+
+- Users now review prepared ingest sessions in a dedicated `/ingest-review` workflow rather than in the general chat interface.
+- Proposed updates to existing documents now surface explicit diff previews with visible before/after hunks instead of only prose rationale.
+- Users can edit draft proposals before approval, approve or reject individual actions, and approve all actions for the current session.
+- Contradiction warnings now include explanatory summary text plus links back to the conflicting note in the document browser.
+- Dormant sessions can be refreshed with a true-up action before proposal approval, returning them to the queued preparation flow.
+
+**Implementation notes:**
+
+- M36 intentionally stops at `approved_pending_execution`; execution through the canonical MCP tool plane remains deferred to M37 so review and execution concerns stay separated.
+- Diff previews are generated deterministically from current vault note content when review detail is loaded or a draft proposal is edited, which keeps proposal rendering stable even before document history lands in M39.
+- Open questions are stored as JSON payloads on the ingest session itself, with M36 appending `answer` and `answered_at` fields rather than introducing a second table before execution semantics are needed.
+- The existing prepared-session drawer from M35 remains test-covered as a notification surface, but the primary user workflow now lives on the dedicated route launched from the topbar badge and command palette.
+
+**Files modified:**
+
+- `monocle/models.py`
+- `monocle/routers/ingest.py`
+- `monocle/services/ingest_review.py`
+- `monocle/services/ingest_sessions.py`
+- `monocle/tests/test_api.py`
+- `monocle/tests/test_ingest_sessions.py`
+- `openapi.json`
+- `frontend/src/App.tsx`
+- `frontend/src/App.test.tsx`
+- `frontend/src/IngestReview.test.tsx`
+- `frontend/src/api/ingest.ts`
+- `frontend/src/api/schema.d.ts`
+- `frontend/src/components/IngestReview/IngestReviewScreen.tsx`
+- `frontend/src/components/IngestReview/IngestReviewScreen.css`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 973 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 449 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+

@@ -14,14 +14,24 @@ from fastapi import Response
 
 from monocle.models import (
     CountResponse,
+    IngestOpenQuestionAnswerRequest,
     IngestNotificationSummary,
     IngestRequest,
     IngestResponse,
     IngestSession,
     IngestSessionDetailResponse,
     IngestTrueUpResponse,
+    ProposedActionPatchRequest,
 )
 from monocle.rate_limit import limiter
+from monocle.services.ingest_review import (
+    answer_review_question,
+    approve_all_review_actions,
+    load_review_session,
+    set_review_action_approval,
+    start_review_session,
+    update_review_action,
+)
 
 router = APIRouter(tags=["ingest"])
 logger = logging.getLogger(__name__)
@@ -83,7 +93,95 @@ async def list_sessions(
 async def get_session(session_id: str, request: Request) -> IngestSessionDetailResponse:
     """Return the full persisted ingest session with its archived sources."""
     store = request.app.state.ingest_session_store
-    detail = await asyncio.to_thread(store.get_session, session_id)
+    vault = request.app.state.vault
+    detail = await load_review_session(store, vault, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
+    return detail
+
+
+@router.post("/ingest/sessions/{session_id}/start-review", response_model=IngestSessionDetailResponse)
+async def start_review(session_id: str, request: Request) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    detail = await start_review_session(store, vault, session_id)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
+    return detail
+
+
+@router.patch("/ingest/sessions/{session_id}/questions/{question_id}", response_model=IngestSessionDetailResponse)
+async def answer_question(
+    session_id: str,
+    question_id: str,
+    body: IngestOpenQuestionAnswerRequest,
+    request: Request,
+) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    detail = await answer_review_question(store, vault, session_id, question_id, body.answer)
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Question not found for ingest session: {session_id}")
+    return detail
+
+
+@router.patch("/ingest/sessions/{session_id}/actions/{action_id}", response_model=IngestSessionDetailResponse)
+async def patch_proposed_action(
+    session_id: str,
+    action_id: str,
+    body: ProposedActionPatchRequest,
+    request: Request,
+) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    detail = await update_review_action(
+        store,
+        vault,
+        session_id,
+        action_id,
+        target_file_path=body.target_file_path,
+        target_note_type=body.target_note_type,
+        rationale=body.rationale,
+        proposed_content=body.proposed_content,
+    )
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Proposed action not found: {action_id}")
+    return detail
+
+
+@router.post("/ingest/sessions/{session_id}/actions/{action_id}/approve", response_model=IngestSessionDetailResponse)
+async def approve_proposed_action(
+    session_id: str,
+    action_id: str,
+    request: Request,
+) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    detail = await set_review_action_approval(store, vault, session_id, action_id, "approved")
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Proposed action not found: {action_id}")
+    return detail
+
+
+@router.post("/ingest/sessions/{session_id}/actions/{action_id}/reject", response_model=IngestSessionDetailResponse)
+async def reject_proposed_action(
+    session_id: str,
+    action_id: str,
+    request: Request,
+) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    detail = await set_review_action_approval(store, vault, session_id, action_id, "rejected")
+    if detail is None:
+        raise HTTPException(status_code=404, detail=f"Proposed action not found: {action_id}")
+    return detail
+
+
+@router.post("/ingest/sessions/{session_id}/approve-all", response_model=IngestSessionDetailResponse)
+async def approve_all_actions(session_id: str, request: Request) -> IngestSessionDetailResponse:
+    store = request.app.state.ingest_session_store
+    vault = request.app.state.vault
+    detail = await approve_all_review_actions(store, vault, session_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
     return detail

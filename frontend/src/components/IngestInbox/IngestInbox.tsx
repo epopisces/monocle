@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   countIngestNotifications,
   dismissIngestNotification,
@@ -27,6 +27,11 @@ export default function IngestInbox({ open, onClose, onCountUpdate }: Props) {
   const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set())
+  const itemsRef = useRef<IngestNotificationSummary[]>([])
+
+  useEffect(() => {
+    itemsRef.current = items
+  }, [items])
 
   const refreshUnreadCount = useCallback(async () => {
     try {
@@ -72,24 +77,29 @@ export default function IngestInbox({ open, onClose, onCountUpdate }: Props) {
     return () => window.removeEventListener('keydown', handler)
   }, [open, onClose])
 
+  const selected = useMemo(
+    () => items.find(item => item.notification_id === selectedId) ?? null,
+    [items, selectedId],
+  )
+  const selectedSessionId = selected?.session_id ?? null
+
   useEffect(() => {
-    if (!open || !selectedId) return
-    const selected = items.find(item => item.notification_id === selectedId)
-    if (!selected) return
+    if (!open || !selectedId || !selectedSessionId) return
 
     let cancelled = false
     setDetailLoading(true)
     setError(null)
 
-    getIngestSession(selected.session_id)
+    getIngestSession(selectedSessionId)
       .then(async data => {
         if (cancelled) return
         setDetail(data)
-        if (selected.status === 'unread') {
-          await markIngestNotificationRead(selected.notification_id)
+        const currentSelected = itemsRef.current.find(item => item.notification_id === selectedId)
+        if (currentSelected?.status === 'unread') {
+          await markIngestNotificationRead(selectedId)
           if (cancelled) return
           setItems(current => current.map(item => (
-            item.notification_id === selected.notification_id
+            item.notification_id === selectedId
               ? { ...item, status: 'read' }
               : item
           )))
@@ -106,7 +116,7 @@ export default function IngestInbox({ open, onClose, onCountUpdate }: Props) {
     return () => {
       cancelled = true
     }
-  }, [open, selectedId, items, refreshUnreadCount])
+  }, [open, selectedId, selectedSessionId, refreshUnreadCount])
 
   const handleDismiss = useCallback(async (notificationId: string) => {
     setDismissingIds(current => new Set(current).add(notificationId))
@@ -150,8 +160,6 @@ export default function IngestInbox({ open, onClose, onCountUpdate }: Props) {
   }, [selectedId, items])
 
   if (!open) return null
-
-  const selected = items.find(item => item.notification_id === selectedId) ?? null
 
   return (
     <>
