@@ -396,7 +396,7 @@ class IngestRequest(BaseModel):
 ```python
 class IngestSession(BaseModel):
   session_id: str
-  origin: Literal["chat", "inbox"]
+  origin: Literal["api", "chat", "inbox"]
   state: Literal[
     "captured", "queued", "preparing", "dormant_ready", "in_review",
     "awaiting_user", "proposal_ready", "approved_pending_execution",
