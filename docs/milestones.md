@@ -1221,3 +1221,54 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 
 **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 973 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 449 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 
+---
+
+### M37: Ingest Execution, Validation & Source UX
+
+**Goal:** Execute approved ingest proposals using the canonical MCP tool plane, validate the resulting vault writes through deterministic readback checks, and expose archived raw sources as discoverable UI elements in the document browser.
+
+**Completed:** 2026-04-24
+
+**Deliverables completed:**
+
+- [x] Created `monocle/services/ingest_execute.py` with `execute_review_session()` orchestration that applies all approved actions by calling the canonical MCP `create_note` and `update_note` operations (never direct vault writes), records per-action execution results, and emits execution summary with succeeded/failed/skipped counts.
+- [x] Implemented post-apply validation via deterministic readback checks: after each create/update completes, grep-style substring search confirms that the expected note content now exists in the vault; if validation fails, the note is reverted from `.trash/` and the action is marked failed with a detailed validation message.
+- [x] Added `POST /api/ingest/sessions/{session_id}/execute` endpoint that validates the session is in `approved_pending_execution` state, executes all approved actions, collects execution results, records completion timestamps, emits HTTP 200 with detailed per-action execution outcome summary, and persists final session state.
+- [x] Added `GET /api/ingest/sources`, `GET /api/ingest/sources/{source_id}`, `GET /api/ingest/sources/{source_id}/content`, and `GET /api/ingest/sources/{source_id}/download` endpoints in `monocle/routers/ingest.py` that enumerate archived sources from `data/sources/`, support text/binary payloads, truncate large text with a `truncated` flag, and return deterministic source metadata including source name and author when known.
+- [x] Added `Sources` collapsed `<details>` section to the document browser with a source-list renderer that links back to archived raw sources for each ingested note via the `metadata.sources` backref array.
+- [x] Added source-opening behavior in the document browser: clicking an archived text source opens it inline in a read-only preview within the Document Viewer; binary sources (audio, images) show a download button that uses system defaults; non-ingestible sources (Teams, MCP) display a summary card instead of opening.
+- [x] Styled the sources section with CSS tokens (`var(--border)`, `var(--text-secondary)`, `var(--accent)`) integrated into `frontend/src/components/DocumentBrowser/DocumentBrowserScreen.css`.
+
+**Acceptance Criteria met:**
+
+- Approved actions are applied ONLY through MCP-owned `create_note` and `update_note` operations; no parallel direct-write ingest path exists.
+- Post-apply validation confirms expected document changes via readback substring search; if validation fails, notes are rolled back to `.trash/` and the action is marked failed instead of silently succeeding.
+- The execution summary reports which approved actions succeeded, failed, or were skipped and offers immediate opening of affected notes in the Document Viewer.
+- Archived sources are discoverable via `/api/ingest/sources` list and browsable in the document UI under a collapsed `Sources` section that displays source name/author when available.
+- Text-based sources open inline in the Document Viewer with read-only preview; other file types trigger system defaults or show download buttons; archived sources remain excluded from default search and embedding flows.
+
+**Implementation notes:**
+
+- M37 closes the gap between M36's approved-pending state and final note writes; execution now happens through the canonical MCP tools instead of a separate ingest path, preserving the single-plane architecture.
+- Readback validation happens line-by-line via simple substring search (no regex), which makes validation deterministic and independent of note body parsing fragility.
+- Response records per-action state (`execution_result.status`: `succeeded`, `failed`, or `skipped`), execution timestamp, and error/validation-failure messages so the frontend can render granular feedback.
+- Source archival remains immutable and outside the vault, so sources can be referenced from multiple ingest sessions without duplication and can be garbage-collected independently of the vault lifecycle.
+- The `Sources` section in the document UI is styled as a collapsed `<details>` drawer beneath the note body so it's discoverable but doesn't clutter the primary editing surface.
+
+**Files modified:**
+
+- `monocle/models.py` (added `ExecutionSummary`, `ExecutionResult`, extended `IngestSessionDetailResponse`)
+- `monocle/routers/ingest.py` (added `execute_actions`, `list_archived_sources`, `get_archived_source`, `get_archived_source_content`, `download_archived_source`)
+- `monocle/services/ingest_execute.py` (new — orchestration and MCP invocation)
+- `monocle/services/ingest_sessions.py` (minor: added execution result persistence)
+- `monocle/tests/test_api.py` (added 6 M37 tests: MCP execution, validation failure rollback, rejection edge cases, archived source list/read/content/download/truncate)
+- `monocle/tests/test_ingest_sessions.py` (integration tests)
+- `openapi.json`
+- `frontend/src/components/DocumentBrowser/DocumentBrowserScreen.tsx` (added sources drawer and source detail handlers)
+- `frontend/src/components/DocumentBrowser/DocumentBrowserScreen.css` (added `.doc-browser__sources-*` styles)
+- `frontend/src/api/ingest.ts` (typed archived-source endpoints)
+- `frontend/src/api/schema.d.ts`
+- `frontend/src/DocumentBrowser.test.tsx` (added source-list and source-preview test cases)
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 992 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 450+ passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+
