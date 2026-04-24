@@ -120,7 +120,6 @@ def _load_template_schema(template_name: str) -> dict[str, Any]:
         return yaml.safe_load(fh) or {}
 
 
-@functools.lru_cache(maxsize=None)
 def _load_template_body(template_root: str, template_name: str) -> str:
     """Load a user-facing Markdown scaffold from ``<vault>/.templates``.
 

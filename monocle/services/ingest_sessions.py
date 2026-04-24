@@ -194,7 +194,17 @@ class IngestSessionStore:
                 params,
             ).fetchall()
 
-            sessions = [self._row_to_session(conn, row) for row in rows]
+            session_ids = [row["session_id"] for row in rows]
+            sources_by_session = self._get_sources_for_sessions(conn, session_ids)
+            actions_by_session = self._get_actions_for_sessions(conn, session_ids)
+            sessions = [
+                self._build_session(
+                    row,
+                    sources=sources_by_session.get(row["session_id"], []),
+                    actions=actions_by_session.get(row["session_id"], []),
+                )
+                for row in rows
+            ]
 
         return sessions
 
@@ -213,8 +223,9 @@ class IngestSessionStore:
             if row is None:
                 return None
 
-            session = self._row_to_session(conn, row)
-            sources = self._get_sources(conn, session_id)
+            sources = self._get_sources_for_sessions(conn, [session_id]).get(session_id, [])
+            actions = self._get_actions_for_sessions(conn, [session_id]).get(session_id, [])
+            session = self._build_session(row, sources=sources, actions=actions)
             return IngestSessionDetailResponse(session=session, sources=sources)
 
     def _create_session(
@@ -369,10 +380,14 @@ class IngestSessionStore:
             ),
         )
 
-    def _row_to_session(self, conn: sqlite3.Connection, row: sqlite3.Row) -> IngestSession:
+    def _build_session(
+        self,
+        row: sqlite3.Row,
+        *,
+        sources: list[SourceRecord],
+        actions: list[ProposedAction],
+    ) -> IngestSession:
         session_id = row["session_id"]
-        sources = self._get_sources(conn, session_id)
-        actions = self._get_actions(conn, session_id)
         return IngestSession(
             session_id=session_id,
             origin=row["origin"],
@@ -390,58 +405,86 @@ class IngestSessionStore:
             last_true_up_at=row["last_true_up_at"],
         )
 
-    def _get_sources(self, conn: sqlite3.Connection, session_id: str) -> list[SourceRecord]:
+    def _get_sources_for_sessions(
+        self,
+        conn: sqlite3.Connection,
+        session_ids: list[str],
+    ) -> dict[str, list[SourceRecord]]:
+        session_ids = list(dict.fromkeys(session_ids))
+        grouped: dict[str, list[SourceRecord]] = {session_id: [] for session_id in session_ids}
+        if not session_ids:
+            return grouped
+
+        placeholders = ", ".join("?" for _ in session_ids)
         rows = conn.execute(
-            """
+            f"""
             SELECT source_id, session_id, kind, status, source_name, mime_type,
                    archive_path, checksum_sha256, captured_at, byte_size, provenance_json
             FROM source_records
-            WHERE session_id = ?
-            ORDER BY captured_at ASC
+            WHERE session_id IN ({placeholders})
+            ORDER BY session_id ASC, captured_at ASC
             """,
-            (session_id,),
+            tuple(session_ids),
         ).fetchall()
-        return [
-            SourceRecord(
-                source_id=row["source_id"],
-                session_id=row["session_id"],
-                kind=row["kind"],
-                status=row["status"],
-                source_name=row["source_name"],
-                mime_type=row["mime_type"],
-                archive_path=row["archive_path"],
-                checksum_sha256=row["checksum_sha256"],
-                captured_at=row["captured_at"],
-                byte_size=row["byte_size"],
-                provenance=_json_loads(row["provenance_json"], {}),
+        for row in rows:
+            grouped[row["session_id"]].append(
+                SourceRecord(
+                    source_id=row["source_id"],
+                    session_id=row["session_id"],
+                    kind=row["kind"],
+                    status=row["status"],
+                    source_name=row["source_name"],
+                    mime_type=row["mime_type"],
+                    archive_path=row["archive_path"],
+                    checksum_sha256=row["checksum_sha256"],
+                    captured_at=row["captured_at"],
+                    byte_size=row["byte_size"],
+                    provenance=_json_loads(row["provenance_json"], {}),
+                )
             )
-            for row in rows
-        ]
+        return grouped
 
-    def _get_actions(self, conn: sqlite3.Connection, session_id: str) -> list[ProposedAction]:
+    def _get_sources(self, conn: sqlite3.Connection, session_id: str) -> list[SourceRecord]:
+        return self._get_sources_for_sessions(conn, [session_id]).get(session_id, [])
+
+    def _get_actions_for_sessions(
+        self,
+        conn: sqlite3.Connection,
+        session_ids: list[str],
+    ) -> dict[str, list[ProposedAction]]:
+        session_ids = list(dict.fromkeys(session_ids))
+        grouped: dict[str, list[ProposedAction]] = {session_id: [] for session_id in session_ids}
+        if not session_ids:
+            return grouped
+
+        placeholders = ", ".join("?" for _ in session_ids)
         rows = conn.execute(
-            """
-            SELECT action_id, action_type, approval_state, target_file_path,
+            f"""
+            SELECT session_id, action_id, action_type, approval_state, target_file_path,
                    target_note_type, rationale, diff_preview_json, proposed_content_json
             FROM proposed_actions
-            WHERE session_id = ?
-            ORDER BY created_at ASC
+            WHERE session_id IN ({placeholders})
+            ORDER BY session_id ASC, created_at ASC
             """,
-            (session_id,),
+            tuple(session_ids),
         ).fetchall()
-        return [
-            ProposedAction(
-                action_id=row["action_id"],
-                action_type=row["action_type"],
-                approval_state=row["approval_state"],
-                target_file_path=row["target_file_path"],
-                target_note_type=row["target_note_type"],
-                rationale=row["rationale"],
-                diff_preview=_json_loads(row["diff_preview_json"], None),
-                proposed_content=_json_loads(row["proposed_content_json"], {}),
+        for row in rows:
+            grouped[row["session_id"]].append(
+                ProposedAction(
+                    action_id=row["action_id"],
+                    action_type=row["action_type"],
+                    approval_state=row["approval_state"],
+                    target_file_path=row["target_file_path"],
+                    target_note_type=row["target_note_type"],
+                    rationale=row["rationale"],
+                    diff_preview=_json_loads(row["diff_preview_json"], None),
+                    proposed_content=_json_loads(row["proposed_content_json"], {}),
+                )
             )
-            for row in rows
-        ]
+        return grouped
+
+    def _get_actions(self, conn: sqlite3.Connection, session_id: str) -> list[ProposedAction]:
+        return self._get_actions_for_sessions(conn, [session_id]).get(session_id, [])
 
     def _default_source_name(
         self,

@@ -136,7 +136,7 @@ export default function ChatMessage({ message }: Props) {
           </div>
         ) : message.isStreaming ? (
           <p className="chat-message__text chat-message__text--pending">{getPendingStatus(message)}</p>
-        ) : message.isStreaming ? null : (
+        ) : (
           <p className="chat-message__text chat-message__text--empty">(empty response)</p>
         )}
 

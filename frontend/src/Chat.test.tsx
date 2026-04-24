@@ -420,6 +420,12 @@ describe('ChatMessage', () => {
     expect(screen.getByText('Thinking...')).toBeInTheDocument()
   })
 
+  it('shows empty response placeholder when assistant content is empty and not streaming', () => {
+    const msg: ThreadMessage = { role: 'assistant', content: '', isStreaming: false }
+    render(<ChatMessage message={msg} />)
+    expect(screen.getByText('(empty response)')).toBeInTheDocument()
+  })
+
   it('does not show cursor when not streaming', () => {
     const msg: ThreadMessage = { role: 'assistant', content: 'done', isStreaming: false }
     const { container } = render(<ChatMessage message={msg} />)

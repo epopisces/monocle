@@ -414,6 +414,19 @@ class TestIngest:
         assert body["source_ids"][0].startswith("src_")
         assert body["notification"]["kind"] == "ingest_captured"
 
+    def test_ingest_forces_origin_to_api(self, api_client: TestClient):
+        r = api_client.post(
+            "/api/ingest",
+            json={"content": "Client tries to spoof origin.", "source": "web", "origin": "chat"},
+        )
+        assert r.status_code == 202
+        body = _json(r)
+        assert body["origin"] == "api"
+
+        detail = api_client.get(f"/api/ingest/sessions/{body['session_id']}")
+        assert detail.status_code == 200
+        assert detail.json()["session"]["origin"] == "api"
+
     def test_ingest_requires_content_or_audio(self, api_client: TestClient):
         # Empty content is valid for text (pipeline handles it)
         r = api_client.post("/api/ingest", json={"content": "", "source": "web"})
@@ -503,6 +516,31 @@ class TestIngest:
         assert done_data_lines, "done event has no data line"
         import json as _json
         done_payload = _json.loads(done_data_lines[0])
+
+    def test_ingest_stream_forces_origin_to_api(self, api_client: TestClient):
+        r = api_client.post(
+            "/api/ingest/stream",
+            json={"content": "SSE origin spoof attempt", "source": "web", "origin": "inbox"},
+        )
+        assert r.status_code == 200
+
+        done_payload = None
+        event_name = None
+        for line in r.text.splitlines():
+            if line.startswith("event: "):
+                event_name = line[len("event: "):].strip()
+            elif event_name == "done" and line.startswith("data: "):
+                import json as _json
+
+                done_payload = _json.loads(line[len("data: "):])
+                break
+
+        assert done_payload is not None
+        assert done_payload["origin"] == "api"
+
+        detail = api_client.get(f"/api/ingest/sessions/{done_payload['session_id']}")
+        assert detail.status_code == 200
+        assert detail.json()["session"]["origin"] == "api"
         assert "session_id" in done_payload
         assert "state" in done_payload
         assert "elapsed_ms" in done_payload

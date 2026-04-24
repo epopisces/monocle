@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import patch
 
@@ -93,3 +94,93 @@ class TestIngestSessionStore:
 
         api_sessions = store.list_sessions(origin="api")
         assert [session.session_id for session in api_sessions] == [api_session.session_id]
+
+    def test_list_sessions_preloads_sources_and_actions_in_constant_queries(self, tmp_path: Path):
+        settings = _make_settings()
+        store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        first = store.create_api_session(IngestRequest(content="first", source="web"))
+        second = store.create_api_session(IngestRequest(content="second", source="web"))
+
+        with store._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO proposed_actions (
+                    action_id, session_id, action_type, approval_state,
+                    target_file_path, target_note_type, rationale, proposed_content_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "act_first",
+                    first.session_id,
+                    "update_note",
+                    "draft",
+                    "people/alice.md",
+                    "person_note",
+                    "Needs review before applying.",
+                    '{"title":"Alice"}',
+                ),
+            )
+
+        original_connect = store._connect
+        selects: list[str] = []
+
+        @contextmanager
+        def counted_connect():
+            with original_connect() as conn:
+                conn.set_trace_callback(
+                    lambda sql: selects.append(sql)
+                    if sql.lstrip().upper().startswith("SELECT")
+                    else None
+                )
+                yield conn
+
+        store._connect = counted_connect  # type: ignore[method-assign]
+        try:
+            sessions = store.list_sessions(limit=10)
+        finally:
+            store._connect = original_connect  # type: ignore[method-assign]
+
+        assert len(selects) == 3
+        assert [session.session_id for session in sessions] == [second.session_id, first.session_id]
+        assert sessions[0].source_ids == [second.source_ids[0]]
+        assert sessions[0].proposed_actions == []
+        assert sessions[1].source_ids == [first.source_ids[0]]
+        assert [action.action_id for action in sessions[1].proposed_actions] == ["act_first"]
+
+    def test_get_session_reuses_preloaded_sources(self, tmp_path: Path):
+        settings = _make_settings()
+        store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        created = store.create_api_session(IngestRequest(content="detail", source="web"))
+
+        original_connect = store._connect
+        selects: list[str] = []
+
+        @contextmanager
+        def counted_connect():
+            with original_connect() as conn:
+                conn.set_trace_callback(
+                    lambda sql: selects.append(sql)
+                    if sql.lstrip().upper().startswith("SELECT")
+                    else None
+                )
+                yield conn
+
+        store._connect = counted_connect  # type: ignore[method-assign]
+        try:
+            detail = store.get_session(created.session_id)
+        finally:
+            store._connect = original_connect  # type: ignore[method-assign]
+
+        assert detail is not None
+        assert len(selects) == 3
+        assert detail.session.source_ids == [detail.sources[0].source_id]

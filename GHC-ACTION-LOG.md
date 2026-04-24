@@ -21,6 +21,11 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Rewired `POST /api/ingest`, `POST /api/ingest/stream`, the unified inbox watcher, and the standalone `monocle watch` entry point to capture persisted queued ingest sessions instead of writing notes directly
 - Added `GET /api/ingest/sessions` and `GET /api/ingest/sessions/{session_id}` plus new persistence-focused tests in `monocle/tests/test_ingest_sessions.py`; updated API/security/rate-limit tests to the new `202 Accepted` session contract
 - Validation: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 961 passed, 8 deselected, EXIT 0; archived M34 details to `docs/milestones.md` and marked M34 complete in `docs/build-plan.md`
+- Remediated two post-review findings: `VaultLayer` no longer caches user-editable `<vault>/.templates/*.md` scaffold bodies across calls, and the API ingest routers now override client-supplied `origin` to `api` before persisting sessions
+- Added focused regressions in `monocle/tests/test_vault.py` and `monocle/tests/test_api.py`; validation: targeted pytest slice `3 passed`, then `uv run python -m pytest monocle/tests/test_vault.py monocle/tests/test_api.py -x --tb=short -q` → 167 passed, EXIT 0
+- Refactored `IngestSessionStore` list/detail hydration to bulk-load sources and proposed actions per request, removing the list-route N+1 query pattern and reusing preloaded sources in `get_session()` instead of querying them twice
+- Added query-count regressions in `monocle/tests/test_ingest_sessions.py`, tightened the ingest rate-limit integration test to the current `202 Accepted` contract while handling `NoOpLimiter` test mode explicitly, and simplified a redundant streaming branch in `frontend/src/components/Chat/ChatMessage.tsx`
+- Validation: `uv run python -m pytest monocle/tests/test_ingest_sessions.py -x --tb=short -q` → 5 passed; `uv run python -m pytest monocle/tests/test_rate_limit.py::TestMainAppRateLimits::test_ingest_returns_429_after_30_requests -m integration -x --tb=short -q` → 1 passed; `cd frontend && npm run test -- --run src/Chat.test.tsx` → 49 passed; combined backend slice via absolute paths → 20 passed, 59 deselected
 
 ## 2026-04-22
 

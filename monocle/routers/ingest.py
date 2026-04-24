@@ -28,16 +28,21 @@ def _check_audio_size(request: IngestRequest) -> None:
         )
 
 
+def _api_ingest_request(request: IngestRequest) -> IngestRequest:
+    return request.model_copy(update={"origin": "api"})
+
+
 @router.post("/ingest", response_model=IngestResponse, status_code=202)
 @limiter.limit("30/minute")
 async def ingest(req: IngestRequest, request: Request) -> IngestResponse:
     """Create a persisted ingest session and archive its raw source."""
-    _check_audio_size(req)
+    api_req = _api_ingest_request(req)
+    _check_audio_size(api_req)
 
     store = request.app.state.ingest_session_store
 
     try:
-        return await asyncio.to_thread(store.create_api_session, req)
+        return await asyncio.to_thread(store.create_api_session, api_req)
     except Exception as exc:
         logger.error("[INGEST] Session capture error: %s", exc, exc_info=True)
         raise HTTPException(status_code=500, detail="Ingest session capture failed. See server logs for details.")
@@ -78,7 +83,8 @@ async def get_session(session_id: str, request: Request) -> IngestSessionDetailR
 @limiter.limit("30/minute")
 async def ingest_stream(req: IngestRequest, request: Request) -> StreamingResponse:
     """Streaming ingest capture — emits SSE progress for archival and persistence."""
-    _check_audio_size(req)
+    api_req = _api_ingest_request(req)
+    _check_audio_size(api_req)
 
     store = request.app.state.ingest_session_store
 
@@ -89,7 +95,7 @@ async def ingest_stream(req: IngestRequest, request: Request) -> StreamingRespon
         t0 = time.perf_counter()
         try:
             yield _sse("step_complete", {"step": 1, "name": "source_archival_started"})
-            response = await asyncio.to_thread(store.create_api_session, req)
+            response = await asyncio.to_thread(store.create_api_session, api_req)
             yield _sse("step_complete", {"step": 2, "name": "session_persisted"})
             elapsed = round((time.perf_counter() - t0) * 1000, 1)
             yield _sse(

@@ -603,6 +603,21 @@ class TestVaultLayerCreateFromTemplate:
         assert "## Summary" in note.body
         assert "## Notes\nMet over coffee and talked about AI." in note.body
 
+    def test_template_scaffold_reload_picks_up_runtime_edits(self, tmp_path: Path):
+        template_dir = tmp_path / ".templates"
+        template_dir.mkdir(parents=True, exist_ok=True)
+        template_file = template_dir / "person.md"
+        template_file.write_text("# First Version\n\n{body}\n", encoding="utf-8")
+
+        vault = VaultLayer(tmp_path)
+        first = vault.create_from_template("person_note", {"title": "Alice Example"})
+
+        template_file.write_text("# Second Version\n\n{body}\n", encoding="utf-8")
+        second = vault.create_from_template("person_note", {"title": "Alice Example"})
+
+        assert first.body.startswith("# First Version")
+        assert second.body.startswith("# Second Version")
+
     def test_organization_template_renders_name_alias_and_body(self, tmp_path: Path):
         (tmp_path / ".templates").mkdir(parents=True, exist_ok=True)
         (tmp_path / ".templates" / "organization.md").write_text(
