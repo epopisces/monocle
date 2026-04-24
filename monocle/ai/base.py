@@ -53,7 +53,7 @@ def _open_span(name: str, provider: str = "", model: str = ""):
 
 
 class _AttrSpanContext:
-    """Thin wrapper that sets attributes and ավարտs spans without context attach."""
+    """Thin wrapper that sets attributes and ends spans without context attach."""
 
     def __init__(self, span, provider: str, model: str) -> None:
         self._span = span
