@@ -42,6 +42,9 @@ export interface SettingsResponse {
     auto_approve_threshold_pct: number
     confidence_weights: Record<string, number>
   }
+  history: {
+    retention_versions: number
+  }
   server: {
     host: string
     port: number
@@ -84,6 +87,10 @@ export interface ReviewPatch {
   auto_approve_threshold_pct?: number
 }
 
+export interface HistoryPatch {
+  retention_versions?: number
+}
+
 export interface UIPatch {
   voice_input_backend?: 'whisper' | 'web_speech'
 }
@@ -95,6 +102,7 @@ export interface TelemetryPatch {
 export interface SettingsPatch {
   ai?: AIPatch
   review?: ReviewPatch
+  history?: HistoryPatch
   ui?: UIPatch
   telemetry?: TelemetryPatch
 }

@@ -50,9 +50,10 @@ const mockSettings = {
   index: { chroma_persist_path: './data/chroma', collection_name: 'monocle' },
   agents: { weekly_summary_cron: '0 9 * * 1', reindex_cron: '0 2 * * *' },
   review: { queue_threshold: 70, auto_approve_threshold_pct: 90, confidence_weights: {} },
+  history: { retention_versions: 50 },
   server: { host: '127.0.0.1', port: 8000, dev_mode: false },
   telemetry: { enabled: false, otlp_endpoint: '', log_level: 'INFO', log_format: 'text', trace_filters: ['/api/health'] },
-  ui: {},
+  ui: { chat_session_history_limit: 10, voice_input_backend: 'whisper' },
   mcp_key_last4: 'ab12',
 } as const
 
@@ -142,6 +143,26 @@ describe('SettingsModal — loaded state', () => {
     expect(patchSettings).not.toHaveBeenCalled()
 
     vi.useRealTimers()
+  })
+
+  it('patches history retention when the input loses focus', async () => {
+    renderModal()
+    const input = await screen.findByTestId('history-retention-input')
+    fireEvent.change(input, { target: { value: '25' } })
+    fireEvent.blur(input)
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledWith({ history: { retention_versions: 25 } }))
+  })
+
+  it('does not send NaN when the history retention input is cleared', async () => {
+    renderModal()
+    const input = (await screen.findByTestId('history-retention-input')) as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
+    expect(input.value).toBe('')
+
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(input.value).toBe('50'))
+    expect(patchSettings).not.toHaveBeenCalled()
   })
 
   it('theme radio calls setTheme', async () => {

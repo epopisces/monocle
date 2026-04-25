@@ -42,6 +42,10 @@ const mockPatchNote = vi.fn()
 const mockDeleteNote = vi.fn()
 const mockListTemplates = vi.fn()
 const mockGetNoteBacklinks = vi.fn()
+const mockListNoteHistory = vi.fn()
+const mockGetNoteHistoryVersion = vi.fn()
+const mockGetNoteHistoryDiff = vi.fn()
+const mockRestoreNoteHistoryVersion = vi.fn()
 const mockListArchivedSources = vi.fn()
 const mockGetArchivedSource = vi.fn()
 const mockGetArchivedSourceContent = vi.fn()
@@ -54,6 +58,10 @@ vi.mock('./api/notes', () => ({
   deleteNote: (...args: unknown[]) => mockDeleteNote(...args),
   listTemplates: (...args: unknown[]) => mockListTemplates(...args),
   getNoteBacklinks: (...args: unknown[]) => mockGetNoteBacklinks(...args),
+  listNoteHistory: (...args: unknown[]) => mockListNoteHistory(...args),
+  getNoteHistoryVersion: (...args: unknown[]) => mockGetNoteHistoryVersion(...args),
+  getNoteHistoryDiff: (...args: unknown[]) => mockGetNoteHistoryDiff(...args),
+  restoreNoteHistoryVersion: (...args: unknown[]) => mockRestoreNoteHistoryVersion(...args),
 }))
 
 vi.mock('./api/ingest', () => ({
@@ -133,6 +141,39 @@ const MOCK_ARCHIVED_SOURCE = {
   byte_size: 12,
   provenance: {},
 }
+
+const MOCK_HISTORY_TIMESTAMP = '2026-04-23T00-00-00.000Z'
+const MOCK_HISTORY_ENTRIES = [
+  {
+    timestamp: MOCK_HISTORY_TIMESTAMP,
+    title: 'Alice Smith',
+    updated: '2026-04-23T00:00:00Z',
+    body_excerpt: 'Historical body',
+    byte_size: 42,
+  },
+]
+
+beforeEach(() => {
+  mockListNoteHistory.mockResolvedValue(MOCK_HISTORY_ENTRIES)
+  mockGetNoteHistoryVersion.mockResolvedValue({
+    timestamp: MOCK_HISTORY_TIMESTAMP,
+    note: { ...MOCK_NOTE_FULL, body: 'Historical body' },
+  })
+  mockGetNoteHistoryDiff.mockResolvedValue({
+    file_path: 'people/alice.md',
+    base_timestamp: MOCK_HISTORY_TIMESTAMP,
+    compare_timestamp: null,
+    base_label: MOCK_HISTORY_TIMESTAMP,
+    compare_label: 'Current',
+    diff_preview: {
+      kind: 'history',
+      before_excerpt: 'Historical body',
+      after_excerpt: 'I met Alice today.',
+      hunks: [{ section: 'body', before: 'Historical body', after: 'I met Alice today.' }],
+    },
+  })
+  mockRestoreNoteHistoryVersion.mockResolvedValue({ ...MOCK_NOTE_FULL, body: 'Historical body', mtime: 7777 })
+})
 
 // ── DocumentBrowserScreen tests ───────────────────────────────────
 
@@ -635,6 +676,111 @@ describe('NoteEditor — isolated', () => {
     })
     await waitFor(() => expect(screen.getByTestId('editor-toast')).toBeInTheDocument())
     expect(screen.getByTestId('editor-toast').textContent).toMatch(/conflict/i)
+  })
+
+  it('loads history details when a retained version is selected', async () => {
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={MOCK_NOTE_FULL as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+
+    fireEvent.click(await screen.findByTestId('history-entry-2026-04-23T00-00-00.000Z'))
+
+    await waitFor(() => expect(mockGetNoteHistoryVersion).toHaveBeenCalledWith('people/alice.md', MOCK_HISTORY_TIMESTAMP))
+    await waitFor(() => expect(screen.getByTestId('history-diff')).toBeInTheDocument())
+    expect(screen.getByTestId('history-version-body')).toHaveTextContent('Historical body')
+  })
+
+  it('reverts to the selected retained version', async () => {
+    const onSaved = vi.fn()
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={MOCK_NOTE_FULL as never}
+          templates={[]}
+          onSaved={onSaved}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+
+    fireEvent.click(await screen.findByTestId('history-entry-2026-04-23T00-00-00.000Z'))
+    await waitFor(() => expect(screen.getByTestId('history-revert-btn')).toBeInTheDocument())
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('history-revert-btn'))
+    })
+
+    await waitFor(() => expect(mockRestoreNoteHistoryVersion).toHaveBeenCalledWith(
+      'people/alice.md',
+      MOCK_HISTORY_TIMESTAMP,
+      { if_mtime: MOCK_NOTE_FULL.mtime },
+    ))
+    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({ body: 'Historical body' }))
+    confirmSpy.mockRestore()
+  })
+
+  it('ignores stale history list responses after switching notes', async () => {
+    let resolveFirst: ((value: typeof MOCK_HISTORY_ENTRIES) => void) | undefined
+    const secondEntries = [{
+      timestamp: '2026-04-24T00-00-00.000Z',
+      title: 'Bob Jones',
+      updated: '2026-04-24T00:00:00Z',
+      body_excerpt: 'Bob history',
+      byte_size: 21,
+    }]
+
+    mockListNoteHistory
+      .mockImplementationOnce(() => new Promise(resolve => { resolveFirst = resolve }))
+      .mockResolvedValueOnce(secondEntries)
+
+    const { rerender } = render(
+      <BrowserRouter>
+        <NoteEditor
+          note={MOCK_NOTE_FULL as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+
+    const bobNote = {
+      ...MOCK_NOTE_FULL,
+      file_path: 'people/bob.md',
+      title: 'Bob Jones',
+      body: 'Bob body',
+      mtime: 4444,
+    }
+
+    rerender(
+      <BrowserRouter>
+        <NoteEditor
+          note={bobNote as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+
+    resolveFirst?.(MOCK_HISTORY_ENTRIES)
+
+    await waitFor(() => expect(screen.getByTestId('history-entry-2026-04-24T00-00-00.000Z')).toBeInTheDocument())
+    expect(screen.queryByTestId(`history-entry-${MOCK_HISTORY_TIMESTAMP}`)).toBeNull()
+    expect(screen.getByText('Bob Jones')).toBeInTheDocument()
   })
 })
 

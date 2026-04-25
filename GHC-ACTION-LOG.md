@@ -50,6 +50,9 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Post-review hardened M38 fast capture by preserving `failed` sessions during synchronous prepare, adding a bounded wait when a background prepare job already owns the same session, and keeping execution-failure recoveries in `proposal_ready` with explicit regression coverage
 - Aligned `frontend/src/VoiceCapture.test.tsx` ingest mocks with the current session-based `POST /api/ingest` response contract and added regression coverage for fast-capture prepare failure, execution failure, and the running-prepare race
 - Validation: `uv run python -m pytest e:\development\_agents\monocle\monocle\tests\test_api.py -k "fast_capture" -x --tb=short -q` → 4 passed, 77 deselected, EXIT 0; `uv run python -m pytest e:\development\_agents\monocle\monocle\tests\test_ingest_prepare.py -k "prepare_session_now_waits_for_running_job_completion" -x --tb=short -q` → 1 passed, 6 deselected, EXIT 0; `cd frontend && npm run test -- --run src/VoiceCapture.test.tsx` → 83 passed, EXIT 0
+- Completed M39 end to end by extending vault-backed `.versions` history with configurable retention, note history/diff/restore APIs, and live settings support propagated into the running vault instance
+- Added retained-version browsing, diff inspection, and one-click restore in the Document Viewer, plus a settings control and example-config entry for `history.retention_versions`; refreshed `openapi.json` and `frontend/src/api/schema.d.ts`
+- Fixed the final full-backend regression by updating the shared CLI settings mock for the new `history` section, then revalidated the full milestone: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
 
 ### Claude Haiku 4.5
 - **Completed M37 — Ingest Execution, Validation & Source UX**

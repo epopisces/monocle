@@ -104,6 +104,11 @@
   color: var(--text-secondary);
 }
 
+.settings-field__hint {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+
 .settings-select {
   background-color: var(--bg-elevated);
   color: var(--text-primary);
@@ -116,6 +121,21 @@
 }
 
 .settings-select:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-input {
+  background-color: var(--bg-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-base);
+  font-family: var(--font-ui);
+}
+
+.settings-input:focus {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

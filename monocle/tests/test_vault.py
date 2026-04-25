@@ -774,6 +774,63 @@ class TestVaultLayerVersions:
         restored = vault.read_note("w/r.md")
         assert restored.title == "T"
 
+    def test_retention_prunes_oldest_versions(self, tmp_path: Path):
+        vault = VaultLayer(tmp_path, retention_versions=2)
+        note = Note(file_path="w/retained.md", title="T", body="v1", metadata=NoteMetadata())
+        vault.write_note(note.file_path, note)
+
+        for body in ("v2", "v3", "v4"):
+            time.sleep(0.05)
+            note.body = body
+            vault.write_note(note.file_path, note)
+
+        versions = vault.list_versions(note.file_path)
+        assert len(versions) == 2
+        assert versions == sorted(versions)
+
+    def test_read_version_returns_historical_note(self, tmp_path: Path):
+        vault = VaultLayer(tmp_path)
+        note = Note(file_path="w/version.md", title="T", body="before", metadata=NoteMetadata())
+        vault.write_note(note.file_path, note)
+        time.sleep(0.05)
+        note.body = "after"
+        vault.write_note(note.file_path, note)
+
+        version = vault.read_version(note.file_path, vault.list_versions(note.file_path)[0])
+        assert version.file_path == note.file_path
+        assert version.body == "before"
+
+    def test_diff_version_against_current_includes_body_and_frontmatter_hunks(self, tmp_path: Path):
+        vault = VaultLayer(tmp_path)
+        note = Note(file_path="w/diff.md", title="T", body="before", metadata=NoteMetadata(domain="work"))
+        vault.write_note(note.file_path, note)
+        time.sleep(0.05)
+        note.body = "after"
+        note.metadata.review_status = "pending"
+        vault.write_note(note.file_path, note)
+
+        diff = vault.diff_version_against_current(note.file_path, vault.list_versions(note.file_path)[0])
+        assert diff.file_path == note.file_path
+        assert diff.diff_preview.kind == "history"
+        assert {hunk.section for hunk in diff.diff_preview.hunks} >= {"body", "frontmatter"}
+
+    def test_restore_oldest_retained_version_does_not_prune_target(self, tmp_path: Path):
+        vault = VaultLayer(tmp_path, retention_versions=2)
+        note = Note(file_path="w/restore-oldest.md", title="T", body="v1", metadata=NoteMetadata())
+        vault.write_note(note.file_path, note)
+
+        for body in ("v2", "v3"):
+            time.sleep(0.05)
+            note.body = body
+            vault.write_note(note.file_path, note)
+
+        oldest_timestamp = vault.list_versions(note.file_path)[0]
+
+        vault.restore_version(note.file_path, oldest_timestamp)
+
+        restored = vault.read_note(note.file_path)
+        assert restored.body == "v1"
+
 
 # ============================================================================
 # VaultLayer: list_notes

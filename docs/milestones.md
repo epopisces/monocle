@@ -1319,3 +1319,59 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 
 **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 994 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 457 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 
+---
+
+### M39: File History, Revert & Diff Viewer
+
+**Goal:** Give users first-class note history so they can inspect retained versions, compare diffs against the current note, and restore a prior state after manual or ingest-driven edits.
+
+**Completed:** 2026-04-24
+
+**Deliverables completed:**
+
+- [x] Extended the vault-backed `.versions` snapshot system with configurable retention, validated version resolution helpers, history reads, and diff generation so the canonical history store stays in one place.
+- [x] Added note history API endpoints for listing retained versions, reading a specific historical version, diffing that version against the current note, and restoring a retained version through the normal vault/reindex path.
+- [x] Added Document Viewer history UI with retained-version browsing, diff inspection, and one-click restore, plus a settings control for live editing `history.retention_versions`.
+- [x] Ensured ingest-driven and manual note updates share the same history and rollback path by keeping snapshot creation in `VaultLayer` and updating write/restore flows to stamp fresh `metadata.updated` values.
+
+**Acceptance Criteria met:**
+
+- Retention is configurable in settings/config: `history.retention_versions` is now part of the server settings model, persisted by `PATCH /api/settings`, applied live to the in-memory vault, and documented in `config.yaml.example`.
+- Users can open historical diffs for a document in the Document Viewer: the history drawer loads retained versions, shows diff hunks against the current note, and supports quick switching between versions.
+- Users can revert a document to a prior retained version after ingest or manual changes: restore runs through the vault layer, invalidates review counts, queues reindex, and refreshes the open note content in the editor.
+
+**Implementation notes:**
+
+- The history store remains `<vault>/.versions/<path>/<timestamp>.md`; M39 formalizes access and retention around the existing snapshot layout instead of introducing a second persistence mechanism.
+- Retention pruning happens per-note path after new snapshots are written, deleting only the oldest retained files beyond the configured limit.
+- History diffs are generated against the current note and include both frontmatter and body hunks so users can inspect metadata-only changes as well as content edits.
+- The settings router now propagates `history.retention_versions` changes directly into `app.state.vault`, so retention edits take effect immediately without a restart.
+- The Document Viewer loads history details lazily after a version is selected, keeping the default note-editing surface responsive while still exposing full rollback context when needed.
+
+**Files modified:**
+
+- `config.yaml.example`
+- `monocle/cli.py`
+- `monocle/config.py`
+- `monocle/main.py`
+- `monocle/models.py`
+- `monocle/routers/notes.py`
+- `monocle/routers/settings.py`
+- `monocle/tests/test_api.py`
+- `monocle/tests/test_cli.py`
+- `monocle/tests/test_settings.py`
+- `monocle/tests/test_vault.py`
+- `monocle/vault/__init__.py`
+- `openapi.json`
+- `frontend/src/api/notes.ts`
+- `frontend/src/api/schema.d.ts`
+- `frontend/src/api/settings.ts`
+- `frontend/src/components/DocumentBrowser/NoteEditor.css`
+- `frontend/src/components/DocumentBrowser/NoteEditor.tsx`
+- `frontend/src/components/SettingsModal/SettingsModal.css`
+- `frontend/src/components/SettingsModal/index.tsx`
+- `frontend/src/DocumentBrowser.test.tsx`
+- `frontend/src/SettingsModal.test.tsx`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+

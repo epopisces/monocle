@@ -6,9 +6,17 @@ import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { yaml as yamlLang } from '@codemirror/lang-yaml'
 
-import type { Note } from '../../api/notes'
+import {
+  getNoteHistoryDiff,
+  getNoteHistoryVersion,
+  listNoteHistory,
+  putNote,
+  restoreNoteHistoryVersion,
+  type Note,
+  type NoteHistoryDiffResponse,
+  type NoteHistoryEntry,
+} from '../../api/notes'
 import { getArchivedSourceDownloadUrl, isTextSourceRecord, type SourceLink } from '../../api/ingest'
-import { putNote } from '../../api/notes'
 import { approveNote } from '../../api/review'
 import { ApiError } from '../../api/client'
 import { useDebouncedCallback } from '../../hooks/useDebounce'
@@ -51,9 +59,17 @@ export default function NoteEditor({
   const [isDirty, setIsDirty] = useState(false)
   const [isSaving, setIsSaving] = useState(false)
   const [toast, setToast] = useState<ToastState | null>(null)
+  const [historyEntries, setHistoryEntries] = useState<NoteHistoryEntry[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [selectedHistoryTimestamp, setSelectedHistoryTimestamp] = useState<string | null>(null)
+  const [selectedHistoryNote, setSelectedHistoryNote] = useState<Note | null>(null)
+  const [historyDiff, setHistoryDiff] = useState<NoteHistoryDiffResponse | null>(null)
+  const [isReverting, setIsReverting] = useState(false)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const editorViewRef = useRef<EditorView | null>(null)
+  const historyRequestIdRef = useRef(0)
   // Track if content changes are coming from the editor (not external load)
   const externalUpdateRef = useRef(false)
 
@@ -96,6 +112,26 @@ export default function NoteEditor({
 
   const debouncedSave = useDebouncedCallback(saveNote, 2000)
 
+  const loadHistory = useCallback(async (filePath: string) => {
+    const requestId = historyRequestIdRef.current + 1
+    historyRequestIdRef.current = requestId
+    setHistoryLoading(true)
+    setHistoryError(null)
+    setHistoryEntries([])
+    try {
+      const entries = await listNoteHistory(filePath)
+      if (requestId !== historyRequestIdRef.current) return
+      setHistoryEntries(entries)
+    } catch (err) {
+      if (requestId !== historyRequestIdRef.current) return
+      setHistoryError(String((err as Error)?.message ?? 'Failed to load history'))
+      setHistoryEntries([])
+    } finally {
+      if (requestId !== historyRequestIdRef.current) return
+      setHistoryLoading(false)
+    }
+  }, [])
+
   // Cancel any pending debounced saves on unmount
   useEffect(() => {
     return () => {
@@ -111,6 +147,9 @@ export default function NoteEditor({
     setLocalNote(note)
     setIsDirty(false)
     setMode('yaml')
+    setSelectedHistoryTimestamp(null)
+    setSelectedHistoryNote(null)
+    setHistoryDiff(null)
     // Update the CodeMirror editor content
     if (editorViewRef.current) {
       externalUpdateRef.current = true
@@ -121,7 +160,39 @@ export default function NoteEditor({
       })
       externalUpdateRef.current = false
     }
+    loadHistory(note.file_path)
   }, [note, computeRaw, debouncedSave])
+
+  useEffect(() => {
+    if (!selectedHistoryTimestamp) {
+      setSelectedHistoryNote(null)
+      setHistoryDiff(null)
+      return
+    }
+
+    const historyTimestamp = selectedHistoryTimestamp
+
+    let cancelled = false
+    async function loadHistoryDetail() {
+      try {
+        const [version, diff] = await Promise.all([
+          getNoteHistoryVersion(localNote.file_path, historyTimestamp),
+          getNoteHistoryDiff(localNote.file_path, historyTimestamp),
+        ])
+        if (cancelled) return
+        setSelectedHistoryNote(version.note)
+        setHistoryDiff(diff)
+      } catch (err) {
+        if (cancelled) return
+        setToast({ message: `History load failed: ${(err as Error).message}`, kind: 'error' })
+        setSelectedHistoryNote(null)
+        setHistoryDiff(null)
+      }
+    }
+
+    loadHistoryDetail()
+    return () => { cancelled = true }
+  }, [localNote.file_path, selectedHistoryTimestamp])
 
   // ── CodeMirror setup ──────────────────────────────────────────
 
@@ -268,6 +339,38 @@ export default function NoteEditor({
     saveNote(localNote)
   }
 
+  const handleRevertHistoryVersion = async () => {
+    if (!selectedHistoryTimestamp) return
+
+    const message = isDirty
+      ? 'You have unsaved changes. Reverting will discard them. Continue?'
+      : 'Revert this document to the selected version?'
+    if (!window.confirm(message)) return
+
+    setIsReverting(true)
+    debouncedSave.cancel()
+    try {
+      const restored = await restoreNoteHistoryVersion(localNote.file_path, selectedHistoryTimestamp, {
+        if_mtime: localNote.mtime ?? undefined,
+      })
+      setLocalNote(restored)
+      setIsDirty(false)
+      onSaved(restored)
+      setSelectedHistoryTimestamp(null)
+      setSelectedHistoryNote(null)
+      setHistoryDiff(null)
+      await loadHistory(restored.file_path)
+      setToast({ message: 'Document reverted to historical version', kind: 'success' })
+    } catch (err) {
+      const message = err instanceof ApiError && err.status === 409
+        ? 'Revert conflict — this note was modified elsewhere. Reload to see the latest version.'
+        : `Revert failed: ${(err as Error).message}`
+      setToast({ message, kind: 'error' })
+    } finally {
+      setIsReverting(false)
+    }
+  }
+
   // ── Toast auto-dismiss ────────────────────────────────────────
 
   useEffect(() => {
@@ -373,6 +476,65 @@ export default function NoteEditor({
           </ul>
         </details>
       )}
+
+      <details className="note-editor__history" data-testid="note-history">
+        <summary>History ({historyEntries.length})</summary>
+        {historyLoading && <p className="note-editor__history-muted">Loading history…</p>}
+        {historyError && <p className="note-editor__history-error">{historyError}</p>}
+        {!historyLoading && !historyError && historyEntries.length === 0 && (
+          <p className="note-editor__history-muted">No previous versions yet.</p>
+        )}
+        {!historyLoading && historyEntries.length > 0 && (
+          <div className="note-editor__history-grid">
+            <div className="note-editor__history-list" data-testid="history-list">
+              {historyEntries.map(entry => (
+                <button
+                  key={entry.timestamp}
+                  type="button"
+                  className={`note-editor__history-entry${selectedHistoryTimestamp === entry.timestamp ? ' note-editor__history-entry--active' : ''}`}
+                  onClick={() => setSelectedHistoryTimestamp(entry.timestamp)}
+                  data-testid={`history-entry-${entry.timestamp}`}
+                >
+                  <strong>{entry.timestamp}</strong>
+                  <span>{entry.title ?? localNote.title}</span>
+                  {entry.body_excerpt && <small>{entry.body_excerpt}</small>}
+                </button>
+              ))}
+            </div>
+            {selectedHistoryTimestamp && selectedHistoryNote && historyDiff && (
+              <div className="note-editor__history-detail" data-testid="history-detail">
+                <div className="note-editor__history-actions">
+                  <span className="note-editor__history-label">Comparing {historyDiff.base_label} to {historyDiff.compare_label}</span>
+                  <button
+                    type="button"
+                    className="note-editor__history-revert-btn"
+                    onClick={handleRevertHistoryVersion}
+                    disabled={isReverting}
+                    data-testid="history-revert-btn"
+                  >
+                    {isReverting ? 'Reverting…' : 'Revert to this version'}
+                  </button>
+                </div>
+                <div className="note-editor__history-diff" data-testid="history-diff">
+                  {historyDiff.diff_preview.hunks.map((hunk, index) => (
+                    <div key={`${hunk.section ?? index}-${index}`} className="note-editor__history-hunk">
+                      <p>{hunk.section ?? 'change'}</p>
+                      <div className="note-editor__history-columns">
+                        <pre>{hunk.before ?? 'No content'}</pre>
+                        <pre>{hunk.after ?? 'No content'}</pre>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="note-editor__history-preview">
+                  <h3>{selectedHistoryNote.title}</h3>
+                  <pre data-testid="history-version-body">{selectedHistoryNote.body}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </details>
 
       {/* ── Toast ───────────────────────────────────────────────── */}
       {toast && (

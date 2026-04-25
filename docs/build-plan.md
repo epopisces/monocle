@@ -27,9 +27,14 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M38 — Fast-Capture Path (2026-04-24)
-**Note:** M34-M38 were completed out of sequence to unblock and streamline the ingest workflow; M33 remains queued.
+**Last Completed:** M39 — File History, Revert & Diff Viewer (2026-04-24)
+**Note:** M34-M39 were completed out of sequence to unblock and streamline the ingest workflow; M33 remains queued.
 **Blocked By:** None
+**Session Notes (M39 — File History, Revert & Diff Viewer):**
+- **Status:** COMPLETE (2026-04-24)
+- Extended the existing vault `.versions` history into a first-class note-history feature with configurable retention, note history/diff/revert APIs, and live settings support so manual and ingest-driven edits share the same rollback path.
+- Added retained-version browsing, diff inspection, and one-click restore in the Document Viewer, and refreshed the example config plus generated API artifacts to expose the new settings and endpoints.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 **Session Notes (M38 — Fast-Capture Path):**
 - **Status:** COMPLETE (2026-04-24)
 - Added fast-capture orchestration on top of persisted ingest sessions so `fast_capture=true` runs synchronous prepare → fallback-or-approve → execute using the existing ingest-session, MCP execution, provenance, validation, and reindex paths.
@@ -183,7 +188,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M36 | Ingest Review Workspace & Proposal Flow                        | COMPLETE    |
 | M37 | Ingest Execution, Validation & Source UX                       | COMPLETE    |
 | M38 | Fast-Capture Path                                              | COMPLETE    |
-| M39 | File History, Revert & Diff Viewer                             | NOT STARTED |
+| M39 | File History, Revert & Diff Viewer                             | COMPLETE    |
 | M40 | Add Documents & Snippets To Chat Context                       | NOT STARTED |
 
 ---
@@ -885,22 +890,11 @@ The implementation stays on the persisted ingest-session/source architecture, pr
 
 ### M39: File History, Revert & Diff Viewer
 
-**Status:** NOT STARTED — queued after M36
+**Status:** COMPLETE (2026-04-24)
 
-Add first-class document history so users can inspect prior versions, open diffs in the Document Viewer, and undo ingest-driven or manual edits.
-
-**Deliverables:**
-
-- [ ] Persist file history snapshots with configurable retention limits (for example, keep the last `x` versions)
-- [ ] Add revert / undo operations for prior document versions
-- [ ] Add diff viewing in the Document Viewer for historical versions and ingest-proposed changes
-- [ ] Ensure ingest execution records history entries in a way that supports targeted rollback
-
-**Acceptance Criteria:**
-
-- Retention is configurable in settings/config
-- Users can open historical diffs for a document in the Document Viewer
-- Users can revert a document to a prior retained version after ingest or manual changes
+Added first-class note history on top of the existing vault `.versions` store, with configurable retention, history inspection/diff APIs, and restore support that keeps ingest-driven and manual edits on the same rollback mechanism.
+The Document Viewer now exposes retained versions, per-version diffs, and revert actions, and settings can update retention live.
+**Full details:** [docs/milestones.md#m39-file-history-revert--diff-viewer](milestones.md#m39-file-history-revert--diff-viewer)
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 

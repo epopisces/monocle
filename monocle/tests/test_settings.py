@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -79,6 +79,44 @@ class TestPatchSettings:
         r = api_client.patch("/api/settings", json={"review": {"queue_threshold": 0.75}})
         assert r.status_code == 200
         assert r.json()["review"]["queue_threshold"] == 0.75
+
+    def test_patch_history_retention_versions(self, api_client: TestClient) -> None:
+        r = api_client.patch("/api/settings", json={"history": {"retention_versions": 12}})
+        assert r.status_code == 200
+        assert r.json()["history"]["retention_versions"] == 12
+        assert api_client.app.state.settings.history.retention_versions == 12
+        assert api_client.app.state.vault.retention_versions == 12
+
+    def test_patch_history_retention_prunes_existing_versions(self, api_client: TestClient) -> None:
+        payload = {"title": "History", "body": "v1", "metadata": {"type": "observation", "domain": "work"}}
+        api_client.put("/api/notes/work/history-prune.md", json=payload)
+        api_client.put("/api/notes/work/history-prune.md", json={**payload, "body": "v2"})
+        api_client.put("/api/notes/work/history-prune.md", json={**payload, "body": "v3"})
+
+        versions_before = api_client.app.state.vault.list_versions("work/history-prune.md")
+        assert len(versions_before) == 2
+
+        r = api_client.patch("/api/settings", json={"history": {"retention_versions": 1}})
+        assert r.status_code == 200
+
+        versions_after = api_client.app.state.vault.list_versions("work/history-prune.md")
+        assert len(versions_after) == 1
+
+    def test_patch_review_does_not_reapply_history_retention(self, api_client: TestClient) -> None:
+        api_client.app.state.vault.set_history_retention = MagicMock()
+
+        r = api_client.patch("/api/settings", json={"review": {"queue_threshold": 0.8}})
+
+        assert r.status_code == 200
+        api_client.app.state.vault.set_history_retention.assert_not_called()
+
+    def test_patch_history_same_retention_does_not_reapply(self, api_client: TestClient) -> None:
+        api_client.app.state.vault.set_history_retention = MagicMock()
+
+        r = api_client.patch("/api/settings", json={"history": {"retention_versions": 50}})
+
+        assert r.status_code == 200
+        api_client.app.state.vault.set_history_retention.assert_not_called()
 
     def test_patch_review_auto_approve_threshold(self, api_client: TestClient) -> None:
         r = api_client.patch(
