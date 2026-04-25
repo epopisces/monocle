@@ -181,6 +181,7 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
 
     config_patch: dict[str, dict] = {}
     ai_provider_changed = False
+    history_retention_changed = False
     new_ai_provider = None
     pending_trace_filters: list[str] | None = None  # Deferred until after validation
 
@@ -206,6 +207,7 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
                 history_data = settings.history.model_dump()
                 history_data.update(history_updates)
                 new_history = HistoryConfig(**history_data)
+                history_retention_changed = new_history.retention_versions != settings.history.retention_versions
                 settings = settings.model_copy(update={"history": new_history})
                 config_patch["history"] = history_updates
             except ValidationError as exc:
@@ -297,7 +299,7 @@ async def patch_settings(request: Request, patch: SettingsPatch) -> dict:
     if new_ai_provider is not None:
         request.app.state.ai = new_ai_provider
     vault = getattr(request.app.state, "vault", None)
-    if vault is not None:
+    if vault is not None and history_retention_changed:
         await asyncio.to_thread(vault.set_history_retention, settings.history.retention_versions)
 
     # Apply trace filters AFTER all validations/hot-reload succeed (atomic guarantee)

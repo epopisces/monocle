@@ -153,6 +153,18 @@ describe('SettingsModal — loaded state', () => {
     await waitFor(() => expect(patchSettings).toHaveBeenCalledWith({ history: { retention_versions: 25 } }))
   })
 
+  it('does not send NaN when the history retention input is cleared', async () => {
+    renderModal()
+    const input = (await screen.findByTestId('history-retention-input')) as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
+    expect(input.value).toBe('')
+
+    fireEvent.blur(input)
+
+    await waitFor(() => expect(input.value).toBe('50'))
+    expect(patchSettings).not.toHaveBeenCalled()
+  })
+
   it('theme radio calls setTheme', async () => {
     renderModal()
     await screen.findByTestId('chat-model-select')

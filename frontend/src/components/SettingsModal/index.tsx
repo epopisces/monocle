@@ -81,7 +81,7 @@ export default function SettingsModal({ open, onClose }: Props) {
   const thresholdTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [draftQT, setDraftQT] = useState<number | null>(null)
   const [draftAAT, setDraftAAT] = useState<number | null>(null)
-  const [draftHistoryRetention, setDraftHistoryRetention] = useState<number | null>(null)
+  const [draftHistoryRetention, setDraftHistoryRetention] = useState<string | null>(null)
   const [modelStatus, setModelStatus] = useState<ProviderModelsResponse | null>(null)
   const { theme, setTheme } = useTheme()
 
@@ -171,12 +171,25 @@ export default function SettingsModal({ open, onClose }: Props) {
   }
 
   const handleHistoryRetentionBlur = async () => {
-    if (!settings || draftHistoryRetention === null || Number.isNaN(draftHistoryRetention)) return
-    if (draftHistoryRetention === settings.history.retention_versions) return
+    if (!settings || draftHistoryRetention === null) return
+    if (draftHistoryRetention.trim() === '') {
+      setDraftHistoryRetention(null)
+      return
+    }
+
+    const parsedRetention = parseInt(draftHistoryRetention, 10)
+    if (Number.isNaN(parsedRetention)) {
+      setDraftHistoryRetention(null)
+      return
+    }
+    if (parsedRetention === settings.history.retention_versions) {
+      setDraftHistoryRetention(null)
+      return
+    }
 
     dispatch({ type: 'SAVING' })
     try {
-      const saved = await patchSettings({ history: { retention_versions: draftHistoryRetention } })
+      const saved = await patchSettings({ history: { retention_versions: parsedRetention } })
       dispatch({ type: 'SAVED', payload: saved })
     } catch (e) {
       dispatch({ type: 'SAVE_ERROR', payload: String(e) })
@@ -366,8 +379,8 @@ export default function SettingsModal({ open, onClose }: Props) {
                   min={1}
                   max={500}
                   step={1}
-                  value={draftHistoryRetention ?? settings.history.retention_versions}
-                  onChange={e => setDraftHistoryRetention(parseInt(e.target.value, 10))}
+                  value={draftHistoryRetention ?? String(settings.history.retention_versions)}
+                  onChange={e => setDraftHistoryRetention(e.target.value)}
                   onBlur={handleHistoryRetentionBlur}
                   disabled={status === 'saving'}
                   className="settings-input"
