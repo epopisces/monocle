@@ -2,7 +2,7 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-24
+last-updated: 2026-04-25
 active-milestone: M33
 ---
 
@@ -27,9 +27,14 @@ This is the primary reference document for building Monocle. Read it at the star
 ## Current Status
 
 **Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M39 — File History, Revert & Diff Viewer (2026-04-24)
-**Note:** M34-M39 were completed out of sequence to unblock and streamline the ingest workflow; M33 remains queued.
+**Last Completed:** M40 — Add Documents & Snippets To Chat Context (2026-04-25)
+**Note:** M34-M40 were completed out of sequence to unblock and streamline the ingest workflow; M33 remains queued.
 **Blocked By:** None
+**Session Notes (M40 — Add Documents & Snippets To Chat Context):**
+- **Status:** COMPLETE (2026-04-25)
+- Added explicit user-grounding flows from the Docs explorer and Document Viewer: file-tree document drag-and-drop onto the persistent Chat nav target, plus right-click add-to-chat actions for documents, sections, sentences, and selected text across preview, YAML, and form modes.
+- Chat sessions now persist user-added grounding as first-class localStorage entries and reopen target sessions via the existing `session_id` route wiring, so manually added context stays visibly distinct from implicit vault retrieval inside the destination chat.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1007 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 468 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 **Session Notes (M39 — File History, Revert & Diff Viewer):**
 - **Status:** COMPLETE (2026-04-24)
 - Extended the existing vault `.versions` history into a first-class note-history feature with configurable retention, note history/diff/revert APIs, and live settings support so manual and ingest-driven edits share the same rollback path.
@@ -189,7 +194,7 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M37 | Ingest Execution, Validation & Source UX                       | COMPLETE    |
 | M38 | Fast-Capture Path                                              | COMPLETE    |
 | M39 | File History, Revert & Diff Viewer                             | COMPLETE    |
-| M40 | Add Documents & Snippets To Chat Context                       | NOT STARTED |
+| M40 | Add Documents & Snippets To Chat Context                       | COMPLETE    |
 
 ---
 
@@ -902,23 +907,11 @@ The Document Viewer now exposes retained versions, per-version diffs, and revert
 
 ### M40: Add Documents & Snippets To Chat Context
 
-**Status:** NOT STARTED — queued after M33
+**Status:** COMPLETE (2026-04-25)
 
-Let users explicitly add documents or document snippets into a new or existing chat session from the Docs explorer or Document Viewer.
-
-**Deliverables:**
-
-- [ ] Docs file explorer drag-and-drop support for adding a document into a chat session as context
-- [ ] Document Viewer context menu actions for adding the current document, section, or sentence to a new or existing chat session when nothing is selected
-- [ ] Document Viewer context menu actions for adding the current selection to a new or existing chat session when text is selected
-- [ ] Chat/session plumbing that records the inserted context as explicit user-added grounding rather than implicit vault retrieval
-
-**Acceptance Criteria:**
-
-- Users can add whole documents from the Docs explorer to a new or existing chat session
-- Right-click in the Document Viewer exposes add-to-chat actions for document/section/sentence when no text is selected
-- Right-click on a selection exposes add-selection-to-chat actions for a new or existing session
-- Added context is clearly represented as user-provided context inside the destination chat session
+Added explicit add-to-chat grounding flows from the Docs explorer and Document Viewer, including right-click document/section/sentence/selection actions plus file-tree drag-and-drop onto the persistent Chat nav target.
+Chat sessions now persist user-added grounding as first-class localStorage entries and resend them as explicit user context in `/api/chat`, so manual grounding is visibly distinct from agent retrieval.
+**Full details:** [docs/milestones.md#m40-add-documents--snippets-to-chat-context](milestones.md#m40-add-documents--snippets-to-chat-context)
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 

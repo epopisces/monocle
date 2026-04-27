@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import type { Components } from 'react-markdown'
-import type { ThreadMessage, ToolCallEntry, NoteCardEntry } from '../../hooks/useChat'
+import type { ThreadMessage, ToolCallEntry, NoteCardEntry } from './sessionStore'
 import './ChatMessage.css'
 
 // ── Vault path linkifier ──────────────────────────────────────────
@@ -106,12 +106,37 @@ function NoteCard({ note }: { note: NoteCardEntry }) {
   )
 }
 
+function GroundingCard({ message }: { message: ThreadMessage }) {
+  const grounding = message.grounding
+  if (!grounding) return null
+  return (
+    <div className="chat-grounding" data-testid="grounding-card">
+      <div className="chat-grounding__meta">
+        <span className="chat-grounding__badge">User-added context</span>
+        <span className="chat-grounding__scope">{grounding.scope}</span>
+      </div>
+      <p className="chat-grounding__source">{grounding.sourceTitle} · {grounding.sourcePath}</p>
+      <p className="chat-grounding__text">{grounding.text}</p>
+    </div>
+  )
+}
+
 interface Props {
   message: ThreadMessage
 }
 
 export default function ChatMessage({ message }: Props) {
   const isUser = message.role === 'user'
+
+  if (message.kind === 'grounding' && message.grounding) {
+    return (
+      <div className="chat-message chat-message--user chat-message--grounding">
+        <div className="chat-message__bubble">
+          <GroundingCard message={message} />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className={`chat-message chat-message--${isUser ? 'user' : 'assistant'}`}>

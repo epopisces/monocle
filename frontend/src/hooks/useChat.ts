@@ -1,61 +1,20 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { streamChat, type ChatMessage } from '../api/chat'
+import {
+  CHAT_SESSIONS_UPDATED_EVENT,
+  generateSessionId,
+  groundingToApiContent,
+  loadSessions,
+  persistSession,
+  type Session,
+  type ThreadMessage,
+} from '../components/Chat/sessionStore'
 
-const STORAGE_KEY = 'monocle-sessions'
-const MAX_SESSIONS = 10
-
-export interface ToolCallEntry {
-  name: string
-  callId?: string
-  resultCount?: number
-  error?: string
-  url?: string
-  durationMs?: number
-  status?: 'running' | 'success' | 'error'
-}
-
-export interface NoteCardEntry {
-  filePath: string
-  type: string
-}
-
-export interface ThreadMessage {
-  role: 'user' | 'assistant'
-  content: string
-  toolCalls?: ToolCallEntry[]
-  noteCreated?: NoteCardEntry
-  isStreaming?: boolean
-}
-
-export interface Session {
-  id: string
-  title: string
-  createdAt: string
-  messages: ThreadMessage[]
-}
-
-function loadSessions(): Session[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY)
-    return raw ? (JSON.parse(raw) as Session[]) : []
-  } catch {
-    return []
+function toApiMessage(message: ThreadMessage): ChatMessage {
+  if (message.kind === 'grounding' && message.grounding) {
+    return { role: 'user', content: groundingToApiContent(message.grounding) }
   }
-}
-
-function persistSession(session: Session, prev: Session[]): Session[] {
-  const filtered = prev.filter(s => s.id !== session.id)
-  const updated = [session, ...filtered].slice(0, MAX_SESSIONS)
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
-  } catch {
-    // localStorage quota exceeded — silently ignore
-  }
-  return updated
-}
-
-function generateId(): string {
-  return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  return { role: message.role as 'user' | 'assistant', content: message.content }
 }
 
 export function useChat() {
@@ -71,18 +30,28 @@ export function useChat() {
   threadRef.current = thread
   sessionIdRef.current = currentSessionId
 
+  const refreshSessions = useCallback(() => {
+    setSessions(loadSessions())
+  }, [])
+
+  useEffect(() => {
+    const handleSessionsUpdated = () => refreshSessions()
+    window.addEventListener(CHAT_SESSIONS_UPDATED_EVENT, handleSessionsUpdated)
+    return () => window.removeEventListener(CHAT_SESSIONS_UPDATED_EVENT, handleSessionsUpdated)
+  }, [refreshSessions])
+
   // send is stable (empty deps) — reads latest values via refs
   const send = useCallback(async (content: string, toolHint?: string, fetchUrls?: string[]) => {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
 
-    const sessionId = sessionIdRef.current ?? generateId()
+    const sessionId = sessionIdRef.current ?? generateSessionId()
     setCurrentSessionId(sessionId)
 
     // Build API message list from current thread + new user turn
     const messagesForApi: ChatMessage[] = [
-      ...threadRef.current.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),
+      ...threadRef.current.map(toApiMessage),
       { role: 'user', content },
     ]
 
@@ -227,7 +196,7 @@ export function useChat() {
   }, []) // stable — reads thread/sessionId via refs
 
   const selectSession = useCallback((id: string) => {
-    const session = sessions.find(s => s.id === id)
+    const session = loadSessions().find(s => s.id === id) ?? sessions.find(s => s.id === id)
     if (!session) return
     abortRef.current?.abort()
     setThread(session.messages.map(m => ({ ...m, isStreaming: false })))
@@ -242,5 +211,5 @@ export function useChat() {
     setIsStreaming(false)
   }, [])
 
-  return { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession }
+  return { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession, refreshSessions }
 }

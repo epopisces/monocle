@@ -54,6 +54,15 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Added retained-version browsing, diff inspection, and one-click restore in the Document Viewer, plus a settings control and example-config entry for `history.retention_versions`; refreshed `openapi.json` and `frontend/src/api/schema.d.ts`
 - Fixed the final full-backend regression by updating the shared CLI settings mock for the new `history` section, then revalidated the full milestone: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
 
+## 2026-04-25
+
+### GPT-5.4
+- Completed M40 end to end: added explicit user-grounding entries to client-side chat sessions, rendered them distinctly in chat, and serialized them into `/api/chat` as structured user-added context instead of implicit retrieval
+- Added Document Viewer add-to-chat context menus for document/section/sentence/selection across preview, YAML, and form modes, plus a shared new-or-existing chat session picker
+- Added docs-to-chat drag-and-drop from file-tree notes onto the persistent Chat nav target, loading the dropped note and routing it through the same session picker flow
+- Updated `docs/build-plan.md` and `docs/milestones.md` to mark M40 complete and archive its full details
+- Validation: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1007 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 468 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
+
 ### Claude Haiku 4.5
 - **Completed M37 — Ingest Execution, Validation & Source UX**
   - Created `monocle/services/ingest_execute.py` with orchestration that applies approved ingest actions exclusively through canonical MCP tools (`create_note`, `update_note`; never direct vault writes)

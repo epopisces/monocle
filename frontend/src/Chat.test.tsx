@@ -4,7 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import ChatScreen from './components/Chat/ChatScreen'
 import ChatMessage from './components/Chat/ChatMessage'
 import ChatInput from './components/Chat/ChatInput'
-import type { ThreadMessage } from './hooks/useChat'
+import type { ThreadMessage } from './components/Chat/sessionStore'
 
 // ── Module mocks ─────────────────────────────────────────────────
 
@@ -388,6 +388,26 @@ describe('ChatMessage', () => {
     renderWithRouter(<ChatMessage message={msg} />)
     expect(screen.getByTestId('note-card')).toBeInTheDocument()
     expect(screen.getByTestId('note-card').textContent).toContain('alice.md')
+  })
+
+  it('renders user-added grounding as a distinct context card', () => {
+    const msg: ThreadMessage = {
+      role: 'user',
+      content: 'Alice manages the migration timeline.',
+      kind: 'grounding',
+      grounding: {
+        id: 'ctx_1',
+        scope: 'selection',
+        sourcePath: 'people/alice.md',
+        sourceTitle: 'Alice Smith',
+        text: 'Alice manages the migration timeline.',
+        addedAt: '2026-04-24T00:00:00Z',
+      },
+    }
+    render(<ChatMessage message={msg} />)
+    expect(screen.getByTestId('grounding-card')).toBeInTheDocument()
+    expect(screen.getByText('User-added context')).toBeInTheDocument()
+    expect(screen.getByText('selection')).toBeInTheDocument()
   })
 
   it('click on note card navigates to document browser', () => {

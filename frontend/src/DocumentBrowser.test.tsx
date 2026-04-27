@@ -4,12 +4,24 @@ import { BrowserRouter, MemoryRouter } from 'react-router-dom'
 
 // ── Mock CodeMirror ───────────────────────────────────────────────
 // CodeMirror uses DOM APIs not available in jsdom; mock to a simple div
+let mockEditorDocText = '---\ntitle: Test Note\n---\n\nBody text'
+const mockPosAtCoords = vi.fn(() => null)
+
 vi.mock('@codemirror/view', () => ({
   EditorView: class EditorView {
     dom = document.createElement('div')
-    state = { doc: { toString: () => '---\ntitle: Test Note\n---\n\nBody text' } }
+    state = {
+      doc: { toString: () => mockEditorDocText },
+      selection: { main: { from: 0, to: 0 } },
+    }
     constructor(config: { parent?: Element; state?: unknown }) {
+      if (config.state) {
+        this.state = config.state as typeof this.state
+      }
       if (config.parent) config.parent.appendChild(this.dom)
+    }
+    posAtCoords(coords: { x: number; y: number }) {
+      return mockPosAtCoords(coords)
     }
     dispatch() {}
     destroy() {}
@@ -21,7 +33,10 @@ vi.mock('@codemirror/view', () => ({
 
 vi.mock('@codemirror/state', () => ({
   EditorState: {
-    create: vi.fn(() => ({ doc: { toString: () => '' } })),
+    create: vi.fn((config: { doc?: string }) => ({
+      doc: { toString: () => String(config.doc ?? mockEditorDocText) },
+      selection: { main: { from: 0, to: 0 } },
+    })),
   },
 }))
 
@@ -153,7 +168,13 @@ const MOCK_HISTORY_ENTRIES = [
   },
 ]
 
+const mockOnAddGroundingNew = vi.fn()
+const mockOnAddGroundingExisting = vi.fn()
+
 beforeEach(() => {
+  mockEditorDocText = '---\ntitle: Test Note\n---\n\nBody text'
+  mockPosAtCoords.mockReset()
+  mockPosAtCoords.mockReturnValue(null)
   mockListNoteHistory.mockResolvedValue(MOCK_HISTORY_ENTRIES)
   mockGetNoteHistoryVersion.mockResolvedValue({
     timestamp: MOCK_HISTORY_TIMESTAMP,
@@ -220,6 +241,14 @@ describe('FileTree', () => {
     )
     const active = screen.getByRole('button', { current: 'page' })
     expect(active).toBeInTheDocument()
+  })
+
+  it('marks file rows as draggable for chat context drag-and-drop', () => {
+    render(
+      <FileTree notes={MOCK_NOTES as never} selectedPath={null} onSelect={vi.fn()} />,
+    )
+    const files = screen.getAllByTestId('tree-file')
+    expect(files[0]).toHaveAttribute('draggable', 'true')
   })
 
   it('shows pending badge on notes with pending review_status', () => {
@@ -491,6 +520,11 @@ describe('DocumentBrowserScreen', () => {
 import NoteEditor from './components/DocumentBrowser/NoteEditor'
 
 describe('NoteEditor — isolated', () => {
+  beforeEach(() => {
+    mockOnAddGroundingNew.mockReset()
+    mockOnAddGroundingExisting.mockReset()
+  })
+
   it('renders mode buttons', () => {
     render(
       <BrowserRouter>
@@ -781,6 +815,126 @@ describe('NoteEditor — isolated', () => {
     await waitFor(() => expect(screen.getByTestId('history-entry-2026-04-24T00-00-00.000Z')).toBeInTheDocument())
     expect(screen.queryByTestId(`history-entry-${MOCK_HISTORY_TIMESTAMP}`)).toBeNull()
     expect(screen.getByText('Bob Jones')).toBeInTheDocument()
+  })
+
+  it('opens add-to-chat actions for preview content and sends section context to a new chat', async () => {
+    const sectionedNote = {
+      ...MOCK_NOTE_FULL,
+      body: '# Intro\n\nAlpha sentence.\n\n## Target Section\n\nTarget sentence. Another detail.',
+    }
+
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={sectionedNote as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+          onAddToNewChat={mockOnAddGroundingNew}
+          onAddToExistingChat={mockOnAddGroundingExisting}
+        />
+      </BrowserRouter>,
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mode-btn-preview'))
+    })
+
+    fireEvent.contextMenu(screen.getByRole('heading', { level: 2, name: 'Target Section' }))
+    expect(screen.getByTestId('note-context-menu')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByTestId('note-context-section-new'))
+    expect(mockOnAddGroundingNew).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'section',
+      text: expect.stringContaining('## Target Section'),
+    }))
+  })
+
+  it('uses the YAML right-click position instead of a stale editor selection for add-to-chat context', async () => {
+    const sectionedNote = {
+      ...MOCK_NOTE_FULL,
+      body: '# Intro\n\nAlpha sentence.\n\n## Target Section\n\nTarget sentence. Another detail.',
+    }
+    const rawDoc = [
+      '---',
+      'title: Alice Smith',
+      'type: person_note',
+      'template: person',
+      'domain: work',
+      'source: web',
+      'confidence: 0.9',
+      'review_status: approved',
+      'people:',
+      '  - Alice Smith',
+      'tags: []',
+      'action_items: []',
+      'links: []',
+      '---',
+      '',
+      '# Intro',
+      '',
+      'Alpha sentence.',
+      '',
+      '## Target Section',
+      '',
+      'Target sentence. Another detail.',
+    ].join('\n')
+    mockPosAtCoords.mockReturnValue(rawDoc.indexOf('Target sentence'))
+
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={sectionedNote as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+          onAddToNewChat={mockOnAddGroundingNew}
+          onAddToExistingChat={mockOnAddGroundingExisting}
+        />
+      </BrowserRouter>,
+    )
+
+    await act(async () => { await Promise.resolve() })
+
+    fireEvent.contextMenu(screen.getByTestId('codemirror-container'), { clientX: 120, clientY: 80 })
+    fireEvent.click(screen.getByTestId('note-context-section-new'))
+
+    expect(mockPosAtCoords).toHaveBeenCalledWith({ x: 120, y: 80 })
+    expect(mockOnAddGroundingNew).toHaveBeenCalledWith(expect.objectContaining({
+      scope: 'section',
+      text: expect.stringContaining('## Target Section'),
+    }))
+  })
+
+  it('shows selection-specific add-to-chat actions in form mode', async () => {
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={MOCK_NOTE_FULL as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+          onAddToNewChat={mockOnAddGroundingNew}
+          onAddToExistingChat={mockOnAddGroundingExisting}
+        />
+      </BrowserRouter>,
+    )
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('mode-btn-form'))
+    })
+
+    const titleField = screen.getByTestId('field-title') as HTMLInputElement
+    titleField.focus()
+    titleField.setSelectionRange(0, 5)
+    fireEvent.contextMenu(titleField)
+
+    expect(screen.getByTestId('note-context-selection-existing')).toBeInTheDocument()
+    fireEvent.click(screen.getByTestId('note-context-selection-existing'))
+    expect(mockOnAddGroundingExisting).toHaveBeenCalledWith(expect.objectContaining({ scope: 'selection' }))
   })
 })
 

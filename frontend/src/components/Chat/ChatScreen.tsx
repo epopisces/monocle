@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useChat } from '../../hooks/useChat'
 import ChatMessage from './ChatMessage'
 import ChatInput, { type ChatInputHandle } from './ChatInput'
@@ -27,7 +28,8 @@ interface Props {
 }
 
 export default function ChatScreen({ onVoiceOpen }: Props) {
-  const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession } = useChat()
+  const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession, refreshSessions } = useChat()
+  const [searchParams, setSearchParams] = useSearchParams()
   const threadEndRef = useRef<HTMLDivElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
 
@@ -38,6 +40,14 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [thread])
+
+  useEffect(() => {
+    const requestedSessionId = searchParams.get('session')
+    if (!requestedSessionId) return
+    refreshSessions()
+    selectSession(requestedSessionId)
+    setSearchParams({}, { replace: true })
+  }, [refreshSessions, searchParams, selectSession, setSearchParams])
 
   const handleStarterClick = (starter: Starter) => {
     if (starter.action === 'voice') {

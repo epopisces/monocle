@@ -50,6 +50,12 @@
   color: var(--accent);
 }
 
+.left-nav__item--drop-active {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated) 82%);
+  color: var(--text-primary);
+}
+
 .left-nav__icon {
   font-size: var(--text-md);
   flex-shrink: 0;

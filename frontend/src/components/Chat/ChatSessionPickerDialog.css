@@ -1,0 +1,103 @@
+.chat-session-picker {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-session-picker__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 14, 20, 0.48);
+}
+
+.chat-session-picker__panel {
+  position: relative;
+  width: min(560px, calc(100vw - 2rem));
+  max-height: min(80vh, 720px);
+  overflow: auto;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.24);
+  padding: var(--space-4);
+}
+
+.chat-session-picker__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-4);
+}
+
+.chat-session-picker__header h2,
+.chat-session-picker__header p {
+  margin: 0;
+}
+
+.chat-session-picker__header p {
+  margin-top: var(--space-1);
+  color: var(--text-secondary);
+}
+
+.chat-session-picker__close,
+.chat-session-picker__new,
+.chat-session-picker__item {
+  font: inherit;
+}
+
+.chat-session-picker__close {
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-btn);
+  width: 36px;
+  height: 36px;
+  cursor: pointer;
+}
+
+.chat-session-picker__new {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border) 58%);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated) 82%);
+  color: var(--text-primary);
+  padding: var(--space-3);
+  border-radius: var(--radius-btn);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-session-picker__empty {
+  margin: var(--space-4) 0 0;
+  color: var(--text-secondary);
+}
+
+.chat-session-picker__list {
+  list-style: none;
+  padding: 0;
+  margin: var(--space-4) 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.chat-session-picker__item {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-btn);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-session-picker__item span {
+  color: var(--text-secondary);
+  font-size: var(--text-sm);
+}
