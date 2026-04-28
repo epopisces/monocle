@@ -27,9 +27,9 @@ vi.mock('@codemirror/view', () => ({
     destroy() {}
     static updateListener = { of: vi.fn(() => ({})) }
     static theme = vi.fn(() => ({}))
+    static lineWrapping = {}
   },
   keymap: { of: vi.fn(() => ({})) },
-  lineWrapping: {},
 }))
 
 vi.mock('@codemirror/state', () => ({

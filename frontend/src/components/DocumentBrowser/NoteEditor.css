@@ -335,6 +335,11 @@
 
 .note-editor__cm .cm-editor {
   height: 100%;
+  caret-color: var(--accent) !important;
+}
+
+.note-editor__cm .cm-content {
+  caret-color: var(--accent) !important;
 }
 
 /* Force cursor and selection to be visible in both light and dark themes.

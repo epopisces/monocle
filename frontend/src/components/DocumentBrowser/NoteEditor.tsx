@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { EditorState } from '@codemirror/state'
-import { EditorView, keymap, lineWrapping } from '@codemirror/view'
+import { EditorView, keymap } from '@codemirror/view'
 import { defaultKeymap, indentWithTab } from '@codemirror/commands'
 import { markdown } from '@codemirror/lang-markdown'
 import { yaml as yamlLang } from '@codemirror/lang-yaml'
@@ -390,7 +390,7 @@ export default function NoteEditor({
         extensions: [
           markdown(),
           yamlLang(),
-          lineWrapping,
+          EditorView.lineWrapping,
           keymap.of([
             {
               key: saveKey,
