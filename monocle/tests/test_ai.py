@@ -1552,6 +1552,23 @@ class TestAIConfigValidation:
         settings = _make_settings(ai=_OPENAI_AI_NATIVE, openai_api_key="test-key")
         assert settings.ai.transcribe_backend == "native"
 
+    def test_azure_missing_credentials_mentions_active_chat_model(self):
+        from pydantic import ValidationError
+
+        azure_ai = {
+            "chat_model_key": "chat-model",
+            "embed_model_key": "embed-model",
+            "models": [
+                {"key": "chat-model", "name": "gpt-4o", "role": "chat", "provider": "azure"},
+                {"key": "embed-model", "name": "nomic-embed-text", "role": "embed", "provider": "ollama"},
+            ],
+        }
+
+        with patch("dotenv.load_dotenv", return_value=False):
+            with patch.dict("os.environ", {}, clear=True):
+                with pytest.raises(ValidationError, match=r"(?is)active chat model .*provider=azure.*AZURE_OPENAI_API_KEY"):
+                    _make_settings(ai=azure_ai)
+
     def test_ollama_whisper_cpp_valid(self):
         settings = _make_settings(ai={"provider": "ollama", "transcribe_backend": "whisper_cpp"})
         assert settings.ai.transcribe_backend == "whisper_cpp"

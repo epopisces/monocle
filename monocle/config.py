@@ -517,6 +517,18 @@ class Settings(BaseModel):
             self.ai.get_embed_model().provider,
         }
 
+        active_provider_roles: list[str] = []
+        if self.ai.get_chat_model().provider == "azure":
+            active_provider_roles.append(f"chat model ({self.ai.chat_model_key})")
+        if self.ai.get_embed_model().provider == "azure":
+            active_provider_roles.append(f"embed model ({self.ai.embed_model_key})")
+
+        active_openai_roles: list[str] = []
+        if self.ai.get_chat_model().provider == "openai":
+            active_openai_roles.append(f"chat model ({self.ai.chat_model_key})")
+        if self.ai.get_embed_model().provider == "openai":
+            active_openai_roles.append(f"embed model ({self.ai.embed_model_key})")
+
         if "azure" in active_providers:
             missing = [
                 k
@@ -529,8 +541,10 @@ class Settings(BaseModel):
             ]
             if missing:
                 raise ValueError(
-                    f"ai.provider=azure requires env vars: {', '.join(m.upper() for m in missing)}"
+                    f"Active {', '.join(active_provider_roles)} use provider=azure and require env vars: {', '.join(m.upper() for m in missing)}"
                 )
         if "openai" in active_providers and not self.openai_api_key:
-            raise ValueError("ai.provider=openai requires env var: OPENAI_API_KEY")
+            raise ValueError(
+                f"Active {', '.join(active_openai_roles)} use provider=openai and require env var: OPENAI_API_KEY"
+            )
         return self

@@ -159,7 +159,7 @@ export function useChat() {
                 createdAt: new Date().toISOString(),
                 messages: next,
               }
-              setSessions(prevSessions => persistSession(session, prevSessions))
+              setSessions(prevSessions => persistSession(session, prevSessions, false))
               return next
             })
             setIsStreaming(false)

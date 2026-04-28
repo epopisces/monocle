@@ -734,8 +734,11 @@ export default function NoteEditor({
       <div
         className="note-editor__body"
         onContextMenu={event => {
+          if (!onAddToNewChat && !onAddToExistingChat) return
+          const nextContextMenu = buildContextMenuState(event)
+          if (!nextContextMenu) return
           event.preventDefault()
-          setContextMenu(buildContextMenuState(event))
+          setContextMenu(nextContextMenu)
         }}
       >
         {/* CodeMirror container — always mounted so editor state is preserved */}

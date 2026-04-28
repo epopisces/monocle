@@ -909,6 +909,31 @@ describe('NoteEditor — isolated', () => {
     }))
   })
 
+  it('does not block the native context menu when add-to-chat handlers are absent', async () => {
+    const preventDefaultSpy = vi.spyOn(Event.prototype, 'preventDefault')
+
+    render(
+      <BrowserRouter>
+        <NoteEditor
+          note={MOCK_NOTE_FULL as never}
+          templates={[]}
+          onSaved={vi.fn()}
+          onNavigate={vi.fn()}
+          allNotes={MOCK_NOTES}
+        />
+      </BrowserRouter>,
+    )
+
+    await act(async () => { await Promise.resolve() })
+
+    fireEvent.contextMenu(screen.getByTestId('codemirror-container'))
+
+    expect(preventDefaultSpy).not.toHaveBeenCalled()
+    expect(screen.queryByTestId('note-context-menu')).toBeNull()
+
+    preventDefaultSpy.mockRestore()
+  })
+
   it('shows selection-specific add-to-chat actions in form mode', async () => {
     render(
       <BrowserRouter>

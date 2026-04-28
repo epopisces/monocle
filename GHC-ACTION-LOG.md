@@ -12,6 +12,26 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Updated supporting surfaces for the unified-only runtime: cleaned `monocle/watcher.py` docs, updated CLI/import smoke tests, replaced the obsolete VS Code task with a CLI test task, and removed `separate_processes` from `config.yaml.example`
 - Validation: `uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q` → 39 passed, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_mcp.py -x --tb=short -q` → 133 passed, EXIT 0
 
+### GPT-5.4 mini
+- Updated Azure/OpenAI credential validation messages in `monocle/config.py` so they name the active chat/embed model role(s) using `provider=azure` or `provider=openai` instead of the generic `ai.provider` label
+- Added a regression in `monocle/tests/test_ai.py` covering the Azure missing-credential path and asserting the message references the active chat model
+- Validation: `uv run python -m pytest monocle/tests/test_ai.py -k "AIConfigValidation or openai_provider_requires_api_key" -x --tb=short -q` → 9 passed, 81 deselected, EXIT 0
+
+### GPT-5.4
+- Tightened `frontend/src/components/Chat/sessionStore.ts` validation so malformed localStorage entries cannot carry `grounding` unless `kind === 'grounding'`, and cannot claim `kind === 'message'` while still carrying grounding payloads
+- Added a regression in `frontend/src/useChat.test.ts` proving mismatched grounding payloads are filtered out during session load
+- Validation: `cd frontend && npm run test -- --run useChat` → 32 passed, EXIT 0
+
+### GPT-5.4 mini
+- Updated the document browser right-click handler in `frontend/src/components/DocumentBrowser/NoteEditor.tsx` so `preventDefault()` only runs when a custom add-to-chat menu is actually available
+- Added a regression in `frontend/src/DocumentBrowser.test.tsx` proving the native context menu is not blocked when add-to-chat handlers are absent
+- Validation: `cd frontend && npm run test -- --run DocumentBrowser` → passed
+
+### GPT-5.4 mini
+- Removed the redundant same-tab session refresh in `frontend/src/hooks/useChat.ts` by letting self-originating send writes persist session state without emitting `CHAT_SESSIONS_UPDATED_EVENT`
+- Extended `frontend/src/useChat.test.ts` to verify send completion updates sessions without reloading them from localStorage in the same tab
+- Validation: `cd frontend && npm run test -- --run useChat` → 33 passed, EXIT 0
+
 ## 2026-04-24
 
 ### GPT-5.4

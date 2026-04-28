@@ -92,7 +92,9 @@ function isThreadMessage(value: unknown): value is ThreadMessage {
   if (message.noteCreated && !isNoteCardEntry(message.noteCreated)) return false
   if (message.kind && message.kind !== 'message' && message.kind !== 'grounding') return false
   if (message.grounding && !isGroundingEntry(message.grounding)) return false
+  if (message.grounding && message.kind !== 'grounding') return false
   if (message.kind === 'grounding' && !message.grounding) return false
+  if (message.kind === 'message' && message.grounding) return false
   return true
 }
 
@@ -131,19 +133,19 @@ export function loadSessions(): Session[] {
   }
 }
 
-export function replaceSessions(next: Session[]) {
+export function replaceSessions(next: Session[], emitUpdate = true) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
   } catch {
     // localStorage quota exceeded — silently ignore
   }
-  emitSessionsUpdated()
+  if (emitUpdate) emitSessionsUpdated()
 }
 
-export function persistSession(session: Session, prev: Session[]): Session[] {
+export function persistSession(session: Session, prev: Session[], emitUpdate = true): Session[] {
   const filtered = prev.filter(s => s.id !== session.id)
   const updated = [session, ...filtered].slice(0, MAX_SESSIONS)
-  replaceSessions(updated)
+  replaceSessions(updated, emitUpdate)
   return updated
 }
 
