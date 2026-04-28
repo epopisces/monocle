@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useChat } from '../../hooks/useChat'
 import ChatMessage from './ChatMessage'
 import ChatInput, { type ChatInputHandle } from './ChatInput'
@@ -14,12 +15,12 @@ interface Starter {
 }
 
 const CHAT_STARTERS: Starter[] = [
-  { icon: '👤', label: 'Notes on a person',  prompt: 'What are my notes on ', sendImmediately: false, toolHint: 'search_vault' },
-  { icon: '📋', label: 'Open action items',  prompt: 'Show me all open action items', sendImmediately: true, toolHint: 'search_vault' },
-  { icon: '📅', label: 'Weekly review',       prompt: 'Run my weekly review', sendImmediately: true },
-  { icon: '🎤', label: 'Capture voice note',  prompt: null, action: 'voice' },
-  { icon: '🔖', label: 'Recent decisions',    prompt: 'Show my recent decisions', sendImmediately: true, toolHint: 'list_notes' },
-  { icon: '📁', label: 'Summarize project',   prompt: 'Summarize my notes about ', sendImmediately: false, toolHint: 'search_vault' },
+  { icon: '◌', label: 'Notes on a person',  prompt: 'What are my notes on ', sendImmediately: false, toolHint: 'search_vault' },
+  { icon: '▤', label: 'Open action items',  prompt: 'Show me all open action items', sendImmediately: true, toolHint: 'search_vault' },
+  { icon: '◫', label: 'Weekly review',       prompt: 'Run my weekly review', sendImmediately: true },
+  { icon: '◎', label: 'Capture voice note',  prompt: null, action: 'voice' },
+  { icon: '◇', label: 'Recent decisions',    prompt: 'Show my recent decisions', sendImmediately: true, toolHint: 'list_notes' },
+  { icon: '▣', label: 'Summarize project',   prompt: 'Summarize my notes about ', sendImmediately: false, toolHint: 'search_vault' },
 ]
 
 interface Props {
@@ -27,7 +28,8 @@ interface Props {
 }
 
 export default function ChatScreen({ onVoiceOpen }: Props) {
-  const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession } = useChat()
+  const { thread, isStreaming, sessions, currentSessionId, send, selectSession, newSession, refreshSessions } = useChat()
+  const [searchParams, setSearchParams] = useSearchParams()
   const threadEndRef = useRef<HTMLDivElement>(null)
   const chatInputRef = useRef<ChatInputHandle>(null)
 
@@ -38,6 +40,14 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [thread])
+
+  useEffect(() => {
+    const requestedSessionId = searchParams.get('session')
+    if (!requestedSessionId) return
+    refreshSessions()
+    selectSession(requestedSessionId)
+    setSearchParams({}, { replace: true })
+  }, [refreshSessions, searchParams, selectSession, setSearchParams])
 
   const handleStarterClick = (starter: Starter) => {
     if (starter.action === 'voice') {
@@ -97,7 +107,7 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
           aria-label="Start a new session"
           data-testid="new-session-btn"
         >
-          ✨
+          +
         </button>
       </div>
 

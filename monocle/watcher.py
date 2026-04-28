@@ -1,11 +1,8 @@
 """
 monocle/watcher.py — InboxWatcher and ReindexQueue.
 
-Phase 1: InboxWatcher runs as an integrated async task inside the unified
-         FastAPI process (started/stopped in main.py lifespan via the
-         asynccontextmanager).
-Phase 3+: Can be extracted as a standalone OS process when
-          server.separate_processes = true (via ProcessManager).
+InboxWatcher runs as an integrated async task inside the unified FastAPI
+process (started/stopped in main.py lifespan via the asynccontextmanager).
 
 Architecture
 ------------
@@ -157,9 +154,9 @@ class InboxWatcher:
     ``debounce_s`` constructor argument or ``settings.vault.debounce_ms``) prevents
     double-triggering when editors write files in multiple partial steps.
 
-    The watcher is designed for Phase 1 (integrated async task) and Phase 3+
-    (optional standalone process).  The ``start()`` / ``stop()`` / ``status()``
-    interface is compatible with the future ProcessManager API.
+    The watcher is started and stopped by the unified FastAPI process. The
+    ``start()`` / ``stop()`` / ``status()`` interface keeps the lifecycle explicit
+    and testable.
     """
 
     DEBOUNCE_S: float = 2.0  # class-level default; override via constructor

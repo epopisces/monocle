@@ -39,6 +39,15 @@ def _build_source_links(detail: IngestSessionDetailResponse) -> list[dict[str, A
     return links
 
 
+def _session_request_source(detail: IngestSessionDetailResponse) -> str | None:
+    for source in detail.sources:
+        if isinstance(source.provenance, dict):
+            request_source = source.provenance.get("request_source")
+            if isinstance(request_source, str) and request_source:
+                return request_source
+    return None
+
+
 def _merge_source_links(note: Any, new_links: list[dict[str, Any]]) -> list[dict[str, Any]]:
     existing_links: list[dict[str, Any]] = []
     for item in getattr(note.metadata, "sources", []) or []:
@@ -130,6 +139,7 @@ async def execute_review_session(
         return None
 
     source_links = _build_source_links(detail)
+    request_source = _session_request_source(detail)
     expected_source_ids = {str(item["source_id"]) for item in source_links}
     touched_paths: list[str] = []
     succeeded = 0
@@ -161,7 +171,10 @@ async def execute_review_session(
                         title=expected_title,
                         body=expected_body,
                         note_type=action.target_note_type or "observation",
-                        metadata_updates={"sources": source_links},
+                        metadata_updates={
+                            "sources": source_links,
+                            **({"source": request_source} if request_source else {}),
+                        },
                     )
                 )
                 file_path = str(created["file_path"])

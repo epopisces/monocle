@@ -18,6 +18,10 @@ import { getReviewCount } from './api/review'
 import { countIngestNotifications, listIngestFailures } from './api/ingest'
 import { getSettings } from './api/settings'
 import { triggerWeeklySummary, triggerReindex } from './api/agents'
+import { getNote } from './api/notes'
+import ChatSessionPickerDialog from './components/Chat/ChatSessionPickerDialog'
+import { addGroundingToSession, loadSessions, normalizeGroundingDraft, type GroundingDraft } from './components/Chat/sessionStore'
+import type { ChatDocumentDragPayload } from './components/Chat/chatGroundingDnd'
 
 // ── Inner component — must be inside BrowserRouter to use useNavigate ─────────
 
@@ -32,6 +36,7 @@ function AppContent() {
   const [reviewCount, setReviewCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
   const [voiceBackend, setVoiceBackend] = useState<'whisper' | 'web_speech'>('whisper')
+  const [droppedDraft, setDroppedDraft] = useState<GroundingDraft | null>(null)
 
   // Fetch server settings once on mount
   useEffect(() => {
@@ -85,6 +90,26 @@ function AppContent() {
     setReviewOpen(false)
     setFailedOpen(false)
     setCommandPaletteOpen(false)
+    setDroppedDraft(null)
+  }, [])
+
+  const openChatSession = useCallback((sessionId: string) => {
+    navigate(`/?session=${encodeURIComponent(sessionId)}`)
+  }, [navigate])
+
+  const handleChatDocumentDrop = useCallback(async (payload: ChatDocumentDragPayload) => {
+    try {
+      const note = await getNote(payload.filePath)
+      const draft = normalizeGroundingDraft({
+        scope: 'document',
+        sourcePath: note.file_path,
+        sourceTitle: note.title,
+        text: `${note.title}\n\n${note.body}`,
+      })
+      setDroppedDraft(draft)
+    } catch (error) {
+      console.error('[App] Failed to load dropped note for chat context:', error)
+    }
   }, [])
 
   // ── Keyboard shortcuts ─────────────────────────────────────────────────────
@@ -158,6 +183,7 @@ function AppContent() {
         onIngestOpen={() => navigate('/ingest-review')}
         onReviewOpen={() => setReviewOpen(true)}
         onFailedOpen={() => setFailedOpen(true)}
+        onChatDocumentDrop={handleChatDocumentDrop}
         ingestCount={ingestCount}
         reviewCount={reviewCount}
         failedCount={failedCount}
@@ -192,6 +218,24 @@ function AppContent() {
         open={commandPaletteOpen}
         onClose={() => setCommandPaletteOpen(false)}
         extraActions={extraActions}
+      />
+      <ChatSessionPickerDialog
+        open={droppedDraft !== null}
+        sessions={loadSessions()}
+        title="Add dropped document to chat"
+        onClose={() => setDroppedDraft(null)}
+        onCreateNew={() => {
+          if (!droppedDraft) return
+          const session = addGroundingToSession(null, droppedDraft)
+          setDroppedDraft(null)
+          openChatSession(session.id)
+        }}
+        onSelectSession={sessionId => {
+          if (!droppedDraft) return
+          const session = addGroundingToSession(sessionId, droppedDraft)
+          setDroppedDraft(null)
+          openChatSession(session.id)
+        }}
       />
     </>
   )

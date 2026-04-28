@@ -12,6 +12,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { useChat } from './hooks/useChat'
+import { createGroundingMessage, replaceSessions, type Session } from './components/Chat/sessionStore'
+import * as sessionStore from './components/Chat/sessionStore'
 
 vi.mock('./api/chat', () => ({
   streamChat: vi.fn(),
@@ -101,6 +103,52 @@ describe('useChat — send() message construction', () => {
     // Resolve to let the hook finish
     resolver!()
     await act(async () => { await sendPromise! })
+  })
+
+  it('serializes persisted grounding entries as explicit user-added context', async () => {
+    const seeded: Session = {
+      id: 'sess-grounding',
+      title: 'Alice context',
+      createdAt: '2026-04-24T00:00:00Z',
+      messages: [
+        createGroundingMessage({
+          id: 'ctx_1',
+          scope: 'document',
+          sourcePath: 'people/alice.md',
+          sourceTitle: 'Alice Smith',
+          text: 'Alice owns the rollout.',
+          addedAt: '2026-04-24T00:00:00Z',
+        }),
+      ],
+    }
+    replaceSessions([seeded])
+    mockStreamChat.mockReturnValue(makeStream(DONE('sess-grounding')))
+
+    const { result } = renderHook(() => useChat())
+    act(() => result.current.selectSession('sess-grounding'))
+    await act(async () => { await result.current.send('What is Alice focused on?') })
+
+    expect(mockStreamChat).toHaveBeenCalledWith(
+      {
+        messages: [
+          {
+            role: 'user',
+            content: [
+              '[User-added grounding]',
+              'Source: Alice Smith (people/alice.md)',
+              'Scope: document',
+              '',
+              'Alice owns the rollout.',
+            ].join('\n'),
+          },
+          { role: 'user', content: 'What is Alice focused on?' },
+        ],
+        session_id: 'sess-grounding',
+        tool_hint: undefined,
+        fetch_urls: undefined,
+      },
+      expect.any(AbortSignal),
+    )
   })
 })
 
@@ -250,6 +298,20 @@ describe('useChat — send() session persistence', () => {
     expect(result.current.sessions[0].id).toBe('s1')
   })
 
+  it('does not reload sessions after persisting its own send result', async () => {
+    const loadSessionsSpy = vi.spyOn(sessionStore, 'loadSessions')
+    mockStreamChat.mockReturnValue(makeStream(DONE('self-write')))
+
+    const { result } = renderHook(() => useChat())
+    loadSessionsSpy.mockClear()
+
+    await act(async () => { await result.current.send('hello') })
+
+    expect(result.current.sessions).toHaveLength(1)
+    expect(loadSessionsSpy).not.toHaveBeenCalled()
+    loadSessionsSpy.mockRestore()
+  })
+
   it('does not persist to localStorage when stream throws before done', async () => {
     mockStreamChat.mockImplementation(async function* () { throw new Error('fail') })
     const { result } = renderHook(() => useChat())
@@ -345,6 +407,54 @@ describe('useChat — localStorage', () => {
 
   it('handles corrupt localStorage gracefully — starts with empty sessions', () => {
     localStorage.setItem('monocle-sessions', 'not-valid-json{{{{')
+    const { result } = renderHook(() => useChat())
+    expect(result.current.sessions).toEqual([])
+  })
+
+  it('filters out valid JSON entries that do not match the session schema', () => {
+    localStorage.setItem('monocle-sessions', JSON.stringify([
+      { id: 'broken', createdAt: '2026-04-25T00:00:00Z', messages: 'nope' },
+      { id: 'also-broken', title: 'Broken', createdAt: '2026-04-25T00:00:00Z', messages: [{ role: 'system', content: 'bad role' }] },
+    ]))
+    const { result } = renderHook(() => useChat())
+    expect(result.current.sessions).toEqual([])
+  })
+
+  it('filters out grounding messages whose kind does not match the grounding payload', () => {
+    localStorage.setItem('monocle-sessions', JSON.stringify([
+      {
+        id: 'grounding-mismatch',
+        title: 'Mismatch',
+        createdAt: '2026-04-25T00:00:00Z',
+        messages: [
+          {
+            role: 'user',
+            content: 'Context payload',
+            grounding: {
+              id: 'ctx-1',
+              scope: 'document',
+              sourcePath: 'people/alice.md',
+              sourceTitle: 'Alice Smith',
+              text: 'Alice owns the rollout.',
+              addedAt: '2026-04-25T00:00:00Z',
+            },
+          },
+          {
+            role: 'user',
+            content: 'Also bad',
+            kind: 'message',
+            grounding: {
+              id: 'ctx-2',
+              scope: 'document',
+              sourcePath: 'people/bob.md',
+              sourceTitle: 'Bob Jones',
+              text: 'Bob owns the follow-up.',
+              addedAt: '2026-04-25T00:00:00Z',
+            },
+          },
+        ],
+      },
+    ]))
     const { result } = renderHook(() => useChat())
     expect(result.current.sessions).toEqual([])
   })

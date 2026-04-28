@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-24
-active-milestone: M33
+last-updated: 2026-04-28
+active-milestone: M43
 ---
 
 # Monocle — Copilot Build Plan
@@ -19,17 +19,30 @@ This is the primary reference document for building Monocle. Read it at the star
 4. After completing all acceptance criteria for a milestone, update `## Current Status` and the `## Milestone Tracker`.
 5. **Run tests before marking any deliverable complete.** See `## Test Commands`.
 6. When resolving a Technical Spike, record the outcome under `## Technical Spikes`.
-7. If a design question is not answered here, check `docs/srs.md` first (source of truth for behaviour), then `docs/prd.md` (product goals), then `docs/ui-design.md` (frontend layout). **Exception:** SRS §2.6 FR-PROC-01–05 describes an outdated multi-process Phase 1 architecture (separate OS processes for watcher and capture server). The authoritative Phase 1 architecture is the single unified process described in this build plan and PRD v2.4 — treat this build plan as the override for any process topology question.
+7. If a design question is not answered here, check `docs/srs.md` first (source of truth for behaviour), then `docs/prd.md` (product goals), then `docs/ui-design.md` (frontend layout).
 8. Do not invent design decisions not covered in docs — surface any gaps as a comment in this file under the relevant milestone.
 
 ---
 
 ## Current Status
 
-**Active Milestone:** M33 — MCP-First: Third-Party MCP Composition
-**Last Completed:** M39 — File History, Revert & Diff Viewer (2026-04-24)
-**Note:** M34-M39 were completed out of sequence to unblock and streamline the ingest workflow; M33 remains queued.
+**Active Milestone:** M43 — Consolidate Ingest Workflow Ownership
+**Last Completed:** M42 — Remove Separate-Process Support (2026-04-28)
+**Note:** The near-term product direction is now documented and implemented around trust-first capture, a unified capture workbench, lean chat, distinct omnisearch, and one supported unified runtime topology. M24, M26, and M33 remain deferred to a future phase, and M41 remains paused until it is reconciled with the simplified track.
 **Blocked By:** None
+**Session Notes (D1 — Simplification Docs Alignment):**
+- **Status:** COMPLETE (2026-04-28)
+- Aligned `docs/prd.md`, `docs/srs.md`, `docs/architecture.md`, `docs/ui-design.md`, and `docs/build-plan.md` around trust-first capture, a unified capture workbench, explicit URL capture handoff, lean chat, distinct omnisearch, and one supported runtime topology.
+- Validation: reviewed the D1 doc diff for cross-document consistency before starting M42.
+**Session Notes (M42 — Remove Separate-Process Support):**
+- **Status:** COMPLETE (2026-04-28)
+- Collapsed the backend to one supported runtime path by removing split-runtime gating from `monocle/main.py`, deleting the `ProcessManager` module and standalone split CLI commands, and cleaning the related config/example/tasks/test surfaces.
+- **Test Results:** `uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q` → 39 passed, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_mcp.py -x --tb=short -q` → 133 passed, EXIT 0.
+**Session Notes (M40 — Add Documents & Snippets To Chat Context):**
+- **Status:** COMPLETE (2026-04-25)
+- Added explicit user-grounding flows from the Docs explorer and Document Viewer: file-tree document drag-and-drop onto the persistent Chat nav target, plus right-click add-to-chat actions for documents, sections, sentences, and selected text across preview, YAML, and form modes.
+- Chat sessions now persist user-added grounding as first-class localStorage entries and reopen target sessions via the existing `session_id` route wiring, so manually added context stays visibly distinct from implicit vault retrieval inside the destination chat.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1007 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 468 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 **Session Notes (M39 — File History, Revert & Diff Viewer):**
 - **Status:** COMPLETE (2026-04-24)
 - Extended the existing vault `.versions` history into a first-class note-history feature with configurable retention, note history/diff/revert APIs, and live settings support so manual and ingest-driven edits share the same rollback path.
@@ -136,6 +149,8 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | Version shadows | `<vault>/.versions/<path>/<timestamp_ms>.md` (millisecond-precision ISO timestamp) |
 | Soft-delete trash | `<vault>/.trash/<path>.md` |
 | ChromaDB data | `config.yaml` → `index.chroma_persist_path` |
+| Ingest session store | `data/ingest/sessions.db` (SQLite session + notification state) |
+| Source archive | `data/sources/` (immutable raw captures; excluded from semantic index) |
 | Failed-ingest registry | `data/failed_ingests.json` (JSON array; stdlib only; gitignored; auto-created on first failure) |
 | OpenAPI spec | Auto-generated: `GET http://localhost:8000/openapi.json` |
 | Frontend type gen | `npx openapi-typescript http://localhost:8000/openapi.json -o frontend/src/api/schema.d.ts` |
@@ -173,23 +188,32 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M21 | Integration Testing & Obsidian Compatibility                   | COMPLETE    |
 | M22 | Process Manager & Dev Automation                               | COMPLETE    |
 | M23 | Organization Note Type & Cross-Linked People Backreferences    | COMPLETE    |
-| M24 | OneNote Import Plugin                                          | NOT STARTED |
+| M24 | OneNote Import Plugin                                          | DEFERRED    |
 | M25 | Voice Feature Hardening & Cross-Browser Compatibility          | COMPLETE    |
-| M26 | Teams Integration                                              | NOT STARTED |
+| M26 | Teams Integration                                              | DEFERRED    |
 | M27 | Topbar Omnisearch                                              | COMPLETE    |
 | M28 | Provider & Model Status Detection                              | COMPLETE    |
 | M29 | MCP-First: Contract Freeze & Canonical Tool Schema             | COMPLETE    |
 | M30 | MCP-First: Shared Service Layer Extraction                     | COMPLETE    |
 | M31 | MCP-First: MCP Canonicalization                                | COMPLETE    |
 | M32 | MCP-First: Chat Tool Adapter & Orchestration Cleanup           | COMPLETE    |
-| M33 | MCP-First: Third-Party MCP Composition                         | NOT STARTED |
+| M33 | MCP-First: Third-Party MCP Composition                         | DEFERRED    |
 | M34 | Ingest Session Schema & Persistence                            | COMPLETE    |
 | M35 | Background Session Preparation & Notifications                 | COMPLETE    |
 | M36 | Ingest Review Workspace & Proposal Flow                        | COMPLETE    |
 | M37 | Ingest Execution, Validation & Source UX                       | COMPLETE    |
 | M38 | Fast-Capture Path                                              | COMPLETE    |
 | M39 | File History, Revert & Diff Viewer                             | COMPLETE    |
-| M40 | Add Documents & Snippets To Chat Context                       | NOT STARTED |
+| M40 | Add Documents & Snippets To Chat Context                       | COMPLETE    |
+| M41 | MCP Session-Based Capture                                      | PAUSED      |
+| D1  | Simplification Docs Alignment                                  | COMPLETE    |
+| M42 | Remove Separate-Process Support                                | COMPLETE    |
+| M43 | Consolidate Ingest Workflow Ownership                          | NOT STARTED |
+| M44 | Unified Capture Workbench Backend Contract                     | NOT STARTED |
+| M45 | Unified Capture Workbench Frontend                             | NOT STARTED |
+| M46 | Lean Chat & Explicit URL Capture                               | NOT STARTED |
+| M47 | Omnisearch Hardening                                           | NOT STARTED |
+| M48 | Cleanup & Contract Hardening                                   | NOT STARTED |
 
 ---
 
@@ -261,7 +285,6 @@ Assumptions requiring early validation. Each spike is linked to the milestone wh
 - Vault path validation: resolve `file_path` to absolute path via `os.path.realpath`; reject any path that does not start with the configured vault root. Return `403`. Reject symlinks that escape the vault.
 - Audio upload max: 25 MB. Content field max: 50,000 characters.
 - `GET /api/settings` never returns the full MCP key — mask to last 4 characters only.
-- Bot Framework JWT validation required on `POST /api/teams/messages`.
 - CORS: allow `http://localhost:{server.port}`, `http://127.0.0.1:{server.port}`, and (in dev mode only) `http://localhost:5173`, `http://127.0.0.1:5173` (Vite dev server). No wildcard origins.
 - Rate limits: 30 req/min on `/api/ingest` and `/api/transcribe`; 60 req/min on `/api/chat`.
 
@@ -319,9 +342,9 @@ Monocle uses **OpenTelemetry (OTel)** as the single cross-cutting observability 
 
 | Class | Location | Notes |
 |---|---|---|
-| `AIProvider` | `monocle/ai/base.py` | `OllamaProvider`, `FoundryLocalProvider`, `AzureOpenAIProvider` |
+| `AIProvider` | `monocle/ai/base.py` | `OllamaProvider`, `FoundryLocalProvider`, `AzureOpenAIProvider`, `OpenAIProvider`, `CompositeAIProvider` |
 | `IndexLayer` | `monocle/index/base.py` | `ChromaIndex` (prod), `MemoryIndex` (tests only — no embeddings) |
-| `IngestPlugin` | `monocle/ingest/plugin.py` | `TextPlugin`, `AudioPlugin`, `TeamsPlugin` |
+| `IngestPlugin` | `monocle/ingest/plugin.py` | `TextPlugin`, `AudioPlugin`; deferred sources stay behind plugin seams rather than the near-term mainline |
 | `RoutingAgent` | `monocle/agents/routing.py` | concrete class; checks `sentence_starters` first, then LLM via `prompts/routing.md` |
 
 Factories: `get_provider(settings) -> AIProvider`, `get_index(settings) -> IndexLayer`.
@@ -335,7 +358,7 @@ type: "person_note"         # see Note Types table below
 domain: "work"
 people: ["Sarah Chen"]
 tags: ["consulting"]
-source: "web"               # web | voice | teams | mcp | import
+source: "web"               # web | voice | mcp | import
 action_items: []
 created: "2026-03-11T09:00:00Z"
 updated: "2026-03-11T09:00:00Z"
@@ -438,8 +461,7 @@ monocle/           Python package
   main.py             FastAPI app + router registration + lifespan context (includes integrated watchdog + APScheduler in Phase 1)
   config.py           Settings (Pydantic v2) — loads config.yaml + .env
   models.py           All shared Pydantic models
-  watcher.py          InboxWatcher — (Phase 1: integrated async task; Phase 3+: optional standalone process)
-  process_manager.py  ProcessManager — (Phase 3+ only for optional process separation; stubbed M1, optionally implemented M23)
+  watcher.py          InboxWatcher — integrated async task managed by the unified FastAPI process
   graph.py            GraphBuilder + in-memory cache
   mcp_server.py       FastMCP tools + auth middleware
   cli.py              Typer CLI (all commands incl. dev, reindex, pull-models, export, versions)
@@ -454,7 +476,7 @@ monocle/           Python package
                        distinct from the user-facing Markdown templates in vault/.templates/ (inside the vault directory).
   ingest/__init__.py  IngestPipeline + IngestPluginRegistry
   ingest/plugin.py    IngestPlugin ABC
-  ingest/plugins/     TextPlugin, AudioPlugin, TeamsPlugin
+  ingest/plugins/     TextPlugin, AudioPlugin, plus any deferred future plugins kept behind the registry seam
   ingest/chunker.py   chunk_text() — tiktoken cl100k_base
   ingest/confidence.py  IngestConfidence scoring (deterministic formula; no LLM call)
   agents/tools.py     @tool decorated agent tool library
@@ -533,7 +555,7 @@ tests/e2e/            Playwright tests (require running server)
 
 **Status:** COMPLETE (2026-03-17)
 
-**Summary:** AIProvider ABC with three implementations (Ollama, FoundryLocal, AzureOpenAI). TranscriptionProvider abstraction for decoupled transcription backends (WhisperCpp, Subprocess, NativeOpenAI). SPIKE-1 resolved.
+**Summary:** AIProvider ABC with four implementations (Ollama, FoundryLocal, AzureOpenAI, OpenAI) plus composite chat/embed routing. TranscriptionProvider abstraction handles decoupled transcription backends (WhisperCpp, Subprocess, NativeOpenAI). SPIKE-1 resolved.
 
 **Full details:** [docs/milestones.md#m6-ai-provider-abstraction](milestones.md#m6-ai-provider-abstraction) | [SPIKE-1 resolution](milestones.md#spike-1-ollama-whisper-audio-transcription)
 
@@ -813,7 +835,7 @@ cd frontend && npm run test -- --run
 
 ### M33: MCP-First: Third-Party MCP Composition
 
-**Status:** NOT STARTED — depends on M32
+**Status:** DEFERRED — future phase only
 
 Add explicit support for agent composition across internal Monocle and external third-party MCP servers.
 
@@ -902,23 +924,182 @@ The Document Viewer now exposes retained versions, per-version diffs, and revert
 
 ### M40: Add Documents & Snippets To Chat Context
 
-**Status:** NOT STARTED — queued after M33
+**Status:** COMPLETE (2026-04-25)
 
-Let users explicitly add documents or document snippets into a new or existing chat session from the Docs explorer or Document Viewer.
+Added explicit add-to-chat grounding flows from the Docs explorer and Document Viewer, including right-click document/section/sentence/selection actions plus file-tree drag-and-drop onto the persistent Chat nav target.
+Chat sessions now persist user-added grounding as first-class localStorage entries and resend them as explicit user context in `/api/chat`, so manual grounding is visibly distinct from agent retrieval.
+**Full details:** [docs/milestones.md#m40-add-documents--snippets-to-chat-context](milestones.md#m40-add-documents--snippets-to-chat-context)
+
+**Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
+
+---
+
+### M41: MCP Session-Based Capture
+
+**Status:** PAUSED (2026-04-27)
+
+Move MCP `capture_thought` off the direct `IngestPipeline.run()` fast path and onto the persisted ingest-session architecture used by `/api/ingest`, so MCP capture shares the same archival, preparation, approval/fallback, execution, validation, and source-provenance behavior as the rest of the application.
+
+This work is paused while the simplification track resets the mainline around a unified capture workbench and lean chat. The implemented session-backed pieces will be reconciled during M43-M46 rather than continued as a standalone active milestone.
 
 **Deliverables:**
 
-- [ ] Docs file explorer drag-and-drop support for adding a document into a chat session as context
-- [ ] Document Viewer context menu actions for adding the current document, section, or sentence to a new or existing chat session when nothing is selected
-- [ ] Document Viewer context menu actions for adding the current selection to a new or existing chat session when text is selected
-- [ ] Chat/session plumbing that records the inserted context as explicit user-added grounding rather than implicit vault retrieval
+- [x] Re-route MCP `capture_thought` through `IngestSessionStore.create_api_session(..., fast_capture=True)` and `execute_fast_capture_session(...)`
+- [x] Extend MCP state/init wiring so session-backed capture does not depend on FastAPI router globals
+- [x] Version the frozen `capture_thought` contract in `docs/tool-contracts.md` from note-write output to session-state output
+- [ ] Add MCP follow-up session inspection affordances or an equivalent contract for reading the resulting session outcome
+- [x] Align docs/tests around the dual-mode history: session-backed MCP capture, while M33 third-party composition remains deferred
+
+**Acceptance criteria:**
+
+- `capture_thought` always creates a persisted ingest session and archives its raw source before any preparation or execution work begins.
+- Clean MCP captures can still complete synchronously via fast capture, but blocker cases return a persisted session state instead of silently diverging into a second ingest path.
+- Session-backed MCP capture preserves source provenance on created notes and exposes enough response state for external clients to continue the workflow deterministically.
+- Focused MCP and contract tests cover both the completed fast-capture path and the fallback-to-review path.
+
+**Test command:** `uv run python -m pytest monocle/tests/test_mcp.py monocle/tests/test_contracts.py -x --tb=short -q`
+
+---
+
+### D1: Simplification Docs Alignment
+
+**Status:** COMPLETE (2026-04-28)
+Aligned the product and system docs around trust-first capture, one unified capture workbench, explicit URL capture handoff, lean chat, distinct omnisearch, and one supported runtime topology.
+This milestone also reset the execution sequence so simplification work now proceeds through M42-M48 instead of the previously broader integration-heavy track.
+**Full details:** [docs/milestones.md#d1-simplification-docs-alignment](milestones.md#d1-simplification-docs-alignment)
+
+---
+
+### M42: Remove Separate-Process Support
+
+**Status:** COMPLETE (2026-04-28)
+Removed split-runtime support from the near-term mainline by collapsing startup to the unified app, deleting `ProcessManager` and the standalone split CLI commands, and cleaning the related config/example/tasks/test surfaces.
+Health and startup behavior now follow one path only, and `uv run python -m monocle serve` is the single supported runtime entrypoint.
+**Full details:** [docs/milestones.md#m42-remove-separate-process-support](milestones.md#m42-remove-separate-process-support)
+
+---
+
+### M43: Consolidate Ingest Workflow Ownership
+
+**Status:** NOT STARTED — depends on D1
+
+Centralize ingest prepare/review/execute state ownership behind one workflow layer while keeping `IngestSessionStore` focused on persistence and archival.
+
+**Deliverables:**
+
+- [ ] Consolidate prepare/review/execute orchestration behind one workflow owner
+- [ ] Reduce scattered ingest state transitions across multiple modules
+- [ ] Keep `IngestSessionStore` focused on storage, archival, notifications, and mutation primitives
 
 **Acceptance Criteria:**
 
-- Users can add whole documents from the Docs explorer to a new or existing chat session
-- Right-click in the Document Viewer exposes add-to-chat actions for document/section/sentence when no text is selected
-- Right-click on a selection exposes add-selection-to-chat actions for a new or existing session
-- Added context is clearly represented as user-provided context inside the destination chat session
+- [ ] One workflow owner is responsible for ingest state transitions and user-visible flow orchestration
+- [ ] Session storage and archive concerns remain isolated from orchestration concerns
+
+**Test command:** `uv run python -m pytest monocle/tests/test_ingest.py monocle/tests/test_ingest_prepare.py monocle/tests/test_api.py -x --tb=short -q`
+
+---
+
+### M44: Unified Capture Workbench Backend Contract
+
+**Status:** NOT STARTED — depends on M43
+
+Add one aggregated backend contract for actionable capture work across prepared sessions, pending review notes, and failed captures.
+
+**Deliverables:**
+
+- [ ] Add one summary/list contract for capture workbench items and counts
+- [ ] Preserve legacy review/failure/session endpoints temporarily as compatibility adapters where needed
+- [ ] Make one top-level actionable count available to the frontend
+
+**Acceptance Criteria:**
+
+- [ ] The frontend can retrieve one capture workbench summary without polling three separate count surfaces
+- [ ] Prepared sessions, pending review items, and failures can all be represented in one backend shape
+
+**Test command:** `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_review.py monocle/tests/test_ingest.py -x --tb=short -q`
+
+---
+
+### M45: Unified Capture Workbench Frontend
+
+**Status:** NOT STARTED — depends on M44
+
+Replace the separate prepared-session, review-queue, and failed-capture surfaces with one unified workbench in the app shell.
+
+**Deliverables:**
+
+- [ ] Add a unified workbench route or drawer with sections/tabs for prepared, pending review, and failures
+- [ ] Replace topbar/app polling for separate counts with one workbench summary query
+- [ ] Retire `IngestInbox`, `ReviewQueue`, and `FailedCaptures` as separate primary entry points
+
+**Acceptance Criteria:**
+
+- [ ] Users can inspect prepared sessions, approve/fix pending notes, and retry failures from one coherent surface
+- [ ] The topbar exposes one actionable workbench affordance instead of separate review/failure affordances
+
+**Test command:** `cd frontend && npm run test -- --run`
+
+---
+
+### M46: Lean Chat & Explicit URL Capture
+
+**Status:** NOT STARTED — depends on M44
+
+Remove automatic URL prefetch from chat and replace it with explicit capture actions that hand off to the capture workbench or deliberate reference capture.
+
+**Deliverables:**
+
+- [ ] Remove `fetch_urls`-style automatic chat prefetch orchestration
+- [ ] Keep URL detection in the composer only as an explicit `Capture URLs` affordance
+- [ ] Preserve `create_reference_from_url` as an explicit service/tool, not hidden router-level automation
+
+**Acceptance Criteria:**
+
+- [ ] `/api/chat` no longer performs hidden URL-capture side effects during a normal chat turn
+- [ ] URL capture remains available, but only through an explicit user action
+
+**Test command:** `uv run python -m pytest monocle/tests/test_agents.py monocle/tests/test_mcp.py -x --tb=short -q`
+
+---
+
+### M47: Omnisearch Hardening
+
+**Status:** NOT STARTED — depends on D1
+
+Keep omnisearch distinct from semantic search while tightening its fast-match behavior and performance contract.
+
+**Deliverables:**
+
+- [ ] Keep `/api/search/omni` separate from semantic search
+- [ ] Enforce the distinct fast-match behavior, including the 3-character trigger assumption
+- [ ] Introduce a lighter cached catalog or prefix/text index if full-vault scans become too expensive
+
+**Acceptance Criteria:**
+
+- [ ] Omnisearch remains a separate fast-match feature rather than drifting into semantic-search duplication
+- [ ] The user experience stays responsive once the first three characters are typed
+
+**Test command:** `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q`
+
+---
+
+### M48: Cleanup & Contract Hardening
+
+**Status:** NOT STARTED — depends on M42, M45, M46, and M47
+
+Remove obsolete adapters, dead tests, stale docs, and legacy behaviors after the simplified paths are validated.
+
+**Deliverables:**
+
+- [ ] Remove retired tests and adapter code for separate-process runtime, fragmented capture surfaces, and legacy chat URL prefetch
+- [ ] Refresh generated API artifacts and docs once the replacement contracts are stable
+- [ ] Leave the simplified architecture as the only architecture documented and supported in the mainline
+
+**Acceptance Criteria:**
+
+- [ ] No obsolete user-facing drawers, counts, runtime flags, or legacy chat prefetch paths remain in the mainline
+- [ ] Tests and docs describe only the supported simplified architecture
 
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 
@@ -960,6 +1141,6 @@ The following are committed design directions deferred beyond Phase 2. Architect
 ### LTR-3: Optional Process Separation for High-Volume Vaults
 
 - For vaults exceeding ~10,000 notes, optionally extract `InboxWatcher`, `APScheduler`, and capture server as independent OS processes.
-- Phase 3 optionally enables: conditional process separation via `server.separate_processes: true` in `config.yaml`, `ProcessManager` orchestration (M23 implementation), and related CLI commands (`watch`, `capture`, `scheduler`) as standalone entry points.
+- Future-phase work may reintroduce conditional process separation via dedicated orchestration and standalone entry points if high-volume local deployments justify the extra complexity.
 - Phase 1 Phase 2 unified single-process mode remains the default and fully supported; no performance regression for <10k vaults.
-- **Architectural constraint enforced in Phase 1:** `main.py` lifespan hooks must be agnostic to process topology (all async tasks are thread-safe and can run in single process or separate processes transparently)
+- **Architectural constraint enforced in the near-term mainline:** the unified runtime remains the only supported topology until this future-phase work is deliberately resumed.

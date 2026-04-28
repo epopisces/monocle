@@ -7,7 +7,7 @@
 `docs/build-plan.md` contains: active milestone, ordered deliverables, acceptance criteria, test commands, quick-reference table, and all design overrides. Everything else is reference material.
 
 **Source-of-truth hierarchy:** `docs/build-plan.md` → `docs/srs.md` → `docs/prd.md` → `docs/ui-design.md`.  
-**Note:** The SRS describes a single unified process for Phase 1 (all components integrated into one FastAPI process). Future phases (Phase 3+) may extract the watcher and scheduler as separate OS processes via the `ProcessManager` interface, but Phase 1 is unified.
+**Note:** The near-term mainline is a single unified process. If process extraction is revisited in a future phase, it should be treated as new design work rather than assumed to remain available from earlier milestones.
 
 ## Session Housekeeping (required)
 

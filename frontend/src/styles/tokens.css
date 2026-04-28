@@ -3,97 +3,107 @@
 /* ── Dark theme (default) ───────────────────────────────────── */
 :root,
 [data-theme="dark"] {
-  --bg-base: #111318;
-  --bg-surface: #1c1f26;
-  --bg-elevated: #252830;
-  --border: #2e3240;
-  --text-primary: #ebedf2;
-  --text-secondary: #8891a8;
-  --accent: #7c8af7;
-  --accent-hover: #9099fb;
-  --success: #3dbf84;
-  --error: #e96b67;
-  --warning: #f5a623;
-  --tag-bg: #2a2e4a;
-  --tag-text: #a0aaff;
-  --graph-person: #7c8af7;
-  --graph-topic: #3dbf84;
-  --graph-edge: #5a6072;
-  --review-pending: #f5a623;
+  --bg-base: #0b0d15;
+  --bg-app: #0f1220;
+  --bg-surface: #15192b;
+  --bg-elevated: #1d2238;
+  --bg-toolbar: #111426;
+  --bg-panel: #101425;
+  --border: #2c3150;
+  --border-strong: #434a74;
+  --text-primary: #eef1ff;
+  --text-secondary: #9da6c9;
+  --text-tertiary: #70789a;
+  --accent: #9166ff;
+  --accent-hover: #a783ff;
+  --success: #46cf98;
+  --error: #ff7d8f;
+  --warning: #ffb454;
+  --tag-bg: #241c41;
+  --tag-text: #d0c2ff;
+  --graph-person: #aa84ff;
+  --graph-topic: #52ca9d;
+  --graph-edge: #655f88;
+  --review-pending: #9166ff;
 
   color-scheme: dark;
 }
 
 /* ── Light theme ─────────────────────────────────────────────── */
 [data-theme="light"] {
-  --bg-base: #f8f9fa;
+  --bg-base: #f5f5fb;
+  --bg-app: #eff0fb;
   --bg-surface: #ffffff;
-  --bg-elevated: #f0f2f5;
-  --border: #e2e5ea;
-  --text-primary: #111318;
-  --text-secondary: #5a6072;
-  --accent: #5865f2;
-  --accent-hover: #4752c4;
+  --bg-elevated: #eef0fb;
+  --bg-toolbar: #eceffd;
+  --bg-panel: #f8f8ff;
+  --border: #d8ddf0;
+  --border-strong: #bec7e6;
+  --text-primary: #161828;
+  --text-secondary: #57607e;
+  --text-tertiary: #7a84a2;
+  --accent: #7656f0;
+  --accent-hover: #6848dd;
   --success: #2d9e6b;
   --error: #d9534f;
   --warning: #e08a00;
-  --tag-bg: #e8eaff;
-  --tag-text: #3a45c4;
-  --graph-person: #5865f2;
+  --tag-bg: #efebff;
+  --tag-text: #4b3bc2;
+  --graph-person: #7656f0;
   --graph-topic: #2d9e6b;
   --graph-edge: #8891a8;
-  --review-pending: #e08a00;
+  --review-pending: #7656f0;
 
   color-scheme: light;
 }
 
 /* ── Typography ──────────────────────────────────────────────── */
 :root {
-  --font-ui: 'Inter', system-ui, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', 'Inter', system-ui, sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', monospace;
 
   --text-xs:   12px;
-  --text-sm:   13px;
-  --text-base: 14px;
-  --text-md:   16px;
-  --text-lg:   20px;
-  --text-xl:   24px;
-  --text-2xl:  32px;
+  --text-sm:   12px;
+  --text-base: 13px;
+  --text-md:   15px;
+  --text-lg:   18px;
+  --text-xl:   22px;
+  --text-2xl:  28px;
 }
 
 /* ── Border radius ───────────────────────────────────────────── */
 :root {
-  --radius-card:   8px;
-  --radius-btn:    6px;
-  --radius-pill:   20px;
-  --radius-modal:  12px;
+  --radius-card:   6px;
+  --radius-btn:    4px;
+  --radius-pill:   999px;
+  --radius-modal:  10px;
 }
 
 /* ── Shadows ─────────────────────────────────────────────────── */
 :root {
-  --shadow-card:  0 1px 3px rgba(0, 0, 0, 0.12);
-  --shadow-modal: 0 4px 12px rgba(0, 0, 0, 0.2);
+  --shadow-card:  0 0 0 1px rgba(145, 102, 255, 0.08), 0 10px 28px rgba(4, 6, 14, 0.28);
+  --shadow-modal: 0 18px 48px rgba(3, 5, 14, 0.36);
 }
 
 /* ── Spacing scale ───────────────────────────────────────────── */
 :root {
-  --space-1:  4px;
-  --space-2:  8px;
-  --space-3:  12px;
-  --space-4:  16px;
-  --space-5:  20px;
-  --space-6:  24px;
-  --space-8:  32px;
+  --space-1:  3px;
+  --space-2:  6px;
+  --space-3:  10px;
+  --space-4:  14px;
+  --space-5:  18px;
+  --space-6:  22px;
+  --space-8:  30px;
   --space-10: 40px;
   --space-12: 48px;
 }
 
 /* ── Layout constants ────────────────────────────────────────── */
 :root {
-  --topbar-height: 52px;
-  --leftnav-width: 220px;
-  --leftnav-rail-width: 56px;
-  --collapse-breakpoint: 1200px;
+  --topbar-height: 42px;
+  --leftnav-width: 188px;
+  --leftnav-rail-width: 46px;
+  --collapse-breakpoint: 1280px;
 }
 
 /* ── Base resets ─────────────────────────────────────────────── */
@@ -111,6 +121,7 @@ body,
   height: 100%;
   font-family: var(--font-ui);
   font-size: var(--text-base);
+  line-height: 1.4;
   color: var(--text-primary);
   background-color: var(--bg-base);
 }

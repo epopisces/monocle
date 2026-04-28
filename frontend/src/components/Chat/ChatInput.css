@@ -4,10 +4,11 @@
   flex-direction: column;
   gap: 0;
   padding: 0;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 2%, var(--bg-surface)) 0%, var(--bg-surface) 100%);
+  border: 1px solid var(--border-strong, var(--border));
   border-radius: var(--radius-card);
   overflow: hidden;
+  box-shadow: var(--shadow-card);
 }
 
 /* URL pills row — shown when one or more URLs are detected in the input */
@@ -15,7 +16,7 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-4);
+  padding: var(--space-2) var(--space-3);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg-surface));
   border-bottom: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border));
   flex-wrap: wrap;
@@ -74,7 +75,7 @@
   display: flex;
   align-items: flex-end;
   gap: var(--space-2);
-  padding: var(--space-3) var(--space-4);
+  padding: var(--space-2) var(--space-3);
 }
 
 .chat-input__textarea {
@@ -86,8 +87,8 @@
   color: var(--text-primary);
   font-family: var(--font-ui);
   font-size: var(--text-base);
-  line-height: 24px;
-  min-height: 24px;
+  line-height: 20px;
+  min-height: 20px;
   max-height: 144px; /* 6 lines */
   overflow-y: auto;
   padding: 0;
@@ -113,19 +114,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border: none;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
   border-radius: var(--radius-btn);
   cursor: pointer;
-  font-size: var(--text-md);
-  transition: background 0.15s, opacity 0.15s;
-  background: transparent;
+  font-size: var(--text-sm);
+  transition: background 0.15s, opacity 0.15s, border-color 0.15s;
+  background: var(--bg-elevated);
   color: var(--text-secondary);
 }
 
 .chat-input__btn:hover:not(:disabled) {
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated) 90%);
+  border-color: color-mix(in srgb, var(--accent) 24%, transparent);
   color: var(--text-primary);
 }
 

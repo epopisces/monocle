@@ -335,6 +335,11 @@
 
 .note-editor__cm .cm-editor {
   height: 100%;
+  caret-color: var(--accent) !important;
+}
+
+.note-editor__cm .cm-content {
+  caret-color: var(--accent) !important;
 }
 
 /* Force cursor and selection to be visible in both light and dark themes.
@@ -397,4 +402,32 @@
   .note-editor__history-columns {
     grid-template-columns: 1fr;
   }
+}
+
+.note-editor__context-menu {
+  position: fixed;
+  z-index: 40;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+
+.note-editor__context-menu button {
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: var(--radius-btn);
+  cursor: pointer;
+}
+
+.note-editor__context-menu button:hover {
+  background: var(--bg-elevated);
 }

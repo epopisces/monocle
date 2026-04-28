@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { NoteRef } from '../../api/notes'
 import { patchNote, deleteNote } from '../../api/notes'
+import { CHAT_DOCUMENT_DRAG_TYPE, encodeChatDocumentDragPayload } from '../Chat/chatGroundingDnd'
 import './FileTree.css'
 
 // ── Tree data structure ───────────────────────────────────────────
@@ -190,6 +191,16 @@ function TreeNodeRow({ node, selectedPath, onSelect, depth, actions }: TreeNodeP
       style={{ paddingLeft: `${depth * 12 + 8}px` }}
       onClick={() => onSelect(node.path)}
       onContextMenu={e => actions.onContextMenu(node, e)}
+      draggable
+      onDragStart={event => {
+        const payload = encodeChatDocumentDragPayload({
+          filePath: node.path,
+          title: node.note.title || node.name,
+        })
+        event.dataTransfer.setData(CHAT_DOCUMENT_DRAG_TYPE, payload)
+        event.dataTransfer.setData('text/plain', node.path)
+        event.dataTransfer.effectAllowed = 'copy'
+      }}
       data-testid="tree-file"
       aria-current={isSelected ? 'page' : undefined}
       title={node.path}

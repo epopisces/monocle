@@ -3985,7 +3985,8 @@
             "enum": [
               "ollama",
               "foundry_local",
-              "azure"
+              "azure",
+              "openai"
             ],
             "title": "Provider"
           },

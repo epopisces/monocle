@@ -21,6 +21,7 @@ import { approveNote } from '../../api/review'
 import { ApiError } from '../../api/client'
 import { useDebouncedCallback } from '../../hooks/useDebounce'
 import { buildRawDoc, splitFrontmatter, parseFrontmatter } from '../../utils/yamlUtils'
+import { normalizeGroundingDraft, type GroundingDraft } from '../Chat/sessionStore'
 import FormEditor, { type TemplateSchema } from './FormEditor'
 import './NoteEditor.css'
 
@@ -35,6 +36,17 @@ interface NoteEditorProps {
   onNavigate: (path: string) => void
   allNotes: { file_path: string; title: string }[]
   onOpenSource?: (sourceId: string) => void
+  onAddToNewChat?: (draft: GroundingDraft) => void
+  onAddToExistingChat?: (draft: GroundingDraft) => void
+}
+
+interface ContextMenuState {
+  x: number
+  y: number
+  documentDraft: GroundingDraft
+  sectionDraft: GroundingDraft | null
+  sentenceDraft: GroundingDraft | null
+  selectionDraft: GroundingDraft | null
 }
 
 // ── Toast utility ─────────────────────────────────────────────────
@@ -53,6 +65,8 @@ export default function NoteEditor({
   onNavigate,
   allNotes,
   onOpenSource,
+  onAddToNewChat,
+  onAddToExistingChat,
 }: NoteEditorProps) {
   const [mode, setMode] = useState<EditorMode>('yaml')
   const [localNote, setLocalNote] = useState<Note>(note)
@@ -66,9 +80,11 @@ export default function NoteEditor({
   const [selectedHistoryNote, setSelectedHistoryNote] = useState<Note | null>(null)
   const [historyDiff, setHistoryDiff] = useState<NoteHistoryDiffResponse | null>(null)
   const [isReverting, setIsReverting] = useState(false)
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null)
 
   const editorContainerRef = useRef<HTMLDivElement>(null)
   const editorViewRef = useRef<EditorView | null>(null)
+  const contextMenuRef = useRef<HTMLDivElement>(null)
   const historyRequestIdRef = useRef(0)
   // Track if content changes are coming from the editor (not external load)
   const externalUpdateRef = useRef(false)
@@ -79,6 +95,143 @@ export default function NoteEditor({
     const { title: _t, ...restMeta } = meta
     return buildRawDoc(n.title, restMeta, n.body)
   }, [])
+
+  const makeDraft = useCallback((scope: GroundingDraft['scope'], text: string): GroundingDraft | null => {
+    return normalizeGroundingDraft({
+      scope,
+      sourcePath: localNote.file_path,
+      sourceTitle: localNote.title,
+      text,
+    })
+  }, [localNote.file_path, localNote.title])
+
+  const firstSentence = useCallback((text: string) => {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    if (!normalized) return ''
+    const match = normalized.match(/.+?[.!?](?:\s|$)/)
+    return match?.[0]?.trim() ?? normalized
+  }, [])
+
+  const sectionFromMarkdown = useCallback((text: string, index: number) => {
+    const safeIndex = Math.max(0, Math.min(index, text.length))
+    const headings = [...text.matchAll(/^#{1,6}\s+.+$/gm)]
+    if (headings.length === 0) return text
+    for (let idx = 0; idx < headings.length; idx++) {
+      const start = headings[idx].index ?? 0
+      const nextStart = headings[idx + 1]?.index ?? text.length
+      if (safeIndex >= start && safeIndex < nextStart) {
+        return text.slice(start, nextStart)
+      }
+    }
+    return text
+  }, [])
+
+  const sentenceAroundIndex = useCallback((text: string, index: number) => {
+    const normalized = text.replace(/\s+/g, ' ').trim()
+    if (!normalized) return ''
+    const safeIndex = Math.max(0, Math.min(index, normalized.length - 1))
+    let start = safeIndex
+    while (start > 0 && !/[.!?]/.test(normalized[start - 1])) start -= 1
+    let end = safeIndex
+    while (end < normalized.length && !/[.!?]/.test(normalized[end])) end += 1
+    if (end < normalized.length) end += 1
+    return normalized.slice(start, end).trim() || normalized
+  }, [])
+
+  const findTextIndex = useCallback((text: string, snippet: string) => {
+    const target = snippet.replace(/\s+/g, ' ').trim().toLowerCase()
+    if (!target) return null
+
+    const chars: string[] = []
+    const indexMap: number[] = []
+    let lastWasSpace = true
+    for (let idx = 0; idx < text.length; idx++) {
+      const char = text[idx]
+      if (/\s/.test(char)) {
+        if (!lastWasSpace) {
+          chars.push(' ')
+          indexMap.push(idx)
+        }
+        lastWasSpace = true
+        continue
+      }
+      chars.push(char.toLowerCase())
+      indexMap.push(idx)
+      lastWasSpace = false
+    }
+
+    const normalized = chars.join('').trim()
+    const start = normalized.indexOf(target)
+    return start >= 0 ? (indexMap[start] ?? 0) : null
+  }, [])
+
+  const isProseField = useCallback((label: string) => {
+    const normalized = label.trim().toLowerCase()
+    return ['body', 'content', 'notes', 'summary', 'description'].includes(normalized)
+  }, [])
+
+  const getFormInputContext = useCallback((target: EventTarget | null) => {
+    const element = target instanceof HTMLElement ? target.closest('input, textarea') : null
+    if (!(element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)) return null
+    return {
+      label: element.getAttribute('aria-label') || element.getAttribute('placeholder') || 'Field',
+      value: element.value,
+      selectionStart: element.selectionStart ?? 0,
+      selectionEnd: element.selectionEnd ?? 0,
+    }
+  }, [])
+
+  const buildContextMenuState = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const documentDraft = makeDraft('document', `${localNote.title}\n\n${localNote.body}`)
+    if (!documentDraft) return null
+    const raw = computeRaw(localNote)
+
+    if (mode === 'preview') {
+      const selection = window.getSelection()?.toString().trim() ?? ''
+      const block = (event.target instanceof HTMLElement ? event.target.closest('p, li, blockquote, pre, h1, h2, h3, h4, h5, h6') : null) as HTMLElement | null
+      const blockText = block?.textContent?.trim() || block?.innerText?.trim() || localNote.body
+      const matchedIndex = findTextIndex(raw, blockText)
+      return {
+        x: Math.min(event.clientX, window.innerWidth - 240),
+        y: Math.min(event.clientY, window.innerHeight - 240),
+        documentDraft,
+        sectionDraft: makeDraft('section', matchedIndex !== null ? sectionFromMarkdown(raw, matchedIndex) : blockText),
+        sentenceDraft: makeDraft('sentence', matchedIndex !== null ? sentenceAroundIndex(raw, matchedIndex) : firstSentence(blockText)),
+        selectionDraft: makeDraft('selection', selection),
+      }
+    }
+
+    if (mode === 'form') {
+      const inputContext = getFormInputContext(event.target)
+      const proseField = inputContext ? isProseField(inputContext.label) : false
+      const proseSource = inputContext?.value ?? ''
+      const proseIndex = inputContext ? Math.max(0, Math.min(inputContext.selectionStart, proseSource.length)) : 0
+      return {
+        x: Math.min(event.clientX, window.innerWidth - 240),
+        y: Math.min(event.clientY, window.innerHeight - 240),
+        documentDraft,
+        sectionDraft: proseField ? makeDraft('section', sectionFromMarkdown(proseSource, proseIndex)) : null,
+        sentenceDraft: proseField ? makeDraft('sentence', sentenceAroundIndex(proseSource, proseIndex)) : null,
+        selectionDraft: makeDraft('selection', inputContext && inputContext.selectionEnd > inputContext.selectionStart
+          ? inputContext.value.slice(inputContext.selectionStart, inputContext.selectionEnd)
+          : ''),
+      }
+    }
+
+    const view = editorViewRef.current
+    const pointerPos = view?.posAtCoords?.({ x: event.clientX, y: event.clientY }) ?? null
+    const selectionState = (view?.state as { selection?: { main?: { from: number; to: number } } } | undefined)?.selection?.main
+    const from = pointerPos ?? selectionState?.from ?? 0
+    const to = selectionState?.to ?? from
+    return {
+      x: Math.min(event.clientX, window.innerWidth - 240),
+      y: Math.min(event.clientY, window.innerHeight - 240),
+      documentDraft,
+      sectionDraft: makeDraft('section', sectionFromMarkdown(raw, from)),
+      sentenceDraft: makeDraft('sentence', sentenceAroundIndex(raw, from)),
+      selectionDraft: makeDraft('selection', to > from ? raw.slice(from, to) : ''),
+    }
+  }, [computeRaw, findTextIndex, firstSentence, getFormInputContext, isProseField, localNote, makeDraft, mode, sectionFromMarkdown, sentenceAroundIndex])
 
   // ── Save logic ─────────────────────────────────────────────────
 
@@ -237,6 +390,7 @@ export default function NoteEditor({
         extensions: [
           markdown(),
           yamlLang(),
+          EditorView.lineWrapping,
           keymap.of([
             {
               key: saveKey,
@@ -379,6 +533,24 @@ export default function NoteEditor({
     return () => clearTimeout(t)
   }, [toast])
 
+  useEffect(() => {
+    if (!contextMenu) return
+    const handlePointer = (event: MouseEvent) => {
+      if (contextMenuRef.current && !contextMenuRef.current.contains(event.target as Node)) {
+        setContextMenu(null)
+      }
+    }
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setContextMenu(null)
+    }
+    document.addEventListener('mousedown', handlePointer)
+    document.addEventListener('keydown', handleEscape)
+    return () => {
+      document.removeEventListener('mousedown', handlePointer)
+      document.removeEventListener('keydown', handleEscape)
+    }
+  }, [contextMenu])
+
   // ── Mode switch helpers ───────────────────────────────────────
 
   const switchMode = (next: EditorMode) => {
@@ -397,6 +569,16 @@ export default function NoteEditor({
 
   const isPending = localNote.metadata?.review_status === 'pending'
   const sourceLinks = ((((localNote.metadata ?? {}) as Record<string, unknown>).sources) as SourceLink[] | undefined) ?? []
+  const contextTarget = contextMenu?.selectionDraft
+    ? { label: 'selection', draft: contextMenu.selectionDraft }
+    : null
+
+  const contextAction = (draft: GroundingDraft | null, useExisting: boolean) => {
+    if (!draft) return
+    if (useExisting) onAddToExistingChat?.(draft)
+    else onAddToNewChat?.(draft)
+    setContextMenu(null)
+  }
 
   return (
     <div className="note-editor" data-testid="note-editor">
@@ -549,7 +731,16 @@ export default function NoteEditor({
       )}
 
       {/* ── Editor area ────────────────────────────────────────── */}
-      <div className="note-editor__body">
+      <div
+        className="note-editor__body"
+        onContextMenu={event => {
+          if (!onAddToNewChat && !onAddToExistingChat) return
+          const nextContextMenu = buildContextMenuState(event)
+          if (!nextContextMenu) return
+          event.preventDefault()
+          setContextMenu(nextContextMenu)
+        }}
+      >
         {/* CodeMirror container — always mounted so editor state is preserved */}
         <div
           ref={editorContainerRef}
@@ -609,6 +800,55 @@ export default function NoteEditor({
           />
         )}
       </div>
+      {contextMenu && (
+        <div
+          ref={contextMenuRef}
+          className="note-editor__context-menu"
+          role="menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          data-testid="note-context-menu"
+        >
+          {contextTarget ? (
+            <>
+              <button type="button" role="menuitem" onClick={() => contextAction(contextTarget.draft, false)} data-testid="note-context-selection-new">
+                Add {contextTarget.label} to new chat
+              </button>
+              <button type="button" role="menuitem" onClick={() => contextAction(contextTarget.draft, true)} data-testid="note-context-selection-existing">
+                Add {contextTarget.label} to existing chat…
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" role="menuitem" onClick={() => contextAction(contextMenu.documentDraft, false)} data-testid="note-context-document-new">
+                Add document to new chat
+              </button>
+              <button type="button" role="menuitem" onClick={() => contextAction(contextMenu.documentDraft, true)} data-testid="note-context-document-existing">
+                Add document to existing chat…
+              </button>
+              {contextMenu.sectionDraft && (
+                <>
+                  <button type="button" role="menuitem" onClick={() => contextAction(contextMenu.sectionDraft, false)} data-testid="note-context-section-new">
+                    Add section to new chat
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => contextAction(contextMenu.sectionDraft, true)} data-testid="note-context-section-existing">
+                    Add section to existing chat…
+                  </button>
+                </>
+              )}
+              {contextMenu.sentenceDraft && (
+                <>
+                  <button type="button" role="menuitem" onClick={() => contextAction(contextMenu.sentenceDraft, false)} data-testid="note-context-sentence-new">
+                    Add sentence to new chat
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => contextAction(contextMenu.sentenceDraft, true)} data-testid="note-context-sentence-existing">
+                    Add sentence to existing chat…
+                  </button>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   )
 }

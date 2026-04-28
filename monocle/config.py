@@ -37,7 +37,7 @@ class ModelEntry(BaseModel):
     key: str
     name: str
     role: Literal["chat", "embed", "stt"]
-    provider: Literal["ollama", "foundry_local", "azure"]
+    provider: Literal["ollama", "foundry_local", "azure", "openai"]
     base_url: str | None = None
 
 
@@ -204,14 +204,14 @@ class AIConfig(BaseModel):
         1. When transcribe_backend='native', the STT provider supports native transcription
            (i.e., not Ollama)
         2. When stt_key is set to a different provider than chat_model_key, the config
-           is compatible with provider construction (either transcribe_backend is not 'native',
-           or stt provider has native support like Azure/Foundry)
+              is compatible with provider construction (either transcribe_backend is not 'native',
+              or stt provider has native support like OpenAI/Azure/Foundry)
 
         Rationale:
         - get_provider() only builds chat and embed providers; it ignores stt_key
         - When transcribe_backend='native', providers try to use their own transcription API
         - Ollama has no transcription API, so native transcription will fail at runtime
-        - If stt_key points to a different provider (e.g., Azure), it won't be used in
+                - If stt_key points to a different provider (e.g., OpenAI/Azure), it won't be used in
           provider construction, making the config inconsistent
         """
         stt_entry = self.get_stt_model()
@@ -230,7 +230,7 @@ class AIConfig(BaseModel):
                     "ai.transcribe_backend='native' is not supported with Ollama. "
                     "Ollama has no built-in transcription API. "
                     "Set ai.transcribe_backend to 'whisper_cpp' or 'subprocess', "
-                    "or use a provider with native transcription support (Azure/Foundry)."
+                    "or use a provider with native transcription support (OpenAI/Azure/Foundry)."
                 )
 
         # Check 2: stt_key on different provider than chat requires non-native backend
@@ -314,7 +314,6 @@ class ServerConfig(BaseModel):
     port: int = 8000
     mcp_access_key_env: str = "MCP_ACCESS_KEY"
     frontend_dist: str = "./frontend/dist"
-    separate_processes: bool = False
     dev_cors: bool = False  # set True by `monocle dev` command
 
     @field_validator("host")
@@ -471,6 +470,9 @@ class Settings(BaseModel):
     azure_openai_embed_deployment: str | None = Field(default=None, exclude=True)
     azure_openai_chat_deployment: str | None = Field(default=None, exclude=True)
 
+    # OpenAI credentials (env-only)
+    openai_api_key: str | None = Field(default=None, exclude=True)
+
     # Foundry Local credentials (env-only)
     foundry_local_base_url: str | None = Field(default=None, exclude=True)
     foundry_local_api_key: str | None = Field(default=None, exclude=True)
@@ -504,12 +506,30 @@ class Settings(BaseModel):
             os.environ.get("FOUNDRY_LOCAL_BASE_URL"),
         )
         merged.setdefault("foundry_local_api_key", os.environ.get("FOUNDRY_LOCAL_API_KEY"))
+        merged.setdefault("openai_api_key", os.environ.get("OPENAI_API_KEY"))
 
         super().__init__(**merged)
 
     @model_validator(mode="after")
     def validate_cross_fields(self) -> "Settings":
-        if self.ai.provider == "azure":
+        active_providers = {
+            self.ai.get_chat_model().provider,
+            self.ai.get_embed_model().provider,
+        }
+
+        active_provider_roles: list[str] = []
+        if self.ai.get_chat_model().provider == "azure":
+            active_provider_roles.append(f"chat model ({self.ai.chat_model_key})")
+        if self.ai.get_embed_model().provider == "azure":
+            active_provider_roles.append(f"embed model ({self.ai.embed_model_key})")
+
+        active_openai_roles: list[str] = []
+        if self.ai.get_chat_model().provider == "openai":
+            active_openai_roles.append(f"chat model ({self.ai.chat_model_key})")
+        if self.ai.get_embed_model().provider == "openai":
+            active_openai_roles.append(f"embed model ({self.ai.embed_model_key})")
+
+        if "azure" in active_providers:
             missing = [
                 k
                 for k in (
@@ -521,6 +541,10 @@ class Settings(BaseModel):
             ]
             if missing:
                 raise ValueError(
-                    f"ai.provider=azure requires env vars: {', '.join(m.upper() for m in missing)}"
+                    f"Active {', '.join(active_provider_roles)} use provider=azure and require env vars: {', '.join(m.upper() for m in missing)}"
                 )
+        if "openai" in active_providers and not self.openai_api_key:
+            raise ValueError(
+                f"Active {', '.join(active_openai_roles)} use provider=openai and require env var: OPENAI_API_KEY"
+            )
         return self

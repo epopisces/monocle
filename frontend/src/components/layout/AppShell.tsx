@@ -1,6 +1,7 @@
 import React from 'react'
 import Topbar from './Topbar'
 import LeftNav from './LeftNav'
+import type { ChatDocumentDragPayload } from '../Chat/chatGroundingDnd'
 import './AppShell.css'
 
 interface AppShellProps {
@@ -10,6 +11,7 @@ interface AppShellProps {
   onIngestOpen?: () => void
   onReviewOpen?: () => void
   onFailedOpen?: () => void
+  onChatDocumentDrop?: (payload: ChatDocumentDragPayload) => void
   ingestCount?: number
   reviewCount?: number
   failedCount?: number
@@ -22,6 +24,7 @@ export default function AppShell({
   onIngestOpen,
   onReviewOpen,
   onFailedOpen,
+  onChatDocumentDrop,
   ingestCount = 0,
   reviewCount = 0,
   failedCount = 0,
@@ -42,7 +45,7 @@ export default function AppShell({
         failedCount={failedCount}
       />
       <div className="app-body">
-        <LeftNav collapsed={!navOpen} />
+        <LeftNav collapsed={!navOpen} onChatDocumentDrop={onChatDocumentDrop} />
         <main className="app-main">{children}</main>
       </div>
     </div>

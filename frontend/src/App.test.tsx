@@ -4,6 +4,7 @@ import App from './App'
 import { getReviewCount } from './api/review'
 import { countIngestNotifications, listIngestFailures } from './api/ingest'
 import { getSettings } from './api/settings'
+import { getNote } from './api/notes'
 
 // react-force-graph pulls in aframe-extras which requires a global AFRAME.
 // Mock the whole module so App.test.tsx doesn't trigger that side effect.
@@ -17,7 +18,15 @@ vi.mock('./components/IngestReview/IngestReviewScreen', () => ({
 
 // Graph and Notes API calls fired by GraphScreen on the /graph route
 vi.mock('./api/graph', () => ({ getGraph: vi.fn().mockResolvedValue({ focus: null, nodes: [], edges: [] }) }))
-vi.mock('./api/notes', () => ({ listNotes: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }) }))
+vi.mock('./api/notes', () => ({
+  listNotes: vi.fn().mockResolvedValue({ items: [], total: 0, offset: 0, limit: 50 }),
+  getNote: vi.fn().mockResolvedValue({
+    file_path: 'people/alice.md',
+    title: 'Alice Smith',
+    body: 'Alice owns the rollout.',
+    metadata: { type: 'person_note', review_status: 'approved' },
+  }),
+}))
 
 // Review and ingest polled by App on mount every 30 s
 vi.mock('./api/review', () => ({ getReviewCount: vi.fn().mockResolvedValue({ count: 0 }) }))
@@ -218,6 +227,12 @@ describe('App — route navigation', () => {
     vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
     vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
     vi.mocked(listIngestFailures).mockResolvedValue([])
+    vi.mocked(getNote).mockResolvedValue({
+      file_path: 'people/alice.md',
+      title: 'Alice Smith',
+      body: 'Alice owns the rollout.',
+      metadata: { type: 'person_note', review_status: 'approved' },
+    } as never)
   })
   afterEach(() => vi.clearAllMocks())
 
@@ -262,6 +277,55 @@ describe('App — route navigation', () => {
     fireEvent.click(nav.querySelector('a[href="/"]') as Element)
     await act(async () => { await Promise.resolve() })
     expect(nav.querySelector('a[href="/"]')).toBeTruthy()
+  })
+
+  it('opens the add-to-chat picker when a docs file is dropped onto the Chat nav item', async () => {
+    render(<App />)
+    const chatLink = screen.getByTestId('left-nav-chat-link')
+    const payload = JSON.stringify({ filePath: 'people/alice.md', title: 'Alice Smith' })
+
+    const dataTransfer = {
+      types: ['application/x-monocle-chat-document'],
+      getData: vi.fn((type: string) => type === 'application/x-monocle-chat-document' ? payload : ''),
+      setData: vi.fn(),
+      dropEffect: 'copy',
+    }
+
+    fireEvent.dragOver(chatLink, { dataTransfer })
+    fireEvent.drop(chatLink, { dataTransfer })
+
+    await waitFor(() => expect(vi.mocked(getNote)).toHaveBeenCalledWith('people/alice.md'))
+    expect(await screen.findByTestId('chat-session-picker')).toBeInTheDocument()
+  })
+
+  it('clips dropped document grounding before persisting it to localStorage', async () => {
+    localStorage.clear()
+    vi.mocked(getNote).mockResolvedValueOnce({
+      file_path: 'people/alice.md',
+      title: 'Alice Smith',
+      body: `Lead paragraph ${'details '.repeat(1200)}`,
+      metadata: { type: 'person_note', review_status: 'approved' },
+    } as never)
+
+    render(<App />)
+    const chatLink = screen.getByTestId('left-nav-chat-link')
+    const payload = JSON.stringify({ filePath: 'people/alice.md', title: 'Alice Smith' })
+    const dataTransfer = {
+      types: ['application/x-monocle-chat-document'],
+      getData: vi.fn((type: string) => type === 'application/x-monocle-chat-document' ? payload : ''),
+      setData: vi.fn(),
+      dropEffect: 'copy',
+    }
+
+    fireEvent.dragOver(chatLink, { dataTransfer })
+    fireEvent.drop(chatLink, { dataTransfer })
+
+    fireEvent.click(await screen.findByTestId('chat-session-picker-new'))
+
+    const stored = JSON.parse(localStorage.getItem('monocle-sessions') ?? '[]') as Array<{ messages: Array<{ grounding?: { text?: string } }> }>
+    const groundingText = stored[0]?.messages[0]?.grounding?.text ?? ''
+    expect(groundingText.length).toBeLessThanOrEqual(4001)
+    expect(groundingText.endsWith('…')).toBe(true)
   })
 })
 

@@ -79,7 +79,7 @@ The frontend is a **React 18 + Vite 5** single-page application served by the Fa
 
 **Main content area** (`flex-grow`): Phase 1 renders a single content panel. The internal React state tracks an ordered `tabs` array (each entry: `{ tabId, type: "note"|"graph", noteId? }`) so the UI is architecturally ready for multi-pane expansion in Phase 2 without a state model redesign. The tab bar is not surfaced in the Phase 1 UI but the state is wired.
 
-**Topbar**: app name/logo on the left; **omnisearch bar** (§5.6) centered and taking the majority of horizontal space; compact health dot (colored, no label), voice capture button, notification bell with review badge, failed-captures warning button, and settings cog on the right. Backend dot color is driven by `GET /api/health`: green = `ai_reachable: true`, amber = server reachable but `status: indexing` or AI check in-progress, red = `ai_reachable: false`. The notification badge uses `--review-pending` color and is hidden when the count is 0.
+**Topbar**: app name/logo on the left; **omnisearch bar** (§5.6) centered and taking the majority of horizontal space; compact health dot (colored, no label), voice capture button, one capture-workbench button/badge for actionable ingest work, and settings cog on the right. Backend dot color is driven by `GET /api/health`: green = `ai_reachable: true`, amber = server reachable but `status: indexing` or AI check in-progress, red = `ai_reachable: false`. The workbench badge uses `--review-pending` color and is hidden when the actionable count is 0.
 
 **Settings modal** (overlay): backend selection dropdown (Ollama / Foundry Local / Azure AI Services), model configuration fields for the selected backend, vault path display, MCP access key management, confidence review threshold slider.
 
@@ -317,7 +317,7 @@ Edges are visually differentiated by type and — for wikilink and structured ed
 - **Click:** side panel slides in with top 5 related notes and the node's `relation` to the current focus
 - **Double-click:** navigates to the note in Document Browser; drag to reposition (persisted to `localStorage`)
 - **Expand:** click the expand icon on a node to open its full note content inline; while expanded, text within the note body is selectable — selecting text reveals a floating mini-toolbar with *Link to note*, *Link to tag*, *Bold*, *Italic* actions, enabling inline enrichment without leaving the graph
-- **Review-pending pulse:** nodes whose note has `review_status: pending` display a subtle repeating amber pulse (`--review-pending` color); clicking a pulsing node opens the Review Queue panel (§7) pre-filtered to that note, providing a spatial shortcut to the review workflow from within the graph
+- **Review-pending pulse:** nodes whose note has `review_status: pending` display a subtle repeating amber pulse (`--review-pending` color); clicking a pulsing node opens the Capture Workbench (§7) pre-filtered to that note, providing a spatial shortcut to the review workflow from within the graph
 
 ---
 
@@ -334,14 +334,14 @@ Edges are visually differentiated by type and — for wikilink and structured ed
 │  Ingestion by Source (last 30 days)                         │
 │  ████████████  web / chat    614                            │
 │  ██████         MCP           289                           │
-│  ████           Teams          91                           │
+│  ████           import         91                           │
 │  ██             voice          48                           │
 │                                                              │
 │  Notes by Type                    Activity (last 8 weeks)  │
 │  [Horizontal bar chart]           [Sparkline bar chart]    │
 │                                                              │
 │  Source Quality Index ⓘ                                    │
-│  MCP: ★★★★☆  Voice: ★★★★★  Web: ★★★☆☆  Teams: ★★★☆☆       │
+│  MCP: ★★★★☆  Voice: ★★★★★  Web: ★★★☆☆  Import: ★★★☆☆      │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -428,59 +428,53 @@ Triggered from the chat `🎤` button or the "Capture voice note" chat starter.
 
 ---
 
-## 7. Review Queue Panel
+## 7. Capture Workbench
 
-A right-anchored slide-over panel triggered by clicking the `🔔` notification bell in the topbar.
+A right-anchored slide-over panel or dedicated route triggered by clicking the topbar capture-workbench button.
 
 ```
-                              ┌─ Review Queue (3 pending) ─────────┐
-                              │  Sort by: [Confidence ▾]           │
+                              ┌─ Capture Workbench (3 items) ──────┐
+                              │  [Prepared] [Pending] [Failures]   │
                               │  ─────────────────────────────────  │
                               │  ┌──────────────────────────────┐ │
-                              │  │ person_note  voice  48%        │ │
+                              │  │ prepared  voice   2 actions    │ │
                               │  │ Sarah mentioned she’s thinking │ │
                               │  │ about leaving her job…         │ │
-                              │  │ [Fix ✏]           [Approve ✓] │ │
+                              │  │ [True-up] [Review] [Capture]  │ │
                               │  └──────────────────────────────┘ │
                               │  ┌──────────────────────────────┐ │
-                              │  │ decision  mcp  71%            │ │
+                              │  │ pending   mcp    71%          │ │
                               │  │ Decided to migrate to Azure…   │ │
                               │  │ [Fix ✏]           [Approve ✓] │ │
                               │  └──────────────────────────────┘ │
                               │  ┌──────────────────────────────┐ │
-                              │  │ observation  web  89%         │ │
-                              │  │ ChromaDB dimensions are fixed  │ │
-                              │  │ at collection creation…        │ │
-                              │  │ [Fix ✏]           [Approve ✓] │ │
+                              │  │ failed    web    retryable    │ │
+                              │  │ URL capture could not be       │ │
+                              │  │ summarized in time…            │ │
+                              │  │ [Inspect] [Retry] [Dismiss]   │ │
                               │  └──────────────────────────────┘ │
                               │                                   │
-                              │  [Approve All ✓]  [Close ×]      │
+                              │  [Bulk Approve ✓] [Close ×]      │
                               └───────────────────────────────────┘
 ```
 
-**Panel behavior:**
-- Opens as a right-anchored slide-over (400px wide); does not replace the main content area; `Escape` closes it
-- Sorted by confidence ascending (lowest confidence first) by default; user can toggle to sort by date ingested
-- Each card shows: note type badge, source badge, **confidence percentage** pill (amber `--review-pending` color), 2-line content preview
-- **Approve `✓`**: calls `PATCH /api/review/{path}/approve` — sets `review_status: approved`, records `approval_mode: manual`, `approved_by`, and `approved_at` in frontmatter, removes card, decrements badge
-- **Fix `✏`**: closes the panel and opens the note in the Document Browser editor; card remains in queue with an `editing` indicator until the user manually approves from within the editor toolbar
-- **Approve All `✓`**: bulk-approves all currently visible items via `POST /api/review/approve-all`
-- Empty state: "✔ All notes reviewed" shown after all items are approved; panel closes automatically after 2 seconds
-- The badge count re-evaluates live when the review queue threshold or auto-approve threshold is changed in Settings
+**Workbench behavior:**
+- Opens as a right-anchored slide-over (400px wide) or dedicated route; `Escape` closes the slide-over variant
+- Presents three sections or tabs: `Prepared`, `Pending Review`, and `Failures`
+- `Prepared` items surface dormant-ready sessions with digest, related-note context, and actions such as `True-up`, `Review`, and `Fast Capture` when allowed
+- `Pending Review` items retain confidence-first ordering and approval/fix actions for pending notes
+- `Failures` surface retryable failed ingests with `Inspect`, `Retry`, and `Dismiss`
+- The topbar badge reflects one actionable workbench count rather than separate review and failure counts
+- Detailed note editing still routes into the Document Browser when the user chooses `Fix`
 
 ---
 
-## 7.1 Failed Captures Panel
+## 7.1 Workbench Sections
 
-A right-anchored slide-over panel triggered by the topbar failed-captures warning button.
-
-**Panel behavior:**
-- Opens as a right-anchored slide-over (400px wide); `Escape` closes it
-- Lists failed ingests newest first with source badge, failed step, timestamp, and a one-line reason preview
-- **Inspect** opens the generated `.error.md` sidecar in the Document Browser
-- **Retry** calls `POST /api/ingest/failures/retry` and removes the item on success
-- **Dismiss** hides the item from the panel once the user has handled it manually; the underlying sidecar file remains until explicitly deleted
-- Empty state: "No failed captures" with the warning button hidden from the topbar
+- **Prepared:** ingest sessions waiting for review, true-up, or fast capture
+- **Pending Review:** notes or proposed actions that still require explicit human approval
+- **Failures:** failed ingests, failed preparation, or failed execution records that require inspection or retry
+- Each section can share the same shell, filtering, and keyboard behavior so the workbench feels like one surface instead of three separate drawers
 
 ---
 
@@ -514,9 +508,8 @@ Every note carries a `source` frontmatter value. Rendered as a small monospaced 
 |---|---|---|
 | `web` | `web` | Chat capture or direct web form |
 | `mcp` | `mcp` | Captured via MCP tool from an AI client |
-| `teams` | `teams` | Ingested from a Microsoft Teams message |
 | `voice` | `voice` | Transcribed from audio (browser or Whisper) |
-| `import` | `import` | Imported from OneNote, Obsidian, or other |
+| `import` | `import` | Imported or explicitly handed off from a non-chat capture flow |
 
 ---
 
@@ -541,7 +534,7 @@ Accessible from the topbar `⚙` icon.
 │                                                           │
 │  MCP Access Key: [••••••••••a3f9]  [↺ Rotate]          │
 │                                                           │
-│  ─ Review Queue ──────────────────────────────────────── │
+│  ─ Capture Workbench ─────────────────────────────────── │
 │  Queue threshold                                          │
 │  Show pending notes below: [────────●──────────────] 1.00│
 │  (1.00 = show all pending   0.00 = hide badge)            │
@@ -572,7 +565,7 @@ Backend-specific fields show/hide dynamically based on selection. Azure fields r
 
 On open, all fields are populated from `GET /api/settings`. Saving calls `PATCH /api/settings` — the server is the authoritative source. `localStorage` holds a cache for instant UI render only.
 
-The **Queue threshold** slider controls which pending notes appear in the review queue. Range 0.00–1.00, step 0.05. Default `1.00` (all pending notes visible). Setting to `0.00` hides the notification entirely.
+The **Queue threshold** slider controls which pending notes appear in the capture workbench. Range 0.00–1.00, step 0.05. Default `1.00` (all pending notes visible). Setting to `0.00` hides low-confidence pending-note alerts entirely.
 
 The **Auto-approve threshold** input controls whether high-confidence ingests are approved immediately. Range 0–100. Default `0` disables auto-approval. Setting it to `90` means notes scoring 90% or higher are auto-approved and stamped with approval metadata (`approved_by: system:auto`, `approved_at`, `approval_mode: auto`).
 
@@ -607,7 +600,7 @@ Phase 1 targets desktop browsers only (≥ 1024px width).
 - All interactive elements have visible focus rings (2px `--accent` outline)
 - Color is never the sole state indicator — icons and text used alongside color
 - ARIA labels on all icon-only buttons
-- The notification bell announces its badge count via `aria-label="{n} notes pending review"`; when count is 0 the label reads `"No notes pending review"`
+- The capture-workbench button announces its badge count via `aria-label="{n} capture items need attention"`; when count is 0 the label reads `"No capture items need attention"`
 - Tab order follows visual reading order; `Escape` closes modals and slide-over panels
 - Graph view provides a table-format fallback accessible via keyboard navigation
 
@@ -633,7 +626,7 @@ All shortcuts use `Ctrl` on Windows/Linux and `Cmd` on macOS.
 | `Ctrl+Z` / `Ctrl+Shift+Z` | Undo / Redo | Document editor |
 | `Tab` | Indent / next focusable element | Editor / navigation |
 
-The **command palette** (`Ctrl+/`) is a searchable list of all available actions (navigate to screen, run chat starter, open review queue, trigger weekly summary, etc.). It is the primary discoverability surface for keyboard-first users.
+The **command palette** (`Ctrl+/`) is a searchable list of all available actions (navigate to screen, run chat starter, open the capture workbench, trigger weekly summary, etc.). It is the primary discoverability surface for keyboard-first users.
 
 ---
 

@@ -224,7 +224,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
               title="Voice capture"
               data-testid="voice-btn"
             >
-              🎤
+              ◎
             </button>
           )}
           <button

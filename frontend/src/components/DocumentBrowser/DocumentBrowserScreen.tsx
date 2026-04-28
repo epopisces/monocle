@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { listNotes, getNote, listTemplates, type Note, type NoteRef } from '../../api/notes'
 import {
   getArchivedSource,
@@ -10,6 +10,8 @@ import {
   type ArchivedSourceContentResponse,
   type SourceRecord,
 } from '../../api/ingest'
+import ChatSessionPickerDialog from '../Chat/ChatSessionPickerDialog'
+import { addGroundingToSession, loadSessions, type GroundingDraft } from '../Chat/sessionStore'
 import type { TemplateSchema } from './FormEditor'
 import FileTree from './FileTree'
 import NoteEditor from './NoteEditor'
@@ -17,6 +19,7 @@ import BacklinksPanel from './BacklinksPanel'
 import './DocumentBrowserScreen.css'
 
 export default function DocumentBrowserScreen() {
+  const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const [notes, setNotes] = useState<NoteRef[]>([])
   const [sources, setSources] = useState<SourceRecord[]>([])
@@ -33,6 +36,7 @@ export default function DocumentBrowserScreen() {
   const [loadingNotes, setLoadingNotes] = useState(true)
   const [notesError, setNotesError] = useState<string | null>(null)
   const [wikiToast, setWikiToast] = useState<string | null>(null)
+  const [chatPickerDraft, setChatPickerDraft] = useState<GroundingDraft | null>(null)
 
   useEffect(() => {
     setLoadingNotes(true)
@@ -203,6 +207,26 @@ export default function DocumentBrowserScreen() {
     setOpenNote(prev => prev?.file_path === path ? { ...prev, title: newTitle } : prev)
   }, [])
 
+  const openChatSession = useCallback((sessionId: string) => {
+    navigate(`/?session=${encodeURIComponent(sessionId)}`)
+  }, [navigate])
+
+  const handleAddGroundingToNewChat = useCallback((draft: GroundingDraft) => {
+    const session = addGroundingToSession(null, draft)
+    openChatSession(session.id)
+  }, [openChatSession])
+
+  const handleAddGroundingToExistingChat = useCallback((draft: GroundingDraft) => {
+    setChatPickerDraft(draft)
+  }, [])
+
+  const handleSelectExistingChat = useCallback((sessionId: string) => {
+    if (!chatPickerDraft) return
+    const session = addGroundingToSession(sessionId, chatPickerDraft)
+    setChatPickerDraft(null)
+    openChatSession(session.id)
+  }, [chatPickerDraft, openChatSession])
+
   return (
     <div className="doc-browser" data-testid="doc-browser">
       {wikiToast && (
@@ -318,6 +342,8 @@ export default function DocumentBrowserScreen() {
               onNavigate={handleNavigate}
               allNotes={notes}
               onOpenSource={handleOpenSource}
+              onAddToNewChat={handleAddGroundingToNewChat}
+              onAddToExistingChat={handleAddGroundingToExistingChat}
             />
             <BacklinksPanel
               path={openNote.file_path}
@@ -326,6 +352,18 @@ export default function DocumentBrowserScreen() {
           </div>
         )}
       </div>
+      <ChatSessionPickerDialog
+        open={chatPickerDraft !== null}
+        sessions={loadSessions()}
+        title="Add context to chat"
+        onClose={() => setChatPickerDraft(null)}
+        onCreateNew={() => {
+          if (!chatPickerDraft) return
+          handleAddGroundingToNewChat(chatPickerDraft)
+          setChatPickerDraft(null)
+        }}
+        onSelectSession={handleSelectExistingChat}
+      />
     </div>
   )
 }

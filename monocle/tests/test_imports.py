@@ -41,10 +41,6 @@ def test_watcher_import() -> None:
     from monocle.watcher import InboxWatcher, ReindexQueue  # noqa: F401
 
 
-def test_process_manager_import() -> None:
-    from monocle.process_manager import ProcessManager  # noqa: F401
-
-
 def test_agent_stubs_import() -> None:
     from monocle.agents.routing import RoutingAgent  # noqa: F401
     from monocle.agents.reindex import ReindexAgent  # noqa: F401

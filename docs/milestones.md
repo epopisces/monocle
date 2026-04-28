@@ -1109,6 +1109,80 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 
 ---
 
+### D1: Simplification Docs Alignment
+
+**Goal:** Rewrite the source-of-truth docs so the near-term product is explicitly a trust-first capture system with one unified workbench, lean chat, explicit URL capture handoff, distinct omnisearch, and one supported runtime topology.
+
+**Completed:** 2026-04-28
+
+**Deliverables completed:**
+
+- [x] Updated `docs/prd.md` to remove near-term Teams/OneNote/channel-breadth positioning and replace it with trust-first capture, a unified capture workbench, and explicit URL capture handoff.
+- [x] Updated `docs/srs.md` to describe one supported runtime topology, deferred channel integrations, explicit URL capture instead of automatic chat prefetch, and the unified capture workbench direction.
+- [x] Updated `docs/architecture.md` to remove ProcessManager/separate-process mainline diagrams and reflect the workbench + lean chat target architecture.
+- [x] Updated `docs/ui-design.md` so topbar, review, and failure surfaces converge on one capture workbench design.
+- [x] Updated `docs/build-plan.md` milestone sequencing so D1 precedes M42-M48 and M24/M26/M33 become deferred future-phase work.
+
+**Acceptance Criteria met:**
+
+- The PRD, SRS, build plan, architecture doc, and UI design doc now describe the same near-term product shape.
+- Separate-process runtime support is documented as deferred work rather than as a mainline deliverable.
+- Teams, OneNote, and third-party MCP composition are clearly deferred out of the near-term track.
+- Chat is documented as lean retrieval and authoring with explicit capture handoffs instead of hidden URL-prefetch automation.
+- The unified capture workbench is the documented destination for prepared sessions, pending review work, and failures.
+
+**Files modified:**
+
+- `docs/prd.md`
+- `docs/srs.md`
+- `docs/architecture.md`
+- `docs/ui-design.md`
+- `docs/build-plan.md`
+- `GHC-ACTION-LOG.md`
+
+**Validation:** Reviewed the D1 docs diff for cross-document consistency before starting M42.
+
+---
+
+### M42: Remove Separate-Process Support
+
+**Goal:** Remove separate-process runtime support from the near-term mainline backend and CLI so Monocle supports one runtime topology only.
+
+**Completed:** 2026-04-28
+
+**Deliverables completed:**
+
+- [x] Removed `ProcessManager` and capture-only runtime branches from `monocle/main.py` and CLI entrypoints.
+- [x] Removed `server.separate_processes` and `MONOCLE_SEPARATE_PROCESSES` from supported mainline config/runtime paths.
+- [x] Deleted process-manager-specific code/tests and replaced them with unified-runtime CLI/import coverage.
+
+**Acceptance Criteria met:**
+
+- `uv run python -m monocle serve` now starts the only supported runtime topology.
+- No documented or supported `--separate-processes`, `capture`, `watch`, or `scheduler` mainline runtime path remains in the live code/config surface.
+- Health and startup behavior no longer branch on capture-only or separate-process mode.
+
+**Files modified:**
+
+- `monocle/main.py`
+- `monocle/cli.py`
+- `monocle/config.py`
+- `monocle/watcher.py`
+- `monocle/tests/test_cli.py`
+- `monocle/tests/test_imports.py`
+- `.vscode/tasks.json`
+- `config.yaml`
+- `config.yaml.example`
+
+**Files removed:**
+
+- `monocle/process_manager.py`
+- `monocle/tests/test_process_manager.py`
+
+**Test Results:** `uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q` → 39 passed, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_mcp.py -x --tb=short -q` → 133 passed, EXIT 0.
+
+---
+
 ### M35: Background Session Preparation & Notifications
 
 **Goal:** Turn persisted ingest sessions into dormant, review-ready work items by preparing them during idle time and surfacing ready notifications through a dedicated app-shell entry point.
@@ -1374,4 +1448,57 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - `frontend/src/SettingsModal.test.tsx`
 
 **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+
+---
+
+### M40: Add Documents & Snippets To Chat Context
+
+**Goal:** Let users explicitly add documents or document snippets into a new or existing chat session from the Docs explorer or Document Viewer without relying on implicit retrieval.
+
+**Completed:** 2026-04-25
+
+**Deliverables completed:**
+
+- [x] Added explicit chat grounding persistence for client-side chat sessions so user-provided context is stored as a first-class localStorage entry instead of being folded into a normal message or hidden behind retrieval.
+- [x] Added Document Viewer context-menu actions for the current document, section, sentence, or selected text, with new-chat and existing-chat flows wired from preview, YAML, and form modes.
+- [x] Added Docs explorer drag-and-drop from file-tree documents onto the persistent Chat nav target, then routed the dropped document through the same new-or-existing session picker flow.
+- [x] Updated chat rendering and session hydration so destination chat sessions visibly label grounding as `User-added context` and reopen the correct session through the existing `session_id` URL handoff.
+
+**Acceptance Criteria met:**
+
+- Users can add whole documents from the Docs explorer to a new or existing chat session: file rows are draggable and dropping them onto the Chat nav target opens a session picker that can create a new grounded chat or append the document to an existing one.
+- Right-click in the Document Viewer exposes add-to-chat actions for document/section/sentence when no text is selected: the custom NoteEditor context menu offers both new-chat and existing-chat variants in preview, YAML, and form modes.
+- Right-click on a selection exposes add-selection-to-chat actions for a new or existing session: the NoteEditor context menu collapses to selection-specific actions whenever there is an active text selection.
+- Added context is clearly represented as user-provided context inside the destination chat session: grounding renders as a distinct `User-added context` card and is serialized into `/api/chat` as an explicit structured user message.
+
+**Implementation notes:**
+
+- The M40 implementation stays entirely within the existing Phase 1 client-side chat-session model. No server-side chat persistence was introduced, which preserves the LTR-4 constraint that server memory remains deferred.
+- Explicit grounding is represented by a dedicated `kind: "grounding"` thread entry plus structured `GroundingEntry` metadata. When a grounded session is sent to `/api/chat`, each grounding entry becomes a separate user-role message prefixed with `[User-added grounding]`, the source path/title, and the grounding scope.
+- The same `ChatSessionPickerDialog` is reused for both right-click add-to-chat actions and docs-to-chat drag-and-drop, so the user-facing decision between new and existing sessions stays consistent across entry points.
+- Document Viewer section/sentence extraction intentionally uses the nearest text context available in each mode: rendered block text in preview mode, CodeMirror selection/cursor context in YAML mode, and active input selection/value context in form mode.
+
+**Files modified:**
+
+- `frontend/src/App.test.tsx`
+- `frontend/src/App.tsx`
+- `frontend/src/Chat.test.tsx`
+- `frontend/src/DocumentBrowser.test.tsx`
+- `frontend/src/components/Chat/ChatMessage.css`
+- `frontend/src/components/Chat/ChatMessage.tsx`
+- `frontend/src/components/Chat/ChatScreen.tsx`
+- `frontend/src/components/Chat/ChatSessionPickerDialog.css`
+- `frontend/src/components/Chat/ChatSessionPickerDialog.tsx`
+- `frontend/src/components/Chat/chatGroundingDnd.ts`
+- `frontend/src/components/Chat/sessionStore.ts`
+- `frontend/src/components/DocumentBrowser/FileTree.tsx`
+- `frontend/src/components/DocumentBrowser/DocumentBrowserScreen.tsx`
+- `frontend/src/components/DocumentBrowser/NoteEditor.css`
+- `frontend/src/components/DocumentBrowser/NoteEditor.tsx`
+- `frontend/src/components/layout/AppShell.tsx`
+- `frontend/src/components/layout/LeftNav.css`
+- `frontend/src/components/layout/LeftNav.tsx`
+- `frontend/src/hooks/useChat.ts`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1007 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 468 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 

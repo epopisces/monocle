@@ -4,6 +4,34 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-04-28
+
+### GPT-5.4
+- Completed D1 bookkeeping after the doc reset: marked the simplification-docs milestone complete in `docs/build-plan.md`, archived D1 details to `docs/milestones.md`, and advanced the active milestone to M43
+- Completed M42 `Remove Separate-Process Support`: collapsed `monocle/main.py` to the unified runtime path, removed split-runtime flags/commands from `monocle/cli.py`, deleted `monocle/process_manager.py` plus `monocle/tests/test_process_manager.py`, and removed the stale `server.separate_processes` field from config surfaces
+- Updated supporting surfaces for the unified-only runtime: cleaned `monocle/watcher.py` docs, updated CLI/import smoke tests, replaced the obsolete VS Code task with a CLI test task, and removed `separate_processes` from `config.yaml.example`
+- Validation: `uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q` → 39 passed, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_mcp.py -x --tb=short -q` → 133 passed, EXIT 0
+
+### GPT-5.4 mini
+- Updated Azure/OpenAI credential validation messages in `monocle/config.py` so they name the active chat/embed model role(s) using `provider=azure` or `provider=openai` instead of the generic `ai.provider` label
+- Added a regression in `monocle/tests/test_ai.py` covering the Azure missing-credential path and asserting the message references the active chat model
+- Validation: `uv run python -m pytest monocle/tests/test_ai.py -k "AIConfigValidation or openai_provider_requires_api_key" -x --tb=short -q` → 9 passed, 81 deselected, EXIT 0
+
+### GPT-5.4
+- Tightened `frontend/src/components/Chat/sessionStore.ts` validation so malformed localStorage entries cannot carry `grounding` unless `kind === 'grounding'`, and cannot claim `kind === 'message'` while still carrying grounding payloads
+- Added a regression in `frontend/src/useChat.test.ts` proving mismatched grounding payloads are filtered out during session load
+- Validation: `cd frontend && npm run test -- --run useChat` → 32 passed, EXIT 0
+
+### GPT-5.4 mini
+- Updated the document browser right-click handler in `frontend/src/components/DocumentBrowser/NoteEditor.tsx` so `preventDefault()` only runs when a custom add-to-chat menu is actually available
+- Added a regression in `frontend/src/DocumentBrowser.test.tsx` proving the native context menu is not blocked when add-to-chat handlers are absent
+- Validation: `cd frontend && npm run test -- --run DocumentBrowser` → passed
+
+### GPT-5.4 mini
+- Removed the redundant same-tab session refresh in `frontend/src/hooks/useChat.ts` by letting self-originating send writes persist session state without emitting `CHAT_SESSIONS_UPDATED_EVENT`
+- Extended `frontend/src/useChat.test.ts` to verify send completion updates sessions without reloading them from localStorage in the same tab
+- Validation: `cd frontend && npm run test -- --run useChat` → 33 passed, EXIT 0
+
 ## 2026-04-24
 
 ### GPT-5.4
@@ -54,6 +82,15 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 - Added retained-version browsing, diff inspection, and one-click restore in the Document Viewer, plus a settings control and example-config entry for `history.retention_versions`; refreshed `openapi.json` and `frontend/src/api/schema.d.ts`
 - Fixed the final full-backend regression by updating the shared CLI settings mock for the new `history` section, then revalidated the full milestone: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
 
+## 2026-04-25
+
+### GPT-5.4
+- Completed M40 end to end: added explicit user-grounding entries to client-side chat sessions, rendered them distinctly in chat, and serialized them into `/api/chat` as structured user-added context instead of implicit retrieval
+- Added Document Viewer add-to-chat context menus for document/section/sentence/selection across preview, YAML, and form modes, plus a shared new-or-existing chat session picker
+- Added docs-to-chat drag-and-drop from file-tree notes onto the persistent Chat nav target, loading the dropped note and routing it through the same session picker flow
+- Updated `docs/build-plan.md` and `docs/milestones.md` to mark M40 complete and archive its full details
+- Validation: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1007 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 468 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
+
 ### Claude Haiku 4.5
 - **Completed M37 — Ingest Execution, Validation & Source UX**
   - Created `monocle/services/ingest_execute.py` with orchestration that applies approved ingest actions exclusively through canonical MCP tools (`create_note`, `update_note`; never direct vault writes)
@@ -66,6 +103,21 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - Added 6 new M37-focused tests in `monocle/tests/test_api.py`: MCP execution flow, validation failure rollback, rejection edge cases, archived source list/read/content/download/truncation
   - Archived M37 full details to `docs/milestones.md` and marked M37 complete in `docs/build-plan.md`
   - Validation: `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 992 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 450+ passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0
+
+## 2026-04-27
+
+### GPT-5.4
+- Reset the source-of-truth docs around a trust-first capture product: updated `docs/prd.md`, `docs/srs.md`, `docs/architecture.md`, `docs/ui-design.md`, and `docs/build-plan.md` to define a unified capture workbench, lean chat, distinct omnisearch, and one supported runtime topology before any code changes
+- Added the new execution sequence to `docs/build-plan.md`: D1 docs alignment, then M42-M48 for runtime simplification, ingest workflow consolidation, unified workbench backend/frontend, explicit URL capture, omnisearch hardening, and cleanup
+- Marked OneNote import, Teams integration, third-party MCP composition, and optional process separation as deferred future-phase work in the main planning docs
+- Fixed OpenAI provider drift in runtime settings updates: `PATCH /api/settings` now accepts `provider: "openai"` model entries, with backend regression coverage in `monocle/tests/test_settings.py`
+- Updated frontend settings typings to allow OpenAI-backed model entries and prepared the OpenAPI/type-generation path for the expanded provider union
+- Reconciled architecture/spec docs with the implemented system: model-registry-based AI config, OpenAI provider support, persisted ingest-session/source-archive flows, current settings payload shape, and the documented distinction between session-based API capture and the synchronous MCP `capture_thought` fast path
+- Added M41 `MCP Session-Based Capture` to `docs/build-plan.md`, made it the active milestone, and documented the contract/versioning work needed to migrate `capture_thought` off the direct pipeline path
+- Switched MCP `capture_thought` to create persisted ingest sessions and reuse the existing fast-capture prepare/execute flow, wiring `IngestSessionStore` and `IngestPreparationWorker` into MCP state at app startup and in test lifespans
+- Preserved request source provenance on session-executed create actions by allowing note-service metadata updates to carry `source` alongside archived `sources`
+- Versioned `docs/tool-contracts.md` for the M41 `capture_thought` response change and updated MCP/contract tests to assert session-state output plus blocker fallback behavior
+- Validation: `uv run python -m pytest monocle/tests/test_mcp.py monocle/tests/test_contracts.py -x --tb=short -q` → 88 passed, EXIT 0
 
 ## 2026-04-22
 
@@ -306,6 +358,13 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
   - `frontend/src/components/layout/Topbar.tsx`: replaced center health label with `<OmniSearch />`; moved compact health dot to right side
   - `frontend/src/components/layout/Topbar.css`: updated `.topbar-center` to flex-grow; compact `.topbar-health-dot`
   - `frontend/src/components/Search/SearchScreen.tsx`: added `useSearchParams` init for `?q` and `?mode` URL params; `executeSearch()` extracted; auto-trigger on mount if `?q` present
+
+## 2026-04-28
+
+### GPT-5.4 mini
+- Enabled word wrap in YAML viewing mode by adding CodeMirror `lineWrapping` to `frontend/src/components/DocumentBrowser/NoteEditor.tsx`
+- Updated `frontend/src/DocumentBrowser.test.tsx` so the `@codemirror/view` mock exports `lineWrapping`
+- Validation: `npm run test -- --run DocumentBrowser` passed; existing React Router act warnings still appear in the harness but did not fail the slice
   - `frontend/src/OmniSearch.test.tsx`: 12 tests covering render, Ctrl+E, debounce, results, navigation, keyboard nav (all passing; 408 total frontend tests)
   - `.vscode/tasks.json`: added `test: omnisearch` task
 

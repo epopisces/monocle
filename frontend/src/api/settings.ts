@@ -5,7 +5,7 @@ export interface ModelEntry {
   key: string
   name: string
   role: 'chat' | 'embed' | 'stt'
-  provider: 'ollama' | 'foundry_local' | 'azure'
+  provider: 'ollama' | 'foundry_local' | 'azure' | 'openai'
   base_url: string | null
 }
 
@@ -68,7 +68,7 @@ export interface ModelEntryInput {
   key: string
   name?: string
   role?: 'chat' | 'embed' | 'stt'
-  provider?: 'ollama' | 'foundry_local' | 'azure'
+  provider?: 'ollama' | 'foundry_local' | 'azure' | 'openai'
   base_url?: string | null
 }
 
