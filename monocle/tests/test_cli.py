@@ -105,11 +105,12 @@ class TestHelp:
         for cmd in ("serve", "dev", "reindex", "pull-models", "stats", "search", "export", "versions"):
             assert cmd in result.output
 
-    def test_help_shows_stubs(self):
+    def test_help_hides_removed_split_runtime_commands(self):
         result = runner.invoke(app, ["--help"])
         assert result.exit_code == 0
-        assert "watch" in result.output
-        assert "capture" in result.output
+        assert "\u2502 watch" not in result.output
+        assert "\u2502 capture" not in result.output
+        assert "\u2502 scheduler" not in result.output
 
     def test_versions_help(self):
         result = runner.invoke(app, ["versions", "--help"])
@@ -426,42 +427,6 @@ class TestPullModels:
 
         # Should exit with code 1 when ollama not installed
         assert result.exit_code == 1
-
-
-#endregion
-
-# ---------------------------------------------------------------------------
-#region #*   TestStubs
-# ---------------------------------------------------------------------------
-
-
-class TestStubs:
-    def test_watch_exits_when_vault_watch_disabled(self, tmp_path: Path):
-        """watch command exits immediately when vault.watch=false."""
-        vault = _make_vault(tmp_path)
-        settings = _mock_settings(str(vault))
-        settings.vault.watch = False
-
-        with patch("monocle.cli._load_settings", return_value=settings):
-            result = runner.invoke(app, ["watch"])
-
-        assert result.exit_code == 0
-        assert "vault.watch=false" in result.output.lower()
-
-    def test_capture_calls_uvicorn(self, tmp_path: Path, monkeypatch):
-        """capture command sets MONOCLE_COMPONENT and launches uvicorn."""
-        vault = _make_vault(tmp_path)
-        settings = _mock_settings(str(vault))
-        monkeypatch.delenv("MONOCLE_COMPONENT", raising=False)
-
-        with (
-            patch("monocle.cli._load_settings", return_value=settings),
-            patch("uvicorn.run") as mock_uvicorn,
-        ):
-            result = runner.invoke(app, ["capture"])
-
-        assert result.exit_code == 0
-        mock_uvicorn.assert_called_once()
 
 
 #endregion

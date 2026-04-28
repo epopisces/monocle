@@ -298,6 +298,8 @@ def api_client(tmp_path: Path, mock_ai):
             pipeline,
             app.state.graph_builder,
             settings=settings,
+            ingest_session_store=ingest_session_store,
+            ingest_prepare_worker=app.state.ingest_prepare_worker,
             reindex_queue=rq,
         )
 

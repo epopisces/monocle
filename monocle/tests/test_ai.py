@@ -49,6 +49,16 @@ _FL_AI_NATIVE: dict = {
     "transcribe_backend": "native",
 }
 
+_OPENAI_AI_NATIVE: dict = {
+    "chat_model_key": "openai-chat",
+    "embed_model_key": "openai-embed",
+    "models": [
+        {"key": "openai-chat", "name": "gpt-4o", "role": "chat", "provider": "openai"},
+        {"key": "openai-embed", "name": "text-embedding-3-large", "role": "embed", "provider": "openai"},
+    ],
+    "transcribe_backend": "native",
+}
+
 
 def _make_settings(**overrides) -> Settings:
     """Return a minimal Settings object (no config.yaml required)."""
@@ -495,6 +505,72 @@ class TestAzureOpenAIProvider:
         assert result == []
 
 
+class TestOpenAIProvider:
+    def _make_provider(self):
+        from monocle.ai.openai_provider import OpenAIProvider
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = OpenAIProvider(
+                api_key="test-key",
+                embed_model="text-embedding-3-large",
+                chat_model="gpt-4o",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_embed_returns_vector(self):
+        provider = self._make_provider()
+        provider._client.embeddings.create = AsyncMock(
+            return_value=MagicMock(data=[MagicMock(embedding=[0.9, 0.8, 0.7])])
+        )
+
+        result = await provider.embed("test")
+
+        assert result == [0.9, 0.8, 0.7]
+
+    @pytest.mark.asyncio
+    async def test_chat_returns_string(self):
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="OpenAI says hi!", tool_calls=None))]
+            )
+        )
+
+        result = await provider.chat([{"role": "user", "content": "Hi"}])
+
+        assert result == "OpenAI says hi!"
+
+    @pytest.mark.asyncio
+    async def test_embed_batch_empty_list(self):
+        provider = self._make_provider()
+        result = await provider.embed_batch([])
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_model_status_provider_reachable(self):
+        provider = self._make_provider()
+        provider._client.models.list = AsyncMock(
+            return_value=MagicMock(
+                data=[
+                    MagicMock(id="gpt-4o"),
+                    MagicMock(id="text-embedding-3-large"),
+                    MagicMock(id="whisper-1"),
+                ]
+            )
+        )
+
+        result = await provider.get_model_status()
+
+        assert result.provider == "openai"
+        assert result.provider_reachable is True
+        assert [m.role for m in result.models] == ["chat", "embed", "transcribe"]
+        assert all(m.available is True for m in result.models)
+
+
 #endregion
 
 # ---------------------------------------------------------------------------
@@ -521,6 +597,8 @@ class TestGetProviderFactory:
             cfg["azure_openai_api_key"] = "key"
             cfg["azure_openai_endpoint"] = "https://example.openai.azure.com"
             cfg["azure_openai_api_version"] = "2024-02-01"
+        if provider == "openai":
+            cfg["openai_api_key"] = "key"
         with patch("monocle.config._find_config_file", return_value=__import__("pathlib").Path("/nonexistent")):
             with patch("monocle.config._load_yaml", return_value=cfg):
                 return Settings()
@@ -551,6 +629,15 @@ class TestGetProviderFactory:
         with patch("openai.AsyncAzureOpenAI"):
             provider = get_provider(settings)
         assert isinstance(provider, AzureOpenAIProvider)
+
+    def test_factory_returns_openai(self):
+        from monocle.ai import get_provider
+        from monocle.ai.openai_provider import OpenAIProvider
+
+        settings = self._settings("openai")
+        with patch("openai.AsyncOpenAI"):
+            provider = get_provider(settings)
+        assert isinstance(provider, OpenAIProvider)
 
     def test_factory_raises_for_unknown_provider(self):
         from monocle.ai import get_provider
@@ -999,6 +1086,64 @@ class TestAzureChatWithTools:
         assert parsed["tool_calls"][0]["function"]["name"] == "get_stats"
 
 
+class TestOpenAIChatWithTools:
+    """OpenAIProvider forwards tools and serialises tool_calls."""
+
+    def _make_provider(self):
+        from monocle.ai.openai_provider import OpenAIProvider
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = OpenAIProvider(
+                api_key="test-key",
+                embed_model="text-embedding-3-large",
+                chat_model="gpt-4o",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_chat_with_tools_no_typeerror(self):
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        result = await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "get_stats", "description": "", "parameters": {}}}],
+        )
+        assert isinstance(result, str)
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert "tools" in call_kwargs
+
+    @pytest.mark.asyncio
+    async def test_chat_tool_call_serialised_to_json(self):
+        import json as _json
+
+        provider = self._make_provider()
+        fake_tc = MagicMock()
+        fake_tc.id = "call-openai-1"
+        fake_tc.function.name = "get_stats"
+        fake_tc.function.arguments = "{}"
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="", tool_calls=[fake_tc]))]
+            )
+        )
+
+        result = await provider.chat(
+            [{"role": "user", "content": "stats"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "get_stats", "description": "", "parameters": {}}}],
+        )
+        parsed = _json.loads(result)
+        assert parsed["tool_calls"][0]["function"]["name"] == "get_stats"
+
+
 class TestToolChoiceOllama:
     """OllamaProvider enforces tool_choice via schema filtering."""
 
@@ -1167,6 +1312,57 @@ class TestToolChoiceAzure:
     @pytest.mark.asyncio
     async def test_no_tool_choice_not_forwarded(self):
         """Without tool_choice, no tool_choice key in Azure SDK call."""
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        await provider.chat(
+            [{"role": "user", "content": "hi"}],
+            stream=False,
+        )
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert "tool_choice" not in call_kwargs
+
+
+class TestToolChoiceOpenAI:
+    """OpenAIProvider forwards tool_choice to the OpenAI SDK."""
+
+    def _make_provider(self):
+        from monocle.ai.openai_provider import OpenAIProvider
+
+        with patch("openai.AsyncOpenAI") as mock_cls:
+            mock_instance = AsyncMock()
+            mock_cls.return_value = mock_instance
+            provider = OpenAIProvider(
+                api_key="test-key",
+                embed_model="text-embedding-3-large",
+                chat_model="gpt-4o",
+            )
+            provider._client = mock_instance
+        return provider
+
+    @pytest.mark.asyncio
+    async def test_tool_choice_forwarded_non_stream(self):
+        provider = self._make_provider()
+        provider._client.chat.completions.create = AsyncMock(
+            return_value=MagicMock(
+                choices=[MagicMock(message=MagicMock(content="ok", tool_calls=None))]
+            )
+        )
+        tc = {"type": "function", "function": {"name": "search_vault"}}
+        await provider.chat(
+            [{"role": "user", "content": "search"}],
+            stream=False,
+            tools=[{"type": "function", "function": {"name": "search_vault", "parameters": {}}}],
+            tool_choice=tc,
+        )
+        call_kwargs = provider._client.chat.completions.create.call_args.kwargs
+        assert call_kwargs["tool_choice"] == tc
+
+    @pytest.mark.asyncio
+    async def test_no_tool_choice_not_forwarded(self):
         provider = self._make_provider()
         provider._client.chat.completions.create = AsyncMock(
             return_value=MagicMock(
@@ -1351,6 +1547,11 @@ class TestAIConfigValidation:
         settings = _make_settings(ai=_FL_AI_NATIVE)
         assert settings.ai.transcribe_backend == "native"
 
+    def test_openai_native_valid(self):
+        """provider=openai with transcribe_backend=native is allowed."""
+        settings = _make_settings(ai=_OPENAI_AI_NATIVE, openai_api_key="test-key")
+        assert settings.ai.transcribe_backend == "native"
+
     def test_ollama_whisper_cpp_valid(self):
         settings = _make_settings(ai={"provider": "ollama", "transcribe_backend": "whisper_cpp"})
         assert settings.ai.transcribe_backend == "whisper_cpp"
@@ -1379,6 +1580,21 @@ class TestGetTranscriptionProvider:
         settings = _make_settings(ai=_FL_AI_NATIVE)
         result = get_transcription_provider(settings)
         assert result is None
+
+    def test_native_openai_returns_none(self):
+        from monocle.ai.transcription import get_transcription_provider
+
+        settings = _make_settings(ai=_OPENAI_AI_NATIVE, openai_api_key="test-key")
+        result = get_transcription_provider(settings)
+        assert result is None
+
+    def test_openai_provider_requires_api_key(self):
+        from pydantic import ValidationError
+
+        with patch("dotenv.load_dotenv", return_value=False):
+            with patch.dict("os.environ", {}, clear=True):
+                with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
+                    _make_settings(ai=_OPENAI_AI_NATIVE)
 
     def test_whisper_cpp_returns_correct_type(self):
         from monocle.ai.transcription import (

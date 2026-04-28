@@ -35,6 +35,10 @@ ai:
   #   name: gpt-4o
   #   role: chat
   #   provider: azure
+  # - key: gpt-4o-openai
+  #   name: gpt-4o
+  #   role: chat
+  #   provider: openai
 
 vault:
   path: ./vault
@@ -83,7 +87,6 @@ server:
   port: 8000
   mcp_access_key_env: MCP_ACCESS_KEY
   frontend_dist: ./frontend/dist
-  separate_processes: false
 
 telemetry:
   enabled: true

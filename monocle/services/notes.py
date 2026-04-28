@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _MAX_BODY_LENGTH = 50_000
-_ALLOWED_METADATA_UPDATE_KEYS = frozenset({"sources"})
+_ALLOWED_METADATA_UPDATE_KEYS = frozenset({"source", "sources"})
 
 _METADATA_TYPE_ALIASES = {
     "person": "person_note",

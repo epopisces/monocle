@@ -29,6 +29,7 @@ vi.mock('@codemirror/view', () => ({
     static theme = vi.fn(() => ({}))
   },
   keymap: { of: vi.fn(() => ({})) },
+  lineWrapping: {},
 }))
 
 vi.mock('@codemirror/state', () => ({

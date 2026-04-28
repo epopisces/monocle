@@ -18,6 +18,16 @@ from monocle.ai.base import AIProvider  # noqa: F401 — re-export
 logger = logging.getLogger(__name__)
 
 
+def _effective_transcribe_model(settings: "Settings", provider_name: str) -> str:
+    """Return the transcription model that should be used for *provider_name*."""
+    stt_entry = settings.ai.get_stt_model()
+    if stt_entry and stt_entry.provider == provider_name:
+        return stt_entry.name
+    if provider_name == "openai":
+        return "whisper-1"
+    return settings.ai.transcribe_model
+
+
 def _build_single_provider(
     settings: "Settings",
     chat_entry: "ModelEntry",
@@ -79,14 +89,26 @@ def _build_single_provider(
             chat_deployment=(
                 settings.azure_openai_chat_deployment or chat_entry.name  # type: ignore[attr-defined]
             ),
-            transcribe_deployment=settings.ai.transcribe_model,
+            transcribe_deployment=_effective_transcribe_model(settings, provider_name),
+            embed_dimensions=settings.ai.embed_dimensions,
+            transcription_provider=transcription_provider,
+        )
+
+    if provider_name == "openai":
+        from monocle.ai.openai_provider import OpenAIProvider
+
+        return OpenAIProvider(
+            api_key=settings.openai_api_key,  # type: ignore[arg-type]
+            embed_model=embed_entry.name,
+            chat_model=chat_entry.name,
+            transcribe_model=_effective_transcribe_model(settings, provider_name),
             embed_dimensions=settings.ai.embed_dimensions,
             transcription_provider=transcription_provider,
         )
 
     raise ValueError(
         f"Unknown provider {provider_name!r} in ai.models. "
-        "Expected one of: ollama, foundry_local, azure."
+        "Expected one of: ollama, foundry_local, azure, openai."
     )
 
 
@@ -140,14 +162,26 @@ def _build_provider_for_entry(
             api_version=settings.azure_openai_api_version,  # type: ignore[arg-type]
             embed_deployment=entry.name,
             chat_deployment=entry.name,
-            transcribe_deployment=settings.ai.transcribe_model,
+            transcribe_deployment=_effective_transcribe_model(settings, provider_name),
+            embed_dimensions=settings.ai.embed_dimensions,
+            transcription_provider=transcription_provider,
+        )
+
+    if provider_name == "openai":
+        from monocle.ai.openai_provider import OpenAIProvider
+
+        return OpenAIProvider(
+            api_key=settings.openai_api_key,  # type: ignore[arg-type]
+            embed_model=entry.name,
+            chat_model=entry.name,
+            transcribe_model=_effective_transcribe_model(settings, provider_name),
             embed_dimensions=settings.ai.embed_dimensions,
             transcription_provider=transcription_provider,
         )
 
     raise ValueError(
         f"Unknown provider {provider_name!r} in ai.models. "
-        "Expected one of: ollama, foundry_local, azure."
+        "Expected one of: ollama, foundry_local, azure, openai."
     )
 
 

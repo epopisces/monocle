@@ -54,6 +54,7 @@ def _make_note(
 
 def _mock_mcp_state(
     vault=None, index=None, ai=None, pipeline=None, graph=None, rq=None,
+    ingest_session_store=None, ingest_prepare_worker=None,
 ):
     """Inject mock state into the MCP singleton for testing."""
     from monocle.mcp_server import _state
@@ -62,6 +63,8 @@ def _mock_mcp_state(
     _state.index = index or MagicMock()
     _state.ai = ai
     _state.ingest_pipeline = pipeline
+    _state.ingest_session_store = ingest_session_store
+    _state.ingest_prepare_worker = ingest_prepare_worker
     _state.graph_builder = graph
     _state.reindex_queue = rq
     _state._initialised = True
@@ -215,12 +218,14 @@ class TestOutputSchemas:
         from monocle.mcp_server import _state
         orig = (
             _state.vault, _state.index, _state.ai,
-            _state.ingest_pipeline, _state.graph_builder,
+            _state.ingest_pipeline, _state.ingest_session_store,
+            _state.ingest_prepare_worker, _state.graph_builder,
             _state.reindex_queue, _state._initialised,
         )
         yield
         (_state.vault, _state.index, _state.ai,
-         _state.ingest_pipeline, _state.graph_builder,
+         _state.ingest_pipeline, _state.ingest_session_store,
+         _state.ingest_prepare_worker, _state.graph_builder,
          _state.reindex_queue, _state._initialised) = orig
 
     @pytest.mark.asyncio
@@ -267,20 +272,28 @@ class TestOutputSchemas:
     async def test_capture_thought_output_keys(self):
         from monocle.mcp_server import mcp
 
-        note = _make_note(type="decision", review_status="pending")
-        conf = IngestConfidence(
-            score=0.84, template_match=0.3,
-            metadata_coverage=0.3, tag_plausibility=0.2, entity_match=0.15,
+        response = MagicMock(
+            session_id="sess_123",
+            state="completed",
+            source_ids=["src_1"],
+            created_at="2026-04-27T10:00:00Z",
+            updated_at="2026-04-27T10:00:01Z",
         )
-        pipeline = AsyncMock()
-        pipeline.run = AsyncMock(return_value=(note, conf))
-        _mock_mcp_state(pipeline=pipeline)
+        detail = MagicMock()
+        detail.session = MagicMock(
+            state="completed",
+            source_ids=["src_1"],
+            updated_at="2026-04-27T10:00:01Z",
+            execution_summary=MagicMock(affected_file_paths=["work/test.md"]),
+        )
+        _mock_mcp_state(vault=MagicMock(), ingest_session_store=MagicMock())
 
-        result = await mcp.call_tool("capture_thought", {"content": "A thought"})
-        data = json.loads(_extract_text(result))
+        with patch("monocle.services.ingest.capture_thought_session", new=AsyncMock(return_value=(response, detail))):
+            result = await mcp.call_tool("capture_thought", {"content": "A thought"})
+            data = json.loads(_extract_text(result))
 
         assert set(data.keys()) == {
-            "file_path", "type", "confidence", "review_status",
+            "session_id", "state", "source_ids", "affected_file_paths", "created_at", "updated_at",
         }
 
     @pytest.mark.asyncio
@@ -385,7 +398,7 @@ class TestServiceDelegation:
             "from monocle.services.notes import update_note",
             "from monocle.services.graph import get_graph",
             "from monocle.services.references import create_reference_from_url",
-            "from monocle.services.ingest import capture_thought",
+            "from monocle.services.ingest import capture_thought_session",
         ]
         for imp in expected_imports:
             assert imp in source, f"MCP server missing: {imp}"
@@ -420,10 +433,10 @@ class TestServiceDelegation:
         from monocle.services.notes import read_note, create_note, update_note
         from monocle.services.graph import get_graph
         from monocle.services.references import create_reference_from_url
-        from monocle.services.ingest import capture_thought
+        from monocle.services.ingest import capture_thought_session
 
         for fn in [search_vault, read_note, create_note, update_note,
-                    get_graph, create_reference_from_url, capture_thought]:
+                get_graph, create_reference_from_url, capture_thought_session]:
             assert inspect.iscoroutinefunction(fn), f"{fn.__name__} is not async"
 
 

@@ -2,8 +2,8 @@
 type: reference
 project: monocle
 milestone: M31
-last-updated: 2026-04-09
-status: frozen
+last-updated: 2026-04-27
+status: versioned-amendment-in-progress
 ---
 
 # Monocle Canonical Tool Contracts
@@ -12,9 +12,9 @@ This document is the **single source of truth** for Monocle-owned data operation
 It is the primary deliverable of **M29 — MCP-First: Contract Freeze & Canonical Tool Schema**,
 and is declared **FROZEN** as of **M31 — MCP Canonicalization** (2026-04-09).
 
-> **FROZEN CONTRACT:** The MCP tool return schemas defined in §2 are now authoritative.
-> Breaking changes to output field names, types, or semantics require an explicit versioned
-> acceptance decision documented in this file before implementation.
+> **VERSIONED AMENDMENT (M41):** `capture_thought` is being migrated from the direct note-write
+> contract to a persisted ingest-session contract. All other tool schemas remain frozen.
+> The accepted M41 change is documented in §2.3 before implementation.
 
 MCP tools and chat agent tools MUST converge on the schemas and behaviors
 defined here. Divergences from this document are bugs to be resolved in M32.
@@ -124,8 +124,8 @@ operations and will not be exposed through the canonical MCP tool layer):
 
 ### 2.3 `capture_thought`
 
-**Purpose:** Accept raw unstructured text and run it through the full 8-step `IngestPipeline`
-(routing → metadata extraction → note construction → file write → confidence scoring).
+**Purpose:** Accept raw unstructured text, persist it as an ingest session first, then run the
+existing fast-capture prepare/approve/execute flow synchronously when possible.
 
 **Input schema:**
 
@@ -138,28 +138,30 @@ operations and will not be exposed through the canonical MCP tool layer):
 
 ```json
 {
-  "file_path": "work/decisions/2026-04-08-migrate-db.md",
-  "type": "decision",
-  "confidence": 0.84,
-  "review_status": "pending"
+  "session_id": "sess_123",
+  "state": "completed",
+  "source_ids": ["src_123"],
+  "affected_file_paths": ["work/decisions/2026-04-08-migrate-db.md"],
+  "created_at": "2026-04-27T10:00:00Z",
+  "updated_at": "2026-04-27T10:00:01Z"
 }
 ```
 
 **Side effects:**
-- Creates a new `.md` file in the vault.
-- Triggers reindex for the new file.
-- May write a `.error.md` sidecar on routing/extraction failure.
-- Writes confidence + review_status to frontmatter.
+- Creates a persisted ingest session and archives the raw source immediately.
+- Attempts synchronous fast capture via the existing prepare/review/execute pipeline.
+- May complete with affected note paths, or return a persisted fallback state when review blockers remain.
 
-**Required app state:** `IngestPipeline`, `VaultLayer`, `AIProvider`, `IndexLayer`.
+**Required app state:** `IngestSessionStore`, `IngestPreparationWorker`, `VaultLayer`, `ReindexQueue`.
 
-**Review/reindex semantics:** Pipeline owns confidence scoring and review_status assignment.
-`review_status` is `"approved"` if `score * 100 >= auto_approve_threshold_pct`; otherwise `"pending"`.
+**Review/reindex semantics:** The persisted ingest-session lifecycle owns preparation, blocker fallback,
+execution, validation, and reindex behavior. `state` communicates whether the request completed
+synchronously (`completed`) or needs further review (`in_review`, `awaiting_user`, `proposal_ready`, etc.).
 
 **Chat-only decorations:** The chat agent does not expose `capture_thought` directly.
 Unstructured capture in chat is handled by the `/api/ingest` endpoint via the UI ingest flow,
 not by a chat agent tool. This is an MCP-only tool for external clients that send raw text
-intended for full pipeline processing.
+intended for persisted ingest-session processing.
 
 **Current divergence:** No agent tool equivalent. MCP-only. ✅
 

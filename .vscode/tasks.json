@@ -167,9 +167,9 @@
       "problemMatcher": []
     },
     {
-      "label": "test: process_manager",
+      "label": "test: cli",
       "type": "shell",
-      "command": "uv run python -m pytest monocle/tests/test_process_manager.py -x --tb=short -q",
+      "command": "uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q",
       "group": "test",
       "presentation": { "reveal": "always", "panel": "shared" },
       "problemMatcher": []

@@ -155,7 +155,7 @@ export default function Topbar({
         >
           ☰
         </button>
-        <span className="topbar-logo">◉ Monocle</span>
+        <span className="topbar-logo">Monocle</span>
       </div>
 
       <div className="topbar-center">
@@ -271,7 +271,7 @@ export default function Topbar({
           title="Voice capture"
           data-testid="voice-capture-btn"
         >
-          🎤
+          ◎
         </button>
 
         {ingestCount > 0 && (
@@ -282,7 +282,7 @@ export default function Topbar({
             title={`${ingestCount} prepared ingest session(s) ready for review`}
             data-testid="ingest-inbox-btn"
           >
-            📥
+            ▣
             <span className="topbar-badge topbar-badge--info" data-testid="ingest-badge">{ingestCount}</span>
           </button>
         )}
@@ -296,7 +296,7 @@ export default function Topbar({
             title={`${reviewCount} notes pending review`}
             data-testid="review-queue-btn"
           >
-            🔔
+            ◌
             <span className="topbar-badge" data-testid="review-badge">{reviewCount}</span>
           </button>
         )}
@@ -310,7 +310,7 @@ export default function Topbar({
             title={`${failedCount} failed capture(s)`}
             data-testid="failed-captures-btn"
           >
-            ⚠
+            !
             <span className="topbar-badge topbar-badge--warning" data-testid="failed-badge">
               {failedCount}
             </span>

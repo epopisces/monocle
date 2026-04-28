@@ -45,7 +45,7 @@ class ModelEntryPatch(BaseModel):
     key: str
     name: str
     role: Literal["chat", "embed", "stt"]
-    provider: Literal["ollama", "foundry_local", "azure"]
+    provider: Literal["ollama", "foundry_local", "azure", "openai"]
     base_url: str | None = None
 
 

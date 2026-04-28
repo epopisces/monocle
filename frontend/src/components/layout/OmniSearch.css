@@ -1,7 +1,7 @@
 .omni-search {
   position: relative;
   flex: 1;
-  max-width: 520px;
+  max-width: 640px;
 }
 
 .omni-search__input-wrap {
@@ -12,8 +12,8 @@
 
 .omni-search__icon {
   position: absolute;
-  left: var(--space-2);
-  font-size: 1.1rem;
+  left: 8px;
+  font-size: 13px;
   color: var(--text-tertiary, var(--text-secondary));
   pointer-events: none;
   user-select: none;
@@ -22,9 +22,10 @@
 
 .omni-search__input {
   width: 100%;
-  padding: var(--space-1) var(--space-3) var(--space-1) calc(var(--space-2) + 1.4rem);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border);
+  min-height: 30px;
+  padding: 5px 30px 5px 28px;
+  background: color-mix(in srgb, var(--bg-toolbar) 55%, var(--bg-elevated) 45%);
+  border: 1px solid var(--border-strong, var(--border));
   border-radius: var(--radius-btn);
   color: var(--text-primary);
   font-size: var(--text-sm);
@@ -59,10 +60,10 @@
   top: calc(100% + var(--space-1));
   left: 0;
   right: 0;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 3%, var(--bg-panel)) 0%, var(--bg-panel) 100%);
+  border: 1px solid var(--border-strong, var(--border));
   border-radius: var(--radius-card, 8px);
-  box-shadow: var(--shadow-card);
+  box-shadow: var(--shadow-modal);
   z-index: 500;
   max-height: 420px;
   overflow-y: auto;
@@ -85,7 +86,7 @@
   font-size: var(--text-xs, 0.7rem);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--text-secondary);
   border-top: 1px solid var(--border);
 }
@@ -97,16 +98,18 @@
 .omni-search__item {
   display: block;
   width: 100%;
-  padding: var(--space-2) var(--space-3);
+  padding: 7px var(--space-3);
   background: none;
   text-align: left;
   cursor: pointer;
   color: var(--text-primary);
+  border-left: 2px solid transparent;
 }
 
 .omni-search__item:hover,
 .omni-search__item--selected {
-  background: var(--bg-elevated);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elevated) 90%);
+  border-left-color: var(--accent);
 }
 
 .omni-search__item-title {

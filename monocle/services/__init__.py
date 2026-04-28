@@ -12,6 +12,6 @@ Modules:
     notes       — read_note(), create_note(), update_note()
     graph       — get_graph()
     references  — create_reference_from_url()
-    ingest      — capture_thought()
+    ingest      — capture_thought(), capture_thought_session()
     tags        — normalize_tags() shared utility
 """

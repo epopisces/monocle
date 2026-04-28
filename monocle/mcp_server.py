@@ -13,7 +13,7 @@ query parameter before reaching the MCP handler.
 Canonical tools (7):
   search_vault              — Semantic search returning scored note chunks
   read_note                 — Read a full note by vault-relative path
-  capture_thought           — Ingest raw text via the full IngestPipeline
+    capture_thought           — Persist raw text as an ingest session and fast-capture when possible
   create_note               — Create a note via VaultLayer.create_from_template
   update_note               — Overwrite an existing note body
   get_graph                 — Return ego-graph data for a focus entity
@@ -50,6 +50,8 @@ if TYPE_CHECKING:
     from monocle.graph import GraphBuilder
     from monocle.index.base import IndexLayer
     from monocle.ingest import IngestPipeline
+    from monocle.services.ingest_prepare import IngestPreparationWorker
+    from monocle.services.ingest_sessions import IngestSessionStore
     from monocle.vault import VaultLayer
     from monocle.watcher import ReindexQueue
 
@@ -80,6 +82,8 @@ class _MCPState:
         self.ai: "AIProvider | None" = None
         self.settings: "Settings | None" = None
         self.ingest_pipeline: "IngestPipeline | None" = None
+        self.ingest_session_store: "IngestSessionStore | None" = None
+        self.ingest_prepare_worker: "IngestPreparationWorker | None" = None
         self.graph_builder: "GraphBuilder | None" = None
         self.reindex_queue: "ReindexQueue | None" = None
         self._initialised: bool = False
@@ -104,6 +108,8 @@ def init_mcp_state(
     graph_builder: "GraphBuilder",
     *,
     settings: "Settings | None" = None,
+    ingest_session_store: "IngestSessionStore | None" = None,
+    ingest_prepare_worker: "IngestPreparationWorker | None" = None,
     reindex_queue: "ReindexQueue | None" = None,
 ) -> None:
     """Inject shared application state so MCP tool functions can access it.
@@ -115,6 +121,8 @@ def init_mcp_state(
     _state.ai = ai
     _state.settings = settings
     _state.ingest_pipeline = ingest_pipeline
+    _state.ingest_session_store = ingest_session_store
+    _state.ingest_prepare_worker = ingest_prepare_worker
     _state.graph_builder = graph_builder
     _state.reindex_queue = reindex_queue
     _state._initialised = True
@@ -239,33 +247,46 @@ async def read_note(file_path: str) -> str:
 
 @mcp.tool()
 async def capture_thought(content: str, source: str = "mcp") -> str:
-    """Capture a raw text thought and run it through the full ingest pipeline.
+    """Capture a raw text thought through the persisted ingest-session pipeline.
 
     Canonical operation — see ``docs/tool-contracts.md § capture_thought``.
 
-    The pipeline routes the content, extracts metadata, scores confidence, and
-    writes a new note to the vault.  The note may land in the review queue if
-    confidence is below the configured threshold.
+    The tool persists a session first, then attempts synchronous fast capture
+    through the existing prepare/approve/execute lifecycle.
 
     Args:
         content: The raw text content to ingest.
         source: Source identifier (default 'mcp').
 
     Returns:
-        JSON object with ``file_path``, ``type``, ``confidence``, and
-        ``review_status``.
+        JSON object with ``session_id``, ``state``, ``source_ids``,
+        ``affected_file_paths``, ``created_at``, and ``updated_at``.
     """
     _state.assert_ready()
 
-    from monocle.services.ingest import capture_thought as _capture_thought
+    if _state.ingest_session_store is None:
+        raise RuntimeError("MCP ingest session store is not initialised.")
 
-    note, confidence = await _capture_thought(_state.ingest_pipeline, content, source)
+    from monocle.services.ingest import capture_thought_session as _capture_thought
+
+    response, detail = await _capture_thought(
+        _state.ingest_session_store,
+        _state.ingest_prepare_worker,
+        _state.vault,
+        _state.reindex_queue,
+        content,
+        source,
+    )
+    session = detail.session if detail is not None else None
+    execution_summary = session.execution_summary if session is not None else None
     return json.dumps(
         {
-            "file_path": note.file_path,
-            "type": note.metadata.type,
-            "confidence": round(confidence.score, 3) if confidence else None,
-            "review_status": note.metadata.review_status,
+            "session_id": response.session_id,
+            "state": session.state if session is not None else response.state,
+            "source_ids": session.source_ids if session is not None else response.source_ids,
+            "affected_file_paths": execution_summary.affected_file_paths if execution_summary else [],
+            "created_at": response.created_at,
+            "updated_at": session.updated_at if session is not None else response.updated_at,
         }
     )
 

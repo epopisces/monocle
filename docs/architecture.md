@@ -1,7 +1,7 @@
 ---
 type: reference
 project: monocle
-last-updated: 2026-04-07
+last-updated: 2026-04-27
 ---
 
 # Monocle — Architecture Diagrams
@@ -21,7 +21,7 @@ graph TB
         WEB["React Web App<br/>(Vite 5 / React 18)"]
         VOICE["Voice Modal<br/>(Web Speech API +<br/>MediaRecorder)"]
         MCP_CLIENT["MCP Clients<br/>(Claude, Copilot,<br/>Cursor)"]
-        TEAMS["Teams Bot<br/>(botbuilder-core)"]
+        URL_CAPTURE["Explicit URL Capture<br/>(composer handoff / workbench)"]
     end
 
     subgraph API["API Layer  ·  FastAPI 0.115 · uvicorn · 127.0.0.1:8000"]
@@ -52,7 +52,6 @@ graph TB
         CHAT_A["ChatAgent<br/>(MS Agent Framework)<br/><i>tool wrappers → SVC</i>"]
         GRAPH_B["GraphBuilder<br/>(BFS, in-memory cache)"]
         MCP_S["MCP Server<br/>(FastMCP)<br/><i>tool wrappers → SVC</i>"]
-        PROCESS_M["ProcessManager<br/>(crash-restart subprocesses)"]
     end
 
     subgraph SVC["Canonical Services Layer  ·  monocle/services/"]
@@ -62,6 +61,9 @@ graph TB
         SVC_GRAPH["graph.py<br/>get_graph()"]
         SVC_REF["references.py<br/>create_reference_from_url()"]
         SVC_INGEST["ingest.py<br/>capture_thought()"]
+        SVC_INGEST_SESS["ingest_sessions.py<br/>IngestSessionStore"]
+        SVC_INGEST_PREP["ingest_prepare.py<br/>background prepare"]
+        SVC_INGEST_EXEC["ingest_execute.py<br/>execute + validate"]
     end
 
     subgraph AI["AI Layer"]
@@ -70,6 +72,7 @@ graph TB
         OLLAMA["OllamaProvider<br/>localhost:11434"]
         FOUNDRY["FoundryLocalProvider<br/>localhost:5272"]
         AZURE["AzureOpenAIProvider<br/>Azure AI Services"]
+        OPENAI["OpenAIProvider<br/>api.openai.com"]
         WHISPER["TranscriptionProvider<br/>(WhisperCpp / Subprocess<br/>/ NativeOpenAI)"]
     end
 
@@ -77,6 +80,8 @@ graph TB
         direction LR
         VAULT["Vault<br/>(Markdown .md files<br/>+ YAML frontmatter)"]
         CHROMA["ChromaDB<br/>(embeddings +<br/>frontmatter metadata)"]
+        INGEST_DB["IngestSessionStore<br/>(SQLite + artifacts)"]
+        SOURCES["Source Archive<br/>(data/sources)"]
         CONFIG["config.yaml<br/>+ .env"]
         FAILED["FailedIngestRegistry<br/>(data/failed_ingests.json)"]
     end
@@ -92,11 +97,12 @@ graph TB
     WEB -->|REST| SETTINGS_R
     VOICE -->|multipart| TRANSCRIBE_R
     VOICE -->|REST| INGEST_R
-    TEAMS -->|REST| INGEST_R
+    URL_CAPTURE -->|REST| INGEST_R
     MCP_CLIENT -->|Streamable HTTP| MCP_R
 
     %% API → Services
     INGEST_R --> INGEST_P
+    INGEST_R --> SVC_INGEST_SESS
     TRANSCRIBE_R --> AI_P
     NOTES_R --> REINDEX_Q
     AGENTS_R --> WEEKLY_A
@@ -113,6 +119,7 @@ graph TB
     AI_P --> OLLAMA
     AI_P --> FOUNDRY
     AI_P --> AZURE
+    AI_P --> OPENAI
     AI_P --> WHISPER
 
     %% MCP tools and Chat agent tools → Canonical Services
@@ -125,11 +132,15 @@ graph TB
     CHAT_A -->|delegates to| SVC_NOTES
     CHAT_A -->|delegates to| SVC_GRAPH
     CHAT_A -->|delegates to| SVC_REF
-    CHAT_A -->|delegates to| SVC_INGEST
 
     %% Services → Data
     INGEST_P --> VAULT
     INGEST_P --> FAILED
+    SVC_INGEST_SESS --> INGEST_DB
+    SVC_INGEST_SESS --> SOURCES
+    SVC_INGEST_PREP --> INGEST_DB
+    SVC_INGEST_PREP --> SOURCES
+    SVC_INGEST_EXEC --> INGEST_DB
     VAULT <-->|read/write| NOTES_R
     VAULT <-->|read/write| REINDEX_Q
     WATCHER -->|push| REINDEX_Q
@@ -150,8 +161,6 @@ graph TB
 
     SCHEDULER --> WEEKLY_A
     SCHEDULER --> REINDEX_A
-    PROCESS_M -. manages .-> WATCHER
-    PROCESS_M -. manages .-> SCHEDULER
 
     %% Styling
     classDef layer fill:#1e2430,stroke:#3d4f6b,color:#cdd6f4
@@ -170,46 +179,36 @@ graph TB
 
 ---
 
-## 2. Ingest Pipeline — 8-Step Data Flow
+## 2. API / UI Ingest Session Flow
 
-The canonical path from a raw capture to a persisted, indexed note.
+The primary capture path for browser/API/inbox sources: raw input is archived, persisted as a session, prepared in the background, reviewed or fast-captured, then executed into the vault.
 
 ```mermaid
 flowchart TD
     START(["POST /api/ingest<br/>IngestRequest"])
+    CAPTURE["①  Archive source + persist session<br/>IngestSessionStore.create_*_session()<br/>state: captured → queued"]
+    PREP["②  Background preparation<br/>IngestPreparationWorker<br/>extract → digest → related notes<br/>contradictions → proposed actions"]
+    READY["③  Dormant session ready<br/>state: dormant_ready / proposal_ready<br/>capture workbench + ingest-review workspace"]
+    REVIEW{"④  User path"}
+    TRUEUP["True-up + reprepare"]
+    EXECUTE["⑤  Execute approved actions<br/>create_note / update_note via services<br/>validation + reindex handoff"]
+    COMPLETE(["⑥  Session completed<br/>note(s) written to vault<br/>sources linked in frontmatter"])
+    FAILED_SESSION["❌  Failed session / diagnostics<br/>failed-ingest record + artifacts"]
 
-    S1["①  Plugin Resolution<br/>IngestPluginRegistry.resolve()<br/>(TextPlugin / AudioPlugin / TeamsPlugin)"]
-    S2["②  Content Extraction<br/>plugin.extract()<br/>  ▸ text: pass-through<br/>  ▸ audio: ai.transcribe()<br/>  ▸ teams: parse webhook JSON"]
-    S3["③  Routing<br/>RoutingAgent<br/>  ▸ template_hint → skip LLM (conf=1.0)<br/>  ▸ sentence_starters fast-path (conf=0.9)<br/>  ▸ LLM JSON fallback"]
-    S4["④  Metadata Extraction<br/>ai.extract_note_metadata()<br/>via prompts/extract.md<br/>(concurrent with ③ when LLM needed)"]
-    S5["⑤  Note Construction<br/>NoteMetadata assembled<br/>+ body composed"]
-    S6["⑥  File Write + Re-index<br/>vault.write_note()<br/>ai.embed_batch()<br/>index.upsert_chunks()"]
-    S7["⑦  Confidence Scoring<br/>score_confidence() — deterministic<br/>0.35×template_match + 0.30×metadata_coverage<br/>+ 0.20×tag_plausibility + 0.15×entity_match<br/>(reuses embedding from step ⑥)"]
-    S8["⑧  Frontmatter Patch<br/>index.patch_file_metadata()<br/>confidence + review_status written back"]
+    START --> CAPTURE --> PREP --> READY --> REVIEW
+    REVIEW -->|review/edit/approve| EXECUTE --> COMPLETE
+    REVIEW -->|fast capture| EXECUTE
+    REVIEW -->|true-up| TRUEUP --> PREP
+    PREP -->|failure| FAILED_SESSION
+    EXECUTE -->|failure| FAILED_SESSION
 
-    DUP{"Duplicate?<br/>similarity≥0.95<br/>AND ≤7 days"}
-    ERR["❌  Error Path<br/>.error.md sidecar written<br/>FailedIngestRegistry.add()"]
-    DONE(["IngestResponse<br/>{ note, confidence }"])
-
-    START --> S1 --> S2
-    S2 --> DUP
-    DUP -->|"allow_duplicate=true<br/>or no match"| S3
-    DUP -->|"DuplicateSuspected"| DONE
-
-    S3 & S4 -.->|asyncio.gather| S3
-    S3 --> S5
-    S4 --> S5
-    S5 --> S6 --> S7 --> S8 --> DONE
-
-    S3 -->|exception| ERR
-    S4 -->|exception| ERR
-    S5 -->|exception| ERR
-
-    style DUP fill:#3d3520,stroke:#a89060,color:#f9e2af
-    style ERR fill:#3d2020,stroke:#a06060,color:#f38ba8
-    style DONE fill:#203d2a,stroke:#60a080,color:#a6e3a1
+    style REVIEW fill:#3d3520,stroke:#a89060,color:#f9e2af
+    style FAILED_SESSION fill:#3d2020,stroke:#a06060,color:#f38ba8
+    style COMPLETE fill:#203d2a,stroke:#60a080,color:#a6e3a1
     style START fill:#203d2a,stroke:#60a080,color:#a6e3a1
 ```
+
+The MCP `capture_thought` tool intentionally remains a separate synchronous fast path for external clients that need a one-call ingest operation.
 
 ---
 
@@ -347,7 +346,7 @@ React component tree and state ownership.
 
 ```mermaid
 graph TD
-    APP["App.tsx<br/>(AppContext + useReducer)<br/>global state: settings, activeView, notifications"]
+    APP["App.tsx<br/>(AppContext + useReducer)<br/>global state: settings, activeView, workbench count"]
 
     subgraph LAYOUT["Layout"]
         SB["Sidebar<br/>(navigation)"]
@@ -357,16 +356,15 @@ graph TD
     subgraph VIEWS["Route Views"]
         CHAT_V["Chat<br/>(useChat hook,<br/>SSE EventSource)"]
         DB_V["DocumentBrowser<br/>(list + CRUD)"]
+        WORKBENCH_V["CaptureWorkbench<br/>(prepared / review / failures)"]
         SEARCH_V["Search<br/>(debounced query)"]
         GRAPH_V["Graph<br/>(React Force Graph,<br/>D3 + WebGL)"]
         STATS_V["Stats<br/>(Recharts)"]
-        REVIEW_V["ReviewQueue<br/>(approve / reject)"]
     end
 
     subgraph OVERLAYS["Overlays / Modals"]
         VOICE_M["VoiceModal<br/>(Web Speech API primary<br/>MediaRecorder fallback)"]
         SETTINGS_M["SettingsModal<br/>(PATCH /api/settings)"]
-        FAILED_C["FailedCaptures<br/>(ingest failures)"]
     end
 
     APP --> LAYOUT
@@ -374,14 +372,14 @@ graph TD
     APP --> OVERLAYS
 
     CHAT_V -->|"useChat()"| SSE["SSE stream<br/>/api/chat"]
-    VOICE_M -->|"multipart POST"| TRANS["POST /api/transcribe"]
-    VOICE_M -->|"POST"| INGEST["POST /api/ingest"]
-    SEARCH_V -->|"GET"| SRCH["GET /api/search"]
-    GRAPH_V -->|"GET"| GRPH["GET /api/graph"]
-    STATS_V -->|"GET"| STTS["GET /api/stats"]
-    REVIEW_V -->|"PATCH"| RVIEW["PATCH /api/review/{path}/approve"]
-    DB_V -->|"CRUD"| NOTES["GET/PUT/PATCH/DELETE<br/>/api/notes/{path}"]
-    SETTINGS_M -->|"GET/PATCH"| STNGS["GET/PATCH /api/settings"]
+    VOICE_M -->|multipart POST| TRANS["POST /api/transcribe"]
+    VOICE_M -->|POST| INGEST["POST /api/ingest"]
+    WORKBENCH_V -->|GET / PATCH / POST| WB["capture workbench APIs"]
+    SEARCH_V -->|GET| SRCH["GET /api/search"]
+    GRAPH_V -->|GET| GRPH["GET /api/graph"]
+    STATS_V -->|GET| STTS["GET /api/stats"]
+    DB_V -->|CRUD| NOTES["GET/PUT/PATCH/DELETE<br/>/api/notes/{path}"]
+    SETTINGS_M -->|GET/PATCH| STNGS["GET/PATCH /api/settings"]
 ```
 
 ---
@@ -463,37 +461,23 @@ erDiagram
 
 ---
 
-## 8. Process Topology — Unified vs Separate Processes
+## 8. Process Topology — Unified Mainline
 
-How the single process forks when `--separate-processes` is used (M22 ProcessManager).
+The near-term mainline supports one runtime topology: a single unified process.
 
 ```mermaid
-graph LR
-    subgraph UNIFIED["Unified Mode (default)"]
-        direction TB
-        UP["monocle serve<br/>(single process, PID 1)"]
-        UP_API["FastAPI + MCP Server<br/>:8000"]
-        UP_WATCH["InboxWatcher<br/>(async task)"]
-        UP_SCHED["APScheduler<br/>(async task)"]
-        UP --> UP_API
-        UP --> UP_WATCH
-        UP --> UP_SCHED
-    end
+graph TB
+    UP["monocle serve<br/>(single process, PID 1)"]
+    UP_API["FastAPI + MCP Server<br/>:8000"]
+    UP_WATCH["InboxWatcher<br/>(async task)"]
+    UP_SCHED["APScheduler<br/>(async task)"]
 
-    subgraph SEPARATE["Separate-Processes Mode<br/>(--separate-processes or MONOCLE_SEPARATE_PROCESSES=1)"]
-        direction TB
-        PM["ProcessManager<br/>(main process)"]
-        CAPTURE_P["monocle capture<br/>MONOCLE_COMPONENT=capture<br/>(API-only, no watcher/scheduler)"]
-        WATCH_P["monocle watch<br/>(InboxWatcher only)"]
-        SCHED_P["monocle scheduler<br/>(APScheduler only)"]
-        PM -->|"spawn + crash-restart"| CAPTURE_P
-        PM -->|"spawn + crash-restart"| WATCH_P
-        PM -->|"spawn + crash-restart"| SCHED_P
-    end
-
-    note1["Crash-restart uses<br/>exponential back-off"]
-    SEPARATE --- note1
+    UP --> UP_API
+    UP --> UP_WATCH
+    UP --> UP_SCHED
 ```
+
+Optional process separation may be revisited in a future phase, but it is not part of the current mainline architecture.
 
 ---
 
@@ -549,35 +533,39 @@ Runtime provider selection and the transcription sub-abstraction.
 
 ```mermaid
 flowchart TD
-    CFG["config.yaml<br/>ai.provider: ollama|foundry_local|azure"]
+    CFG["config.yaml<br/>ai.chat_model_key / embed_model_key<br/>ai.models[] registry"]
     FACTORY["get_provider(settings)<br/>factory function"]
+    COMPOSITE["CompositeAIProvider<br/>chat + embed split across providers"]
 
     subgraph PROVIDERS["AIProvider implementations"]
         OLLAMA_P["OllamaProvider<br/>• embed: nomic-embed-text<br/>• chat: llama3.2<br/>• auto-pull on first use"]
         FOUNDRY_P["FoundryLocalProvider<br/>• OpenAI-compatible HTTP API<br/>• embed_dimensions configurable"]
         AZURE_P["AzureOpenAIProvider<br/>• openai.AsyncAzureOpenAI<br/>• dims on embed<br/>• env var config only"]
+        OPENAI_P["OpenAIProvider<br/>• openai.AsyncOpenAI<br/>• env var config only"]
     end
 
     subgraph TRANSCRIPTION["TranscriptionProvider (decoupled)"]
         TR_FACTORY["get_transcription_provider(settings)<br/>ai.transcribe_backend"]
         WHISPER_CPP["WhisperCppTranscriptionProvider<br/>httpx POST to whisper.cpp<br/>ai.transcribe_url"]
         SUBPROCESS["SubprocessTranscriptionProvider<br/>openai-whisper CLI<br/>(subprocess)"]
-        NATIVE["NativeOpenAITranscriptionProvider<br/>OpenAI /audio/transcriptions<br/>(Foundry/Azure)"]
+        NATIVE["NativeOpenAITranscriptionProvider<br/>OpenAI-compatible /audio/transcriptions<br/>(Foundry/Azure/OpenAI)"]
     end
 
-    HOT_RELOAD["Hot-reload on PATCH /api/settings<br/>ai.provider change → new get_provider()"]
+    HOT_RELOAD["Hot-reload on PATCH /api/settings<br/>model selection / registry change → new get_provider()"]
 
     CFG --> FACTORY
     FACTORY --> OLLAMA_P
     FACTORY --> FOUNDRY_P
     FACTORY --> AZURE_P
+    FACTORY --> OPENAI_P
+    FACTORY --> COMPOSITE
     FACTORY --> TR_FACTORY
     TR_FACTORY --> WHISPER_CPP
     TR_FACTORY --> SUBPROCESS
     TR_FACTORY --> NATIVE
     HOT_RELOAD --> FACTORY
 
-    OLLAMA_P & FOUNDRY_P & AZURE_P --- TRANSCRIPTION
+    OLLAMA_P & FOUNDRY_P & AZURE_P & OPENAI_P --- TRANSCRIPTION
 ```
 
 ---
@@ -638,7 +626,7 @@ title: "Example note"
 type: person_note          # NOTE_TYPES enum
 template: person           # vault/.templates/<template>.md
 domain: work               # work | personal | ...
-source: web                # web | voice | teams | mcp | import | agent
+source: web                # web | voice | mcp | import | agent
 people: ["Alice", "Bob"]
 tags: ["onboarding", "q1-2026"]
 action_items: []
@@ -674,7 +662,7 @@ flowchart TB
 
     subgraph CHAT_LAYER["Chat Orchestration Layer  ·  routers/chat.py"]
         direction TB
-        CHAT_ORCH["/api/chat endpoint<br/>• URL prefetch + opt-in<br/>• Context injection<br/>• SSE framing (token/tool_call/done)<br/>• Session + timeout policy"]
+        CHAT_ORCH["/api/chat endpoint<br/>• Context injection<br/>• SSE framing (token/tool_call/done)<br/>• Session + timeout policy<br/>• Explicit capture handoff only"]
         CHAT_AGENT["ChatAgent<br/>(MS Agent Framework)"]
         VAULT_TOOLS["VaultTools<br/>(thin adapter — no business logic)"]
     end

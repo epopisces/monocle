@@ -9,11 +9,11 @@ interface LeftNavProps {
 }
 
 const NAV_ITEMS = [
-  { to: '/',       icon: '💬', label: 'Chat' },
-  { to: '/docs',   icon: '📄', label: 'Docs' },
-  { to: '/search', icon: '🔍', label: 'Search' },
-  { to: '/graph',  icon: '◉',  label: 'Graph' },
-  { to: '/stats',  icon: '📊', label: 'Stats' },
+  { to: '/',       icon: '◌', label: 'Chat' },
+  { to: '/docs',   icon: '▤', label: 'Docs' },
+  { to: '/search', icon: '⌕', label: 'Search' },
+  { to: '/graph',  icon: '◎', label: 'Graph' },
+  { to: '/stats',  icon: '◫', label: 'Stats' },
 ]
 
 export default function LeftNav({ collapsed, onChatDocumentDrop }: LeftNavProps) {

@@ -52,6 +52,8 @@ def _reset_mcp_state():
         mcp_state.index,
         mcp_state.ai,
         mcp_state.ingest_pipeline,
+        mcp_state.ingest_session_store,
+        mcp_state.ingest_prepare_worker,
         mcp_state.graph_builder,
         mcp_state.reindex_queue,
         mcp_state._initialised,
@@ -62,6 +64,8 @@ def _reset_mcp_state():
         mcp_state.index,
         mcp_state.ai,
         mcp_state.ingest_pipeline,
+        mcp_state.ingest_session_store,
+        mcp_state.ingest_prepare_worker,
         mcp_state.graph_builder,
         mcp_state.reindex_queue,
         mcp_state._initialised,
@@ -150,10 +154,30 @@ def mock_graph_builder(mock_vault):
 
 
 @pytest.fixture
-def mcp_state(mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder):
+def mcp_state(mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder, tmp_path):
     """Inject all components into the MCP module-level state."""
     from monocle.config import Settings
+    from monocle.services.activity import ActivityMonitor
+    from monocle.services.ingest_prepare import IngestPreparationWorker
+    from monocle.services.ingest_sessions import IngestSessionStore
     from monocle.mcp_server import init_mcp_state
+
+    settings = Settings()
+    store = IngestSessionStore(
+        settings,
+        db_path=tmp_path / "data" / "ingest" / "sessions.db",
+        ingest_root=tmp_path / "data" / "ingest",
+        sources_root=tmp_path / "data" / "sources",
+    )
+    prepare_worker = IngestPreparationWorker(
+        store=store,
+        pipeline=mock_pipeline,
+        vault=mock_vault,
+        index=mock_index,
+        ai=mock_ai,
+        settings=settings,
+        activity=ActivityMonitor(),
+    )
 
     init_mcp_state(
         mock_vault,
@@ -161,7 +185,9 @@ def mcp_state(mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder
         mock_ai,
         mock_pipeline,
         mock_graph_builder,
-        settings=Settings(),
+        settings=settings,
+        ingest_session_store=store,
+        ingest_prepare_worker=prepare_worker,
     )
     return mock_vault, mock_index, mock_ai, mock_pipeline, mock_graph_builder
 
@@ -218,6 +244,25 @@ def auth_client(tmp_path: Path):
         )
 
         graph_builder = GraphBuilder(vault)
+        from monocle.services.activity import ActivityMonitor
+        from monocle.services.ingest_prepare import IngestPreparationWorker
+        from monocle.services.ingest_sessions import IngestSessionStore
+
+        ingest_session_store = IngestSessionStore(
+            settings,
+            db_path=tmp_path / "data" / "ingest" / "sessions.db",
+            ingest_root=tmp_path / "data" / "ingest",
+            sources_root=tmp_path / "data" / "sources",
+        )
+        ingest_prepare_worker = IngestPreparationWorker(
+            store=ingest_session_store,
+            pipeline=pipeline,
+            vault=vault,
+            index=index,
+            ai=mock_ai_inst,
+            settings=settings,
+            activity=ActivityMonitor(),
+        )
 
         app.state.vault = vault
         app.state.index = index
@@ -225,6 +270,8 @@ def auth_client(tmp_path: Path):
         app.state.settings = settings
         app.state.reindex_queue = rq
         app.state.ingest_pipeline = pipeline
+        app.state.ingest_session_store = ingest_session_store
+        app.state.ingest_prepare_worker = ingest_prepare_worker
         app.state.failed_registry = failed_reg
         app.state.watcher = None
         app.state.graph_builder = graph_builder
@@ -236,6 +283,9 @@ def auth_client(tmp_path: Path):
             pipeline,
             graph_builder,
             settings=settings,
+            ingest_session_store=ingest_session_store,
+            ingest_prepare_worker=ingest_prepare_worker,
+            reindex_queue=rq,
         )
 
         yield
@@ -607,8 +657,8 @@ class TestMCPTools:
             {"content": "I had an idea about using graph visualisation for note clusters."},
         )
         data = json.loads(_extract_text(result))
-        assert "file_path" in data
-        assert "review_status" in data
+        assert "session_id" in data
+        assert "state" in data
 
     @pytest.mark.asyncio
     async def test_capture_thought_returns_file_path(self, mcp_state):
@@ -619,8 +669,8 @@ class TestMCPTools:
             {"content": "Short thought."},
         )
         data = json.loads(_extract_text(result))
-        assert isinstance(data["file_path"], str)
-        assert len(data["file_path"]) > 0
+        assert data["state"] in {"completed", "proposal_ready", "awaiting_user", "in_review", "failed"}
+        assert isinstance(data["affected_file_paths"], list)
 
     @pytest.mark.asyncio
     async def test_capture_thought_body_too_long(self, mcp_state):
@@ -640,8 +690,49 @@ class TestMCPTools:
             {"content": "Important meeting notes about the Q2 roadmap.", "source": "teams"},
         )
         data = json.loads(_extract_text(result))
-        note = mock_vault.read_note(data["file_path"])
+        assert data["affected_file_paths"], data
+        note = mock_vault.read_note(data["affected_file_paths"][0])
         assert note.metadata.source == "teams"
+
+    @pytest.mark.asyncio
+    async def test_capture_thought_falls_back_to_review_when_blockers_exist(self, mcp_state, mock_ai):
+        from monocle.mcp_server import _state, mcp
+
+        async def _chat_with_fast_capture_blockers(messages, **kwargs):
+            content = messages[-1].get("content", "") if messages else ""
+            if '"routing_decision"' in content and '"source_excerpt"' in content:
+                return json.dumps(
+                    {
+                        "title": "Needs clarification",
+                        "digest": "Fast capture surfaced an unanswered question.",
+                        "open_questions": [{"question": "Who owns this follow-up?", "reason": "Missing owner."}],
+                        "contradictions": [],
+                        "proposed_actions": [
+                            {
+                                "action_type": "create_note",
+                                "target_note_type": "observation",
+                                "rationale": "Prepared for manual review.",
+                                "proposed_content": {"title": "Needs clarification", "body": "Question remains open."},
+                            }
+                        ],
+                    }
+                )
+            return '{"type": "other", "domain": "personal", "tags": []}'
+
+        mock_ai.chat = AsyncMock(side_effect=_chat_with_fast_capture_blockers)
+
+        result = await mcp.call_tool(
+            "capture_thought",
+            {"content": "Fast capture should stop and ask a question here.", "source": "mcp"},
+        )
+        data = json.loads(_extract_text(result))
+
+        assert data["state"] == "awaiting_user"
+        assert data["affected_file_paths"] == []
+        detail = _state.ingest_session_store.get_session(data["session_id"])
+        assert detail is not None
+        assert detail.session.state == "awaiting_user"
+        assert detail.session.open_questions[0]["question"] == "Who owns this follow-up?"
 
     @pytest.mark.asyncio
     async def test_search_vault_n_results_clamped_low(self, mcp_state):

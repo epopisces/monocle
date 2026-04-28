@@ -1,15 +1,16 @@
 # Software Requirements Specification — Monocle
 
-**Version:** 2.4  
-**Date:** 2026-04-24  
+**Version:** 2.6  
+**Date:** 2026-04-27  
 **Status:** Current  
-**Supersedes:** v2.3
+**Supersedes:** v2.5
+**Changes:** Reset the near-term mainline around trust-first capture, a unified capture workbench, lean chat, distinct omnisearch, and a single supported runtime topology; deferred Teams, OneNote, third-party MCP composition, and separate-process runtime support to a future phase.
 
 ---
 
 ## 1. System Overview
 
-Monocle is a personal AI-powered knowledge system with a React web frontend, a FastAPI backend, an Obsidian-compatible vault as its document store, a ChromaDB vector index, a persisted ingest-session store, an immutable source archive, and a Microsoft Agent Framework orchestration layer. Multiple capture sources feed the ingest-session system; multiple AI client tools read from the curated knowledge base via MCP. All Monocle-owned data operations are implemented once in a shared services layer (`monocle/services/`); both the MCP server tools and the chat agent tools are thin wrappers that delegate to those shared services. MCP is the canonical tool contract for Monocle-owned operations.
+Monocle is a personal AI-powered knowledge system with a React web frontend, a FastAPI backend, an Obsidian-compatible vault as its document store, a ChromaDB vector index, a persisted ingest-session store, an immutable source archive, and a Microsoft Agent Framework orchestration layer. Browser/API/inbox/explicit-URL capture surfaces feed the ingest-session system, while the MCP server also exposes a synchronous `capture_thought` fast path for one-shot external ingestion. Chat is intentionally lean: it focuses on retrieval and authoring, and hands off capture work into explicit capture flows rather than hidden router-level automation. All Monocle-owned data operations are implemented once in a shared services layer (`monocle/services/`); both the MCP server tools and the chat agent tools are thin wrappers that delegate to those shared services. MCP is the canonical tool contract for Monocle-owned operations.
 
 ### 1.1 Architecture
 
@@ -18,8 +19,8 @@ Capture Surfaces            FastAPI Backend                              Consume
 ──────────────────          ───────────────────────────────────────────   ─────────────────
 React Web App   ──REST──►  ┌─ Ingest Router                             MCP Clients
 Voice (browser) ──REST──►  │  ├─ Ingest Session Store (SQLite/file)     (Claude, Copilot,
-Teams Bot       ──REST──►  │  ├─ Source Archive (immutable files)        Cursor…)
-Inbox Watcher   ──local──► │  └─ AI Provider (extract/digest/linking)   │
+Inbox Watcher   ──local──► │  ├─ Source Archive (immutable files)        Cursor…)
+Explicit URL    ──REST──►  │  └─ AI Provider (extract/digest/linking)   │
 MCP capture_tool──MCP───►  ├─ Vault Router (CRUD, search, history)      │
                            │  └─ File Watcher / Inbox poller            ▼
                            ├─ Agent Router                       GET /mcp (Streamable HTTP)
@@ -43,9 +44,9 @@ A single unified process constitutes a full deployment:
 |---|---|---|
 | Main API + Services | `python -m monocle serve` | FastAPI + MCP server + APScheduler (scheduled re-index, weekly review) + integrated inbox file watcher (async task) + frontend static files; binds `127.0.0.1:8000` |
 
-**Developer shortcut:** `python -m monocle dev` starts the unified process with prefixed stdout logging and automatic restart on crash.
+**Developer shortcut:** `python -m monocle dev` starts the unified process with prefixed stdout logging.
 
-**Future optimization:** If performance bottlenecks emerge at scale (>10,000 notes), the inbox watcher can be extracted as a separate OS process for dedicated scaling.
+**Future optimization:** Near-term mainline supports only the unified process. Optional process separation may be revisited in a future phase if high-volume vaults justify it.
 
 - **ChromaDB:** file-backed at the path in `config.yaml` (default: `./data/chroma`)
 - **Vault:** Markdown files on local filesystem at the path in `config.yaml`
@@ -62,11 +63,10 @@ A single unified process constitutes a full deployment:
 | Vector index | ChromaDB 0.6+ | `PersistentClient`, cosine distance |
 | File watcher | watchdog 4+ | Vault change detection + re-index trigger |
 | Agent framework | Microsoft Agent Framework (Python) | Multi-agent orchestration |
-| AI backends | Ollama SDK, Foundry Local SDK, `openai.AzureOpenAI` | Runtime-selectable |
+| AI backends | Ollama SDK, Foundry Local (OpenAI-compatible), OpenAI SDK (`AsyncOpenAI`, `AsyncAzureOpenAI`) | Runtime-selectable per model entry |
 | MCP server | `mcp[cli]` FastMCP | Streamable HTTP transport |
 | Task scheduler | APScheduler 3.x | Cron-style background agents (weekly review, scheduled re-index) |
 | Topic modelling | scikit-learn KMeans/AgglomerativeClustering | Default weekly review clustering (fast, lightweight) |
-| Teams adapter | botbuilder-core | Bot Framework adapter for Teams |
 | Config | PyYAML + python-dotenv | `config.yaml` + `.env` |
 
 **Frontend (Node.js 20+)**
@@ -97,12 +97,28 @@ Requirements are grouped by subsystem. Each requirement has a unique ID (`FR-<SU
 
 ```yaml
 ai:
-  provider: ollama             # "ollama" | "foundry_local" | "azure"
-  embed_model: nomic-embed-text
-  embed_dimensions: 1536       # Fixed across all providers for migration compatibility; choose models producing 1536-dim vectors
-  chat_model: llama3.2
+  chat_model_key: llama3.2
+  embed_model_key: nomic-embed
+  stt_key: null
+  embed_dimensions: null       # null = auto-detect from the first successful embedding call
+  url_reference_timeout_s: 120
+  transcribe_backend: subprocess   # "native" | "whisper_cpp" | "subprocess"
+  transcribe_url: http://localhost:9000
   ollama_base_url: http://localhost:11434
   foundry_local_base_url: http://localhost:5272
+  models:
+    - key: llama3.2
+      name: llama3.2
+      role: chat
+      provider: ollama
+    - key: nomic-embed
+      name: nomic-embed-text
+      role: embed
+      provider: ollama
+    - key: gpt-4o-openai
+      name: gpt-4o
+      role: chat
+      provider: openai
 
 vault:
   path: ./vault                # Absolute or relative path to Markdown vault
@@ -141,8 +157,6 @@ server:
   port: 8000
   mcp_access_key_env: MCP_ACCESS_KEY
   frontend_dist: ./frontend/dist  # Path to Vite production build output (served as static files)
-  separate_processes: false    # Phase 3+ only: set true to extract watcher/scheduler as separate OS processes
-
 telemetry:
   enabled: true
   otlp_endpoint: http://localhost:4317  # AI Toolkit gRPC port; any OTLP-compatible backend
@@ -155,22 +169,24 @@ ui:
   chat_session_history_limit: 10  # Number of chat sessions retained in browser localStorage
 
 ingest:
-  session_store_path: ./data/ingest/sessions.db
-  source_archive_path: ./data/sources
-  inbox_poll_interval_s: 30
-  idle_prepare_enabled: true
-  max_idle_prepare_jobs: 2
+  background_prepare_enabled: true
+  prepare_poll_interval_s: 5.0
+  max_idle_prepare_jobs: 1
+  related_notes_limit: 5
+  source_excerpt_chars: 4000
 
 history:
   retention_versions: 50          # retain the most recent N stored versions per note
 
-**FR-CFG-04:** Azure backend configuration SHALL be read exclusively from environment variables: `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_EMBED_DEPLOYMENT`, `AZURE_OPENAI_CHAT_DEPLOYMENT`.
+**FR-CFG-04:** Azure-backed model entries SHALL read credentials from environment variables: `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`, and `AZURE_OPENAI_API_VERSION`. `AZURE_OPENAI_EMBED_DEPLOYMENT` and `AZURE_OPENAI_CHAT_DEPLOYMENT` MAY override the selected model names.
+
+**FR-CFG-04a:** OpenAI-backed model entries SHALL read credentials from the `OPENAI_API_KEY` environment variable.
 
 **FR-CFG-05:** Foundry Local backend configuration SHALL be read from env var `FOUNDRY_LOCAL_BASE_URL` (overrides config) and `FOUNDRY_LOCAL_API_KEY` (if required by the local server).
 
 **FR-CFG-06:** The system SHALL validate configuration at startup and fail with a descriptive error if required fields are missing or inconsistent.
 
-**FR-CFG-07:** Switching `ai.provider` among `ollama`, `foundry_local`, and `azure` SHALL require no code changes — only config/env var changes.
+**FR-CFG-07:** Switching active chat/embed/STT models among `ollama`, `foundry_local`, `azure`, and `openai` entries SHALL require no code changes — only config/env var changes.
 
 ---
 
@@ -193,16 +209,17 @@ class AIProvider(ABC):
     async def transcribe(self, audio_bytes: bytes, mime_type: str) -> str: ...
 ```
 
-**FR-AI-02:** Three provider implementations SHALL be included:
+**FR-AI-02:** Four provider implementations SHALL be included:
 - `OllamaProvider` — uses `ollama.AsyncClient`; models configured in `config.yaml`
 - `FoundryLocalProvider` — uses OpenAI-compatible HTTP API at Foundry Local base URL
-- `AzureOpenAIProvider` — uses `openai.AzureOpenAI` with deployment names from env vars
+- `AzureOpenAIProvider` — uses `openai.AsyncAzureOpenAI` with credentials from env vars
+- `OpenAIProvider` — uses `openai.AsyncOpenAI` with the public OpenAI API key from env vars
 
-**FR-AI-03:** A factory `get_provider(settings: Settings) -> AIProvider` SHALL select the implementation based on `ai.provider` config.
+**FR-AI-03:** `get_provider(settings: Settings) -> AIProvider` SHALL resolve `ai.chat_model_key` and `ai.embed_model_key` against the model registry. When both roles share a provider/base URL, it SHALL return a single provider instance; when they differ, it SHALL return a composite provider that delegates chat and embed calls to the appropriate backends.
 
 **FR-AI-04:** If the configured Ollama model is not found locally, the system SHALL automatically pull it and log progress.
 
-**FR-AI-05:** `transcribe` for Ollama SHALL use a Whisper model via `ollama.chat` with audio attachment; `transcribe` for Azure SHALL use the Azure Speech or Whisper deployment.
+**FR-AI-05:** Transcription SHALL be selected via the `TranscriptionProvider` abstraction. `transcribe_backend="native"` SHALL use the active provider's built-in transcription endpoint when available (Foundry Local, Azure OpenAI, or OpenAI); Ollama SHALL require `whisper_cpp` or `subprocess` transcription.
 
 **FR-AI-06:** The provider SHALL expose `extract_note_metadata(content: str, template_hint: str | None) -> NoteMetadata` which returns the fields defined in the canonical model (§4.5). The fields populated by this method are:
 
@@ -263,7 +280,7 @@ class IndexLayer(ABC):
 | `tags` | JSON string | From frontmatter |
 | `people` | JSON string | From frontmatter |
 | `domain` | string | From frontmatter |
-| `source` | string | `web` \| `mcp` \| `voice` \| `teams` \| `import` |
+| `source` | string | `web` \| `mcp` \| `voice` \| `import` |
 | `created_at` | ISO 8601 string | Frontmatter or file ctime |
 | `updated_at` | ISO 8601 string | File mtime at index time |
 
@@ -341,7 +358,7 @@ links:
 
 ### 2.5 File Watcher & Re-Index (FR-WTCH)
 
-**FR-WTCH-01:** The `InboxWatcher` SHALL run as an **async task integrated into the unified FastAPI process** (Phase 1). It monitors only `vault/inbox/` (configured via `vault.inbox_path`) and SHALL NOT watch the rest of the vault. Supported file types: `.md`, `.txt`, audio files (`.webm`, `.mp3`, `.wav`, `.m4a`). The integration point is `main.py`'s lifespan hook; the watcher runs in a thread-pool executor so file-system callbacks do not block the async event loop. *(Future: if performance bottlenecks emerge at scale, the watcher can be extracted as a standalone subprocess via `ProcessManager` without any change to the watcher's own API — see § FR-PROC.)*
+**FR-WTCH-01:** The `InboxWatcher` SHALL run as an **async task integrated into the unified FastAPI process** (Phase 1). It monitors only `vault/inbox/` (configured via `vault.inbox_path`) and SHALL NOT watch the rest of the vault. Supported file types: `.md`, `.txt`, audio files (`.webm`, `.mp3`, `.wav`, `.m4a`). The integration point is `main.py`'s lifespan hook; the watcher runs in a thread-pool executor so file-system callbacks do not block the async event loop. No alternate runtime topology is in scope for the near-term mainline.
 
 **FR-WTCH-02:** On new file detection in the inbox:
 1. The watcher archives the source file into the immutable source store with provenance metadata
@@ -370,7 +387,7 @@ This process catches Obsidian edits and any changes made outside the API.
 
 ### 2.6 Ingest Sessions & Review Flow (FR-ING)
 
-**FR-ING-01:** The ingest subsystem handles unstructured input (text, voice, Teams message, inbox file, URL reference, or any registered plugin source) by creating a persisted ingest session rather than immediately writing a structured vault note.
+**FR-ING-01:** The ingest subsystem handles unstructured input (text, voice, inbox file, explicit URL reference, or any future registered plugin source) by creating a persisted ingest session rather than immediately writing a structured vault note.
 
 **FR-ING-02:** Ingest SHALL be a two-phase workflow:
 1. Session preparation: extraction, digest, related-note linking, contradiction analysis, and proposal generation
@@ -385,7 +402,7 @@ class IngestRequest(BaseModel):
   content: str | None = None
   audio: bytes | None = None
   audio_mime: str | None = None
-  source: Literal["web", "mcp", "voice", "teams", "import", "inbox", "chat"]
+  source: Literal["web", "mcp", "voice", "import", "inbox", "chat"]
   template_hint: str | None = None
   allow_duplicate: bool = False
   fast_capture: bool = False
@@ -453,7 +470,7 @@ class ProposedAction(BaseModel):
 
 ```python
 class IngestPlugin(ABC):
-    source_id: ClassVar[str]    # e.g. "text", "audio", "teams", "onenote"
+  source_id: ClassVar[str]    # e.g. "text", "audio", "url", "onenote"
     source_label: ClassVar[str] # e.g. "Plain Text", "Audio File"
 
     @classmethod
@@ -466,7 +483,7 @@ class IngestPlugin(ABC):
         ...
 ```
 
-The `IngestPluginRegistry` singleton holds all registered plugins. On each ingest call, the registry calls `can_handle` in registration order and uses the first matching plugin. Built-in plugins: `TextPlugin` (passthrough), `AudioPlugin` (calls `AIProvider.transcribe`), `TeamsPlugin` (extracts text from Bot Framework Activity). Future sources (e.g., OneNote) are implemented by registering a new `IngestPlugin` subclass without modifying pipeline code.
+The `IngestPluginRegistry` singleton holds all registered plugins. On each ingest call, the registry calls `can_handle` in registration order and uses the first matching plugin. Built-in plugins focus on local-core capture: `TextPlugin` (passthrough) and `AudioPlugin` (calls `AIProvider.transcribe`). Future sources (e.g., explicit URL capture helpers, OneNote, or other integrations) are implemented by registering a new `IngestPlugin` subclass without modifying pipeline code.
 
 **FR-ING-09:** Preparation steps (run in order unless marked optional/concurrent):
 1. Content extraction — `IngestPluginRegistry.resolve(request)` selects plugin; `plugin.extract()` yields plain text
@@ -568,7 +585,7 @@ The Markdown body is the full system prompt text.
 
 All capture routes go through `POST /api/ingest`. There is no separate capture server or standalone watcher process in Phase 1.
 
-**FR-PROC-02 (Dev shortcut):** `python -m monocle dev` SHALL start the unified process with prefixed stdout logging (`[API]`, `[WATCHER]`, `[SCHEDULER]`, `[INGEST]`, `[AGENT]`) and automatic restart on crash (up to 3 times). A `ProcessManager` stub class SHALL exist in `monocle/process_manager.py` to hold the interface for optional future process separation (Phase 3+, see LTR-3) but is **not wired** in Phase 1.
+**FR-PROC-02 (Dev shortcut):** `python -m monocle dev` SHALL start the unified process with prefixed stdout logging (`[API]`, `[WATCHER]`, `[SCHEDULER]`, `[INGEST]`, `[AGENT]`). The near-term mainline SHALL NOT expose capture-only or separate-process runtime modes.
 
 **FR-PROC-03 (Test harness):** pytest SHALL provide a session-scoped `live_server` fixture in `monocle/tests/conftest.py` that:
 - Starts the unified process on a random available port
@@ -584,14 +601,14 @@ Unit-level tests (using FastAPI `TestClient`) do NOT require the fixture.
 
 ### 2.7 REST API (FR-API)
 
-All endpoints return `application/json`. Error responses conform to RFC 7807. The React frontend is the primary consumer; Teams bot and MCP server also use these endpoints internally.
+All endpoints return `application/json`. Error responses conform to RFC 7807. The React frontend is the primary consumer; the MCP server also uses these endpoints internally. The near-term UX target is a unified capture workbench, so dedicated review/failure endpoints remain compatibility surfaces until the workbench aggregation milestones land.
 
 #### 2.7.1 Ingest
 
 **FR-API-01:** `POST /api/ingest`  
 Accepts multipart form (`audio` file) or JSON body:
 ```json
-{ "content": "string", "source": "web|mcp|voice|teams|import|inbox|chat", "template_hint": "person", "fast_capture": false }
+{ "content": "string", "source": "web|mcp|voice|import|inbox|chat", "template_hint": "person", "fast_capture": false }
 ```
 Response format depends on `Accept` header (content negotiation):
 - `Accept: application/json` (default): Returns `202 Accepted` with the created `IngestSession` summary
@@ -706,7 +723,7 @@ Response:
 
 **FR-API-15:** The FastAPI app SHALL mount the Vite build output at `/` and serve `index.html` for all non-API paths (SPA fallback).
 
-#### 2.7.7 Review Queue
+#### 2.7.7 Review Queue Compatibility
 
 **FR-API-16:** `GET /api/review` — Returns notes with `review_status: pending` whose `confidence <= threshold`. Query params: `threshold` (float, overrides `review.queue_threshold`), `sort` (`confidence|date`, default `confidence`), `n` (max 100). Response:
 ```json
@@ -789,22 +806,29 @@ The original `POST /api/ingest` endpoint remains the ingest entry point, but it 
 **FR-API-22:** `GET /api/settings` — Returns current server settings. Secret values are **never** returned in full: the MCP access key is returned as a masked string (`"••••••••<last4chars>"`). Response example:
 ```json
 {
-  "ai": { "provider": "ollama", "chat_model": "llama3.2", "embed_model": "nomic-embed-text", "url_reference_timeout_s": 120 },
-  "ingest": { "inbox_poll_interval_s": 30, "idle_prepare_enabled": true },
+  "ai": {
+    "chat_model_key": "llama3.2",
+    "embed_model_key": "nomic-embed",
+    "stt_key": null,
+    "url_reference_timeout_s": 120,
+    "transcribe_backend": "subprocess",
+    "models": []
+  },
+  "ingest": { "background_prepare_enabled": true, "prepare_poll_interval_s": 5.0 },
   "history": { "retention_versions": 50 },
   "review": { "queue_threshold": 0.75, "auto_approve_threshold_pct": 90 },
   "agents": {
     "weekly_summary": { "enabled": true, "cron": "0 17 * * 5", "domains": [] },
     "reindex": { "enabled": true, "cron": "0 3 * * 0" }
   },
-  "ui": { "chat_session_history_limit": 10 },
-  "mcp_key_hint": "••••••••a3f9"
+  "ui": { "chat_session_history_limit": 10, "voice_input_backend": "whisper" },
+  "mcp_key_last4": "****a3f9"
 }
 ```
 
-**FR-API-23:** `PATCH /api/settings` — Updates mutable server-side settings at runtime. Accepted fields include `ai.provider`, `ai.chat_model`, `ai.embed_model`, `ai.url_reference_timeout_s`, `ingest.inbox_poll_interval_s`, `ingest.idle_prepare_enabled`, `history.retention_versions`, `review.queue_threshold`, `review.auto_approve_threshold_pct`, `agents.weekly_summary.enabled`, `agents.weekly_summary.cron`, `agents.weekly_summary.domains`, `agents.reindex.enabled`, `agents.reindex.cron`, and `ui.chat_session_history_limit`. Changing `ai.provider` reloads the `AIProvider` singleton. Changing embedding models returns a warning that a `reindex --force` is required. **Updated values SHALL be written back to `config.yaml` atomically (write temp + rename) so that changes survive a server restart.** This endpoint SHALL **not** accept new secret values (rotate the MCP key via `POST /api/settings/rotate-mcp-key`).
+**FR-API-23:** `PATCH /api/settings` — Updates mutable server-side settings at runtime. Accepted fields include `ai.chat_model_key`, `ai.embed_model_key`, `ai.stt_key`, `ai.url_reference_timeout_s`, `ai.transcribe_backend`, `ai.transcribe_url`, `ai.ollama_base_url`, full replacement of `ai.models`, `history.retention_versions`, `review.queue_threshold`, `review.auto_approve_threshold_pct`, `ui.voice_input_backend`, and `telemetry.trace_filters`. Changing active model selections or the model registry SHALL hot-reload the `AIProvider` singleton. **Updated values SHALL be written back to `config.yaml` atomically (write temp + rename) so that changes survive a server restart.** This endpoint SHALL **not** accept new secret values (rotate the MCP key via `POST /api/settings/rotate-mcp-key`).
 
-**FR-API-24:** `POST /api/settings/rotate-mcp-key` — Generates a new cryptographically random 64-hex-character MCP access key, writes it to the `.env` file (replacing the old value), and reloads it in memory. Returns `{ "mcp_key_hint": "••••••••<last4chars>" }`. Old key is immediately invalidated.
+**FR-API-24:** `POST /api/settings/rotate-mcp-key` — Generates a new cryptographically random 64-hex-character MCP access key, writes it to the `.env` file (replacing the old value), and reloads it in memory. Returns `{ "mcp_key_last4": "****<last4chars>" }`. Old key is immediately invalidated.
 
 #### 2.7.11 Health
 
@@ -837,7 +861,7 @@ During a startup re-index (FR-WTCH-05), `status` SHALL be `"indexing"` and other
 |---|---|---|---|
 | `search_vault` | Semantic search; returns matching notes with similarity scores | `query: str`, `n_results: int = 5`, `note_type: str = None`, `domain: str = None` | `search_service.search_vault()` |
 | `read_note` | Load full note content by file path | `file_path: str` | `notes_service.read_note()` |
-| `capture_thought` | Ingest unstructured text via the full ingest pipeline | `content: str`, `source: str = "mcp"` | `ingest_service.capture_thought()` |
+| `capture_thought` | Synchronous one-shot ingestion of unstructured text for external MCP clients | `content: str`, `source: str = "mcp"` | `ingest_service.capture_thought()` |
 | `create_note` | Create a new note using a template | `title: str`, `body: str`, `note_type: str = "observation"`, `domain: str = "personal"`, `tags: list[str] = None` | `notes_service.create_note()` |
 | `create_reference_from_url` | Fetch a web page, summarise it with AI, and create a reference note | `url: str`, `extra_context: str = None` | `reference_service.create_reference_from_url()` |
 | `update_note` | Update the body of an existing note | `file_path: str`, `body: str` | `notes_service.update_note()` |
@@ -929,7 +953,7 @@ A Typer application invocable as `python -m monocle <command>`, primarily for se
 
 **FR-WEB-09 (Settings):** A settings modal SHALL allow the user to:
 - Select the active AI backend (Ollama / Foundry Local / Azure AI Services) and configure per-backend model names
-- Set the **review queue threshold** (slider, 0.00–1.00, default `1.00`) — pending notes with `confidence ≤ threshold` appear in the review queue notification; setting to `0.00` hides the notification entirely
+- Set the **review queue threshold** (slider, 0.00–1.00, default `1.00`) — pending notes with `confidence ≤ threshold` appear in the capture workbench attention count; setting to `0.00` hides low-confidence pending-note alerts entirely
 - Set the **auto-approve threshold** (integer 0–100, default `0`) — `0` disables auto-approval; `90` auto-approves notes whose confidence is at least 90%
 - Rotate the MCP access key (calls `POST /api/settings/rotate-mcp-key`; displays only the masked hint after rotation)
 - Toggle dark/light/system theme
@@ -938,7 +962,7 @@ On page load, the frontend SHALL call `GET /api/settings` to initialise all sett
 
 **FR-WEB-10:** Theme (dark/light/system) and backend selection SHALL be persisted across page loads via `localStorage`.
 
-**FR-WEB-10a (Failed Capture Visibility):** The app shell SHALL display a failed-captures indicator whenever `GET /api/ingest/failures` returns any items. The indicator opens a slide-over listing failed ingests with actions to inspect the sidecar, retry the ingest, or dismiss the failure once manually handled.
+**FR-WEB-10a (Capture Workbench Visibility):** The app shell SHALL display a unified capture-workbench indicator whenever prepared ingest sessions, pending-review notes, or failed ingests require user attention. The initial implementation MAY aggregate this from existing session, review, and failure endpoints until the dedicated workbench contract lands.
 
 **FR-WEB-11 (Chat History):** Chat sessions SHALL be persisted to `localStorage`. Each session is identified by a UUID, holds an ordered list of messages (`role`, `content`, optional `tool_calls`), and records a `created_at` timestamp. The frontend SHALL retain up to **`ui.chat_session_history_limit` sessions** (default 10; configurable via `config.yaml` and settable at runtime via `PATCH /api/settings`). A session picker dropdown in the chat topbar allows the user to load a previous session. Chat history is client-side only — it is not sent to the server or stored in the vault.
 
@@ -974,7 +998,6 @@ Chat session history SHALL also preserve any explicit user-added `context_items`
 |---|---|---|
 | Semantic search | `search_vault(query, n, threshold)` | `search_service.search_vault()` |
 | Load note | `read_note(file_path)` | `notes_service.read_note()` |
-| Unstructured capture | `capture_thought(content)` | `ingest_service.capture_thought()` |
 | Create note from template | `create_note(title, body, note_type, domain, tags)` | `notes_service.create_note()` |
 | Update note | `update_note(file_path, body)` | `notes_service.update_note()` |
 | Relationship graph | `get_graph(focus, max_degree)` | `graph_service.get_graph()` |
@@ -986,6 +1009,8 @@ Additional chat-only tools (no MCP equivalent; not Monocle data operations):
 |---|---|
 | `get_stats()` | Return `BrainStats` directly via `IndexLayer` |
 | `list_notes(folder, type)` | Browse vault note listing via `VaultLayer` |
+
+Raw-text capture is intentionally not exposed as a direct chat agent tool. Chat and browser capture flows use the persisted ingest-session APIs instead.
 
 **FR-AGT-04:** The Weekly Summary agent SHALL:
 1. Retrieve all notes modified in the past 7 days via `VaultLayer`
@@ -1018,7 +1043,13 @@ The shared service layer (`monocle/services/`) is the single authoritative imple
 | `notes.py` | `read_note(vault, file_path) -> Note`, `create_note(vault, index, ai, ...) -> Note`, `update_note(vault, index, ai, file_path, body) -> Note` |
 | `graph.py` | `get_graph(vault, focus, max_degree, types, n) -> GraphResult` |
 | `references.py` | `create_reference_from_url(vault, index, ai, url, extra_context) -> Note` |
-| `ingest.py` | `capture_thought(pipeline, content, source) -> IngestResponse` |
+| `ingest.py` | `capture_thought(pipeline, content, source) -> tuple[Note, IngestConfidence \| None]` |
+| `ingest_sessions.py` | `IngestSessionStore(...)` persistence, source archival, notifications, and session mutation helpers |
+| `ingest_prepare.py` | background preparation, digest/linking/contradiction/proposal orchestration |
+| `ingest_review.py` | review loading, question answering, proposal edits, approval transitions |
+| `ingest_execute.py` | approve-all execution, fast-capture execution, validation, and reindex handoff |
+| `activity.py` | interactive-idle activity monitoring for background prepare gating |
+| `tags.py` | shared tag normalization helpers used by wrappers and services |
 
 **FR-SVC-02:** Service functions SHALL own all business logic: vault file I/O, embedding calls, reindex queue dispatch, review-status assignment, path-boundary validation, and result shaping. Tool wrappers SHALL NOT duplicate this logic.
 
@@ -1034,26 +1065,15 @@ The shared service layer (`monocle/services/`) is the single authoritative imple
 
 ---
 
-### 2.13 Microsoft Teams Integration (FR-TMS)
+### 2.13 Deferred Channel Integrations (FR-INT)
 
-**FR-TMS-01:** The system SHALL expose a `POST /api/teams/messages` endpoint that accepts Bot Framework Activity objects from a Teams channel.
+**FR-INT-01:** Broad channel integrations such as Microsoft Teams and OneNote import are explicitly deferred beyond the near-term local core.
 
-**FR-TMS-02:** Incoming Teams messages SHALL be processed by the ingest pipeline with `source="teams"`. The bot SHALL reply in-thread with a structured confirmation (note type, tags, people detected).
+**FR-INT-02:** Existing stubs, seams, or plugin extension points for deferred channels MAY remain in the codebase temporarily, but they are not required deliverables for the current simplification track.
 
-**FR-TMS-03:** The Teams bot SHALL support the following slash commands:
+### 2.14 Capture Review Semantics (FR-REV)
 
-| Command | Action |
-|---|---|
-| `/search <query>` | Runs `GET /api/search` and returns top 3 results |
-| `/notes <person name>` | Searches for notes mentioning the person |
-| `/weekly` | Triggers the weekly summary agent |
-| `/stats` | Returns `GET /api/stats` summary |
-
-**FR-TMS-04:** Bot Framework credentials (`TEAMS_APP_ID`, `TEAMS_APP_PASSWORD`) SHALL be read from `.env` only.
-
-**FR-TMS-05:** The Teams integration is Phase 1 in a limited form (webhook ingest + command replies). Full proactive messaging is Phase 2.
-
-### 2.14 Review Queue (FR-REV)
+The user-facing destination for these semantics is the unified capture workbench. Existing `/api/review` and `/api/ingest/failures` endpoints remain compatibility surfaces until the workbench aggregation milestones land.
 
 **FR-REV-01:** Every note created by the ingest pipeline SHALL have two additional frontmatter fields written at creation time:
 
@@ -1073,7 +1093,7 @@ approval_mode: null       # "auto" | "manual"
 
 Composite score formula: `confidence = 0.35 * template_match + 0.30 * metadata_coverage + 0.20 * tag_plausibility + 0.15 * entity_match`. Weights are adjustable via `review.confidence_weights` in `config.yaml`.
 
-**FR-REV-03:** Notes written directly by the user (not via ingest, e.g., created in the Document Browser editor) SHALL have `confidence: 1.0`, `review_status: approved`, `approval_mode: manual`, `approved_by: "user"`, and `approved_at: <now>` written at creation time and SHALL NOT appear in the review queue.
+**FR-REV-03:** Notes written directly by the user (not via ingest, e.g., created in the Document Browser editor) SHALL have `confidence: 1.0`, `review_status: approved`, `approval_mode: manual`, `approved_by: "user"`, and `approved_at: <now>` written at creation time and SHALL NOT appear as actionable items in the capture workbench.
 
 **FR-REV-04:** The notification badge count is: `count of notes where review_status == "pending" AND confidence <= queue_threshold`. **Source of truth for review behaviour (in priority order):** (1) the values persisted server-side via `PATCH /api/settings` (stored in process memory and written back to `config.yaml`), (2) the values from `config.yaml` on startup. `review.queue_threshold` governs queue visibility. `review.auto_approve_threshold_pct` governs whether a newly ingested note is auto-approved. The Settings modal reads the current values from `GET /api/settings` on open, and writes back via `PATCH /api/settings` on save. `localStorage` caches them only for instant UI render before the first API response arrives; the server is authoritative.
 
@@ -1178,9 +1198,9 @@ These items are committed design directions deferred beyond Phase 2. Architectur
 | NFR-SEC-03 | Secrets (`MCP_ACCESS_KEY`, API keys) SHALL never be logged or included in API responses. `GET /api/settings` SHALL return the MCP key as a masked string showing only the last 4 characters (e.g., `"••••••••a3f9"`). |
 | NFR-SEC-04 | ChromaDB and vault directories SHALL be local-only; no automatic cloud sync |
 | NFR-SEC-05 | The `.env` file SHALL be listed in `.gitignore`. `config.yaml` SHALL also be listed in `.gitignore`; a `config.yaml.example` with placeholder values SHALL be version-controlled instead. |
-| NFR-SEC-06 | Bot Framework credentials SHALL be read from `.env` exclusively (never `config.yaml`) |
+| NFR-SEC-06 | Credentials for any deferred future channel integrations SHALL be read from `.env` exclusively (never `config.yaml`). |
 | NFR-SEC-07 | Vault paths in API requests (`file_path` params) SHALL be validated server-side: the resolved absolute path SHALL be confirmed to start with the configured vault root using `os.path.realpath`. Symlinks that resolve outside the vault root SHALL be rejected with `403 Forbidden`. |
-| NFR-SEC-08 | The `POST /api/teams/messages` endpoint SHALL validate incoming Bot Framework Activity JWT tokens using the `botbuilder-core` `BotFrameworkAuthentication` middleware. Unauthenticated or invalid requests SHALL return `401 Unauthorized`. |
+| NFR-SEC-08 | The near-term mainline exposes no Teams webhook endpoint. Any future channel webhook SHALL enforce equivalent request authentication and reject unauthenticated requests with `401 Unauthorized`. |
 | NFR-SEC-09 | The CORS policy SHALL be explicit. Allowed origins: `http://localhost:{server.port}` and `http://127.0.0.1:{server.port}` (API consumers); and in dev mode only, `http://localhost:5173` and `http://127.0.0.1:5173` (Vite dev server). Wide-open `*` CORS SHALL NOT be used. |
 | NFR-SEC-10 | The `/api/ingest`, `/api/transcribe`, and `/api/chat` endpoints SHALL have per-IP rate limiting applied (e.g., 30 requests/minute for ingest/transcribe, 60/minute for chat) to prevent runaway MCP clients or scripts from exhausting the AI backend. |
 
@@ -1188,7 +1208,7 @@ These items are committed design directions deferred beyond Phase 2. Architectur
 
 | Requirement | Detail |
 |---|---|
-| NFR-EXT-01 | Swapping `ai.provider` between `ollama`, `foundry_local`, and `azure` SHALL require no code changes — only config/env changes |
+| NFR-EXT-01 | Switching active models across `ollama`, `foundry_local`, `azure`, and `openai` providers SHALL require no code changes — only config/env changes |
 | NFR-EXT-02 | Replacing ChromaDB with Azure AI Search SHALL only require implementing `IndexLayer` ABC and updating the factory in `index/__init__.py` |
 | NFR-EXT-03 | Adding a new capture source SHALL only require a new route posting to the ingest pipeline — no pipeline changes |
 | NFR-EXT-04 | Adding a new MCP tool SHALL only require adding a `@mcp.tool()` decorated function |
@@ -1247,13 +1267,13 @@ class Note(BaseModel):
 | `domain` | `str` | Business domain (`hr`, `engineering`, `personal`, ...) |
 | `people` | `list[str]` | Names mentioned |
 | `tags` | `list[str]` | Topic tags |
-| `source` | `str` | Originating capture channel (`web`, `voice`, `teams`, `mcp`, `import`) |
+| `source` | `str` | Originating capture channel (`web`, `voice`, `mcp`, `import`) |
 | `action_items` | `list[str]` | Follow-up tasks |
 | `created` | `datetime` | ISO 8601 creation timestamp (set by ingest pipeline) |
 | `updated` | `datetime` | ISO 8601 last-modified timestamp (updated on every save) |
 | `links` | `list[LinkRef]` | Structured link metadata entries. Each entry: `{ target: str, relation?: str, ...extras }`. `target` resolves via `resolve_wikilink`. Plain string entries (`"Note Name"`) are also accepted and normalised. In addition to structured links, inline `[[wikilinks]]` in the body are parsed separately. |
 | `confidence` | `float` | Agent-assessed quality score 0.0–1.0 (set by ingest, 1.0 for user-created notes) |
-| `confidence_rationale` | `str \| null` | Human-audit explanation of the confidence score breakdown written at ingest time (e.g. `"Low metadata_coverage: missing required fields [status, date]"`) and shown in the Review Queue panel. Null for user-created notes and weekly summaries. |
+| `confidence_rationale` | `str \| null` | Human-audit explanation of the confidence score breakdown written at ingest time (e.g. `"Low metadata_coverage: missing required fields [status, date]"`) and shown in the capture workbench. Null for user-created notes and weekly summaries. |
 | `review_status` | `str` | `"pending"` (awaiting review) or `"approved"` |
 | `approved_by` | `str \| null` | `"system:auto"`, `"system:weekly-summary"`, or the user identity responsible for approval |
 | `approved_at` | `datetime \| null` | Approval timestamp; null while pending |
@@ -1484,7 +1504,7 @@ monocle/
     │   └── plugins/
     │       ├── text_plugin.py         # TextPlugin — passthrough for plain text
     │       ├── audio_plugin.py        # AudioPlugin — delegates to AIProvider.transcribe()
-    │       └── teams_plugin.py        # TeamsPlugin — extracts text from Bot Framework Activity
+    │       └── ...                    # Additional deferred plugins may be added later behind the registry seam
     ├── agents/
     │   ├── __init__.py
     │   ├── tools.py                   # Shared agent tool library (@tool decorated)
@@ -1502,9 +1522,8 @@ monocle/
     │   ├── transcribe.py              # POST /api/transcribe
     │   ├── chat.py                    # POST /api/chat (SSE streaming)
     │   ├── agents.py                  # POST /api/agents/*
-    │   ├── review.py                  # GET/PATCH /api/review/*
-    │   ├── settings.py                # GET/PATCH /api/settings, POST /api/settings/rotate-mcp-key
-    │   └── teams.py                   # POST /api/teams/messages
+    │   ├── review.py                  # GET/PATCH /api/review/* (compatibility surface during workbench migration)
+    │   └── settings.py                # GET/PATCH /api/settings, POST /api/settings/rotate-mcp-key
     └── tests/
         ├── conftest.py                # tmp_vault fixture + memory_index fixture
         ├── test_vault.py
@@ -1515,7 +1534,6 @@ monocle/
         ├── test_graph.py
         ├── test_mcp.py
         ├── test_agents.py
-        ├── test_teams.py
         ├── test_settings.py
         ├── test_review.py
         ├── test_cli.py
@@ -1603,14 +1621,17 @@ AZURE_OPENAI_API_VERSION=2024-05-01-preview
 AZURE_OPENAI_EMBED_DEPLOYMENT=text-embedding-3-small
 AZURE_OPENAI_CHAT_DEPLOYMENT=gpt-4o-mini
 
+# Required only if any ai.models entry uses provider = openai
+OPENAI_API_KEY=
+
 # Required for Azure AI Search (Phase 2)
 AZURE_SEARCH_ENDPOINT=
 AZURE_SEARCH_API_KEY=
 AZURE_SEARCH_INDEX_NAME=monocle
 
-# Required for Microsoft Teams bot (optional Phase 1)
-TEAMS_APP_ID=
-TEAMS_APP_PASSWORD=
+# Reserved for deferred future channel integrations
+# TEAMS_APP_ID=
+# TEAMS_APP_PASSWORD=
 ```
 
 ---

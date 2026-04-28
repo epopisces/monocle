@@ -550,6 +550,34 @@ class TestModelEntryPatchSchema:
         )
         assert r.status_code == 200
 
+    def test_model_entry_patch_accepts_openai_provider(self, api_client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ModelEntryPatch must allow openai-backed model entries."""
+        monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+        r = api_client.patch(
+            "/api/settings",
+            json={
+                "ai": {
+                    "chat_model_key": "gpt-4o-openai",
+                    "embed_model_key": "text-embedding-3-large-openai",
+                    "models": [
+                        {
+                            "key": "gpt-4o-openai",
+                            "name": "gpt-4o",
+                            "role": "chat",
+                            "provider": "openai",
+                        },
+                        {
+                            "key": "text-embedding-3-large-openai",
+                            "name": "text-embedding-3-large",
+                            "role": "embed",
+                            "provider": "openai",
+                        },
+                    ],
+                }
+            },
+        )
+        assert r.status_code == 200
+
 
 class TestAIPatchNullFieldClearing:
     """Tests for setting optional AI fields to null (e.g., stt_key clearing)."""
