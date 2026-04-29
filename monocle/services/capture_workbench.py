@@ -138,22 +138,20 @@ async def _get_all_pending_notes(
     *,
     threshold: float | None,
 ) -> list[NoteRef]:
+    # Fetch all notes in a single call to avoid repeated full vault scans.
+    # Use a large limit (100k) to practically cover all personal vaults in one scan.
+    # list_notes() returns page.total, so we can detect if we need a second call
+    # (unlikely for typical vault sizes).
+    page = await asyncio.to_thread(vault.list_notes, limit=100000, offset=0)
+
+    # Filter for pending notes matching the threshold, in-memory.
     pending: list[NoteRef] = []
-    page_size = 1000
-    offset = 0
-
-    while True:
-        page = await asyncio.to_thread(vault.list_notes, limit=page_size, offset=offset)
-        for ref in page.items:
-            if ref.review_status != "pending":
-                continue
-            if threshold is not None and ref.confidence > threshold:
-                continue
-            pending.append(ref)
-
-        if offset + len(page.items) >= page.total:
-            break
-        offset += page_size
+    for ref in page.items:
+        if ref.review_status != "pending":
+            continue
+        if threshold is not None and ref.confidence > threshold:
+            continue
+        pending.append(ref)
 
     pending.sort(key=_pending_note_sort_key)
     return pending

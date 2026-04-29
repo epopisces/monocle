@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 if False:  # pragma: no cover
+    from monocle.models import Note
     from monocle.vault import VaultLayer
 
 logger = logging.getLogger(__name__)
@@ -102,8 +103,8 @@ class OmniSearchCatalog:
             if len(filename_hits) + len(frontmatter_hits) + len(body_hits) >= limit:
                 # Keep scanning only until the current bucket boundary is satisfied.
                 # This preserves strict bucket priority while avoiding a full walk once enough hits exist.
-                if not body_hits:
-                    continue
+                if body_hits:
+                    break
 
         return (filename_hits + frontmatter_hits + body_hits)[:limit]
 
@@ -132,18 +133,60 @@ class OmniSearchCatalog:
                     self._entries[file_path] = entry
 
     def _build_full_catalog(self) -> list[OmniCatalogEntry]:
-        refs_page = self._vault.list_notes(limit=_FULL_SCAN_LIMIT)
-        if refs_page.total > len(refs_page.items):
-            refs_page = self._vault.list_notes(limit=refs_page.total)
-
+        # Inline the rglob/parse logic to avoid double vault reads.
+        # list_notes() already parses each note; we reuse those parsed results
+        # instead of calling read_note() again for each entry.
+        from monocle.vault import _parse_note_file
+        
         entries: list[OmniCatalogEntry] = []
-        for ref in refs_page.items:
-            entry = self._load_entry(ref.file_path)
-            if entry is not None:
+        scan_root = self._vault.root
+        
+        for md_file in sorted(scan_root.rglob("*.md")):
+            # Skip hidden/system directories (.versions, .trash, .obsidian…)
+            rel_parts = md_file.relative_to(scan_root).parts
+            if any(p.startswith(".") for p in rel_parts):
+                continue
+            
+            relative = self._vault._to_relative(md_file)
+            try:
+                note = _parse_note_file(md_file, relative)
+                entry = self._build_entry_from_note(note)
                 entries.append(entry)
-
+            except Exception as exc:
+                logger.warning("[OMNI] Skipping unreadable note %s: %s", relative, exc)
+                continue
+        
         logger.debug("[OMNI] Built cached catalog with %d entries", len(entries))
         return entries
+    
+    def _build_entry_from_note(self, note: Note) -> OmniCatalogEntry:
+        """Build a catalog entry from a parsed Note object (extracted from _load_entry logic)."""
+        filename_excerpt = os.path.basename(note.file_path)
+        if filename_excerpt.endswith(".md"):
+            filename_excerpt = filename_excerpt[:-3]
+        
+        title = note.title or filename_excerpt
+        frontmatter_parts = [
+            title,
+            note.metadata.type,
+            note.metadata.domain,
+            note.metadata.org or "",
+            *note.metadata.people,
+            *note.metadata.tags,
+        ]
+        frontmatter_text = _compact_whitespace(" | ".join(part for part in frontmatter_parts if part))[:_EXCERPT_WIDTH]
+        body_text = note.body or ""
+        
+        return OmniCatalogEntry(
+            file_path=note.file_path,
+            title=title,
+            filename_excerpt=filename_excerpt,
+            filename_search=filename_excerpt.casefold(),
+            frontmatter_excerpt=frontmatter_text,
+            frontmatter_search=" ".join(part for part in frontmatter_parts if part).casefold(),
+            body_text=body_text,
+            body_search=body_text.casefold(),
+        )
 
     def _load_entry(self, file_path: str) -> OmniCatalogEntry | None:
         try:

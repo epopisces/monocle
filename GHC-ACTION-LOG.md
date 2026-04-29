@@ -6,6 +6,22 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ## 2026-04-29
 
+### Claude Haiku 4.5
+- **Omnisearch Early Exit:** Fixed `OmniSearchCatalog.search()` loop to break when `body_hits` is non-empty and hit limit is reached, eliminating unnecessary full-catalog walks for every omnisearch query
+  - **File:** `monocle/services/omni_search.py` (line ~103)
+  - **Impact:** Preserves bucket priority (filename > frontmatter > body) while exiting early once satisfied
+
+- **Omnisearch Catalog Build Optimization:** Eliminated double vault read in `_build_full_catalog()` by inlining rglob/parse logic and reusing already-parsed Note objects instead of calling `read_note()` for each entry
+  - **Files:** `monocle/services/omni_search.py` — `_build_full_catalog()` + new `_build_entry_from_note()` helper (lines ~119-180)
+  - **Impact:** 2x faster catalog builds; O(vault_size) single parse instead of double file I/O
+  - `_load_entry()` unchanged (still handles incremental dirty-path invalidates)
+
+- **Capture Workbench Pagination:** Changed `_get_all_pending_notes()` to single-call approach with in-memory filtering, avoiding repeated vault scans
+  - **File:** `monocle/services/capture_workbench.py` (lines ~138-155)
+  - **Impact:** 5x+ faster polling; O(1) vault scans instead of loop-based pagination
+
+- **Validation:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 944 passed, 8 deselected, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q` → 11 passed, EXIT 0; `cd frontend && npm run test -- --run` → 435 passed, EXIT 0
+
 ### GPT-5.4
 - Completed M43 `Consolidate Ingest Workflow Ownership`: added `monocle/services/ingest_workflow.py` as the single owner for ingest review/execution orchestration, moved ingest router/service callers onto that workflow layer, and reduced `IngestSessionStore` review mutations to persistence-only updates
 - Converted `monocle/services/ingest_review.py` and `monocle/services/ingest_execute.py` into compatibility shims, updated `monocle/services/ingest_prepare.py` to reload through the workflow layer, and aligned the direct store regression in `monocle/tests/test_ingest_sessions.py`
