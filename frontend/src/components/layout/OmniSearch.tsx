@@ -17,25 +17,32 @@ type GroupedResults = {
   body: OmniResult[]
 }
 
+function isEditableElement(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  return target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName)
+}
+
 export default function OmniSearch() {
   const navigate = useNavigate()
   const inputRef = useRef<HTMLInputElement>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const requestIdRef = useRef(0)
 
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<OmniResult[]>([])
   const [isOpen, setIsOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [selectedIndex, setSelectedIndex] = useState(-1)
+  const normalizedQuery = query.trim()
 
   // Global Ctrl+E → focus input
   useEffect(() => {
     function handleGlobalKey(e: KeyboardEvent) {
-      if (e.ctrlKey && e.key === 'e') {
-        e.preventDefault()
-        inputRef.current?.focus()
-        inputRef.current?.select()
-      }
+      if (!(e.ctrlKey && e.key.toLowerCase() === 'e')) return
+      if (isEditableElement(e.target) && e.target !== inputRef.current) return
+      e.preventDefault()
+      inputRef.current?.focus()
+      inputRef.current?.select()
     }
     window.addEventListener('keydown', handleGlobalKey)
     return () => window.removeEventListener('keydown', handleGlobalKey)
@@ -54,28 +61,37 @@ export default function OmniSearch() {
 
   // Debounced search
   useEffect(() => {
-    if (query.length < MIN_CHARS) {
+    if (normalizedQuery.length < MIN_CHARS) {
+      requestIdRef.current += 1
       setResults([])
       setIsOpen(false)
+      setIsLoading(false)
+      setSelectedIndex(-1)
       return
     }
 
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
     const timer = setTimeout(async () => {
       setIsLoading(true)
       try {
-        const data = await omniSearch({ q: query, limit: 20 })
+        const data = await omniSearch({ q: normalizedQuery, limit: 20 })
+        if (requestIdRef.current !== requestId) return
         setResults(data)
         setIsOpen(true)
         setSelectedIndex(-1)
       } catch {
+        if (requestIdRef.current !== requestId) return
         setResults([])
+        setIsOpen(true)
       } finally {
+        if (requestIdRef.current !== requestId) return
         setIsLoading(false)
       }
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [query])
+  }, [normalizedQuery])
 
   const grouped: GroupedResults = {
     filename: results.filter(r => r.match_location === 'filename'),
@@ -100,8 +116,8 @@ export default function OmniSearch() {
   const navigateToSemantic = useCallback(() => {
     setIsOpen(false)
     setQuery('')
-    navigate(`/search?q=${encodeURIComponent(query)}&mode=semantic`)
-  }, [navigate, query])
+    navigate(`/search?q=${encodeURIComponent(normalizedQuery)}&mode=semantic`)
+  }, [navigate, normalizedQuery])
 
   // Generate option ID for aria-activedescendant based on selectedIndex
   const getActiveDescendant = useCallback((): string | undefined => {
@@ -143,6 +159,7 @@ export default function OmniSearch() {
       }
       case 'Escape':
         setIsOpen(false)
+        inputRef.current?.blur()
         break
     }
   }
@@ -153,10 +170,10 @@ export default function OmniSearch() {
     return (
       <div key={location} className="omni-search__group">
         <div className="omni-search__group-label">{LOCATION_LABELS[location]}</div>
-        {items.map(item => {
+        {items.map((item, itemIdx) => {
           const idx = flatIdx++
           const isSelected = selectedIndex === idx
-          const optionId = `omni-option-${location}-${idx}`
+          const optionId = `omni-option-${location}-${itemIdx}`
           return (
             <div
               key={item.file_path}
@@ -195,7 +212,7 @@ export default function OmniSearch() {
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={handleKeyDown}
-          onFocus={() => { if (query.length >= MIN_CHARS && results.length > 0) setIsOpen(true) }}
+          onFocus={() => { if (normalizedQuery.length >= MIN_CHARS && results.length > 0) setIsOpen(true) }}
           autoComplete="off"
           spellCheck="false"
           aria-label="Omnisearch"
@@ -217,7 +234,7 @@ export default function OmniSearch() {
           {renderGroup(grouped.frontmatter, 'frontmatter')}
           {renderGroup(grouped.body, 'body')}
 
-          {query.length >= MIN_CHARS && (
+          {normalizedQuery.length >= MIN_CHARS && (
             <div
               id="omni-option-semantic"
               className={`omni-search__item omni-search__item--semantic${selectedIndex === semanticIdx ? ' omni-search__item--selected' : ''}`}
@@ -228,7 +245,7 @@ export default function OmniSearch() {
               onMouseEnter={() => setSelectedIndex(semanticIdx)}
               tabIndex={-1}
             >
-              🤖 Search semantically for <strong>{query}</strong>
+              🤖 Search semantically for <strong>{normalizedQuery}</strong>
             </div>
           )}
         </div>

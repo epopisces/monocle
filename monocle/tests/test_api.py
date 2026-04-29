@@ -11,7 +11,7 @@ continue to return 501 and are tested in the stub section at the bottom.
 from __future__ import annotations
 
 import json
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -468,6 +468,10 @@ class TestOmniSearch:
         r = api_client.get("/api/search/omni?q=ab")
         assert r.status_code == 422
 
+    def test_omni_search_trims_query_before_min_length_check(self, api_client: TestClient):
+        r = api_client.get("/api/search/omni", params={"q": " ab "})
+        assert r.status_code == 422
+
     def test_omni_search_requires_q(self, api_client: TestClient):
         r = api_client.get("/api/search/omni")
         assert r.status_code == 422
@@ -502,6 +506,25 @@ class TestOmniSearch:
             if "omni_fm_note" in item["file_path"] and item["match_location"] in ("filename", "frontmatter")
         ]
         assert fm_matches
+
+    def test_omni_search_people_frontmatter_match(self, api_client: TestClient):
+        api_client.put(
+            "/api/notes/work/team-sync.md",
+            json={
+                "title": "Weekly team sync",
+                "body": "Discussed open review items.",
+                "metadata": {"people": ["Sarah Chen", "Taylor Reed"]},
+            },
+        )
+        r = api_client.get("/api/search/omni?q=sarah")
+        assert r.status_code == 200
+        results = r.json()
+        matches = [
+            item for item in results
+            if item["file_path"] == "work/team-sync.md"
+        ]
+        assert matches
+        assert matches[0]["match_location"] == "frontmatter"
 
     def test_omni_search_body_match(self, api_client: TestClient):
         api_client.put(
@@ -538,6 +561,54 @@ class TestOmniSearch:
             assert "excerpt" in item
             assert "match_location" in item
             assert item["match_location"] in ("filename", "frontmatter", "body")
+
+    def test_omni_search_reuses_cached_catalog_until_invalidated(self, api_client: TestClient):
+        api_client.put(
+            "/api/notes/work/cache-target.md",
+            json={"title": "cache target", "body": "cache needle", "metadata": {}},
+        )
+        catalog = api_client.app.state.omni_search_catalog
+
+        with patch.object(catalog, "_build_full_catalog", wraps=catalog._build_full_catalog) as build_catalog:
+            first = api_client.get("/api/search/omni?q=cache")
+            second = api_client.get("/api/search/omni?q=cache")
+
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert build_catalog.call_count == 1
+
+    def test_omni_search_refreshes_invalidated_entry(self, api_client: TestClient):
+        api_client.put(
+            "/api/notes/work/cache-refresh.md",
+            json={
+                "title": "Weekly sync",
+                "body": "Original body text.",
+                "metadata": {"people": ["Sarah Chen"]},
+            },
+        )
+        catalog = api_client.app.state.omni_search_catalog
+
+        warm = api_client.get("/api/search/omni?q=sarah")
+        assert warm.status_code == 200
+        assert any(item["file_path"] == "work/cache-refresh.md" for item in warm.json())
+
+        api_client.put(
+            "/api/notes/work/cache-refresh.md",
+            json={
+                "title": "Weekly sync",
+                "body": "Original body text.",
+                "metadata": {"people": ["Jordan Ellis"]},
+            },
+        )
+        catalog.invalidate("work/cache-refresh.md")
+
+        stale = api_client.get("/api/search/omni?q=sarah")
+        refreshed = api_client.get("/api/search/omni?q=jordan")
+
+        assert stale.status_code == 200
+        assert refreshed.status_code == 200
+        assert all(item["file_path"] != "work/cache-refresh.md" for item in stale.json())
+        assert any(item["file_path"] == "work/cache-refresh.md" for item in refreshed.json())
 
 
 # ===========================================================================
@@ -622,46 +693,6 @@ class TestIngest:
         sessions = listed.json()
         assert any(item["session_id"] == session_id for item in sessions)
 
-    def test_ingest_notifications_api_lists_count_and_marks_read(self, api_client: TestClient):
-        created = api_client.post(
-            "/api/ingest",
-            json={"content": "Prepare this for dormant review.", "source": "web"},
-        )
-        assert created.status_code == 202
-        session_id = created.json()["session_id"]
-        store = api_client.app.state.ingest_session_store
-        job = store.claim_prepare_jobs(limit=1)[0]
-        store.complete_prepare_job(
-            job.job_id,
-            session_id,
-            title="Dormant prep",
-            digest="Prepared digest",
-            open_questions=[{"id": "oq_1", "question": "Need more detail?"}],
-            related_notes=[],
-            contradictions=[],
-            proposed_actions=[],
-            artifact_payload={"digest": "Prepared digest"},
-        )
-
-        count = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
-        assert count.status_code == 200
-        assert count.json()["count"] == 1
-
-        listed = api_client.get("/api/ingest/notifications?kind=ingest_ready")
-        assert listed.status_code == 200
-        items = listed.json()
-        assert len(items) == 1
-        assert items[0]["session_id"] == session_id
-        assert items[0]["session_state"] == "dormant_ready"
-        assert items[0]["open_questions_count"] == 1
-
-        mark = api_client.post(f"/api/ingest/notifications/{items[0]['notification_id']}/read")
-        assert mark.status_code == 204
-
-        count_after = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
-        assert count_after.status_code == 200
-        assert count_after.json()["count"] == 0
-
     def test_fast_capture_executes_clean_session_without_review_handoff(self, api_client: TestClient):
         created = api_client.post(
             "/api/ingest",
@@ -689,10 +720,6 @@ class TestIngest:
         assert note.status_code == 200
         note_body = note.json()
         assert note_body["metadata"]["sources"][0]["session_id"] == body["session_id"]
-
-        unread_ready = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
-        assert unread_ready.status_code == 200
-        assert unread_ready.json()["count"] == 0
 
     def test_fast_capture_falls_back_to_review_when_open_questions_exist(self, api_client: TestClient):
         async def _chat_with_fast_capture_blockers(messages, **kwargs):
@@ -760,16 +787,6 @@ class TestIngest:
         assert session["fast_capture"] is True
         assert session["state"] == "failed"
         assert session["proposed_actions"] == []
-
-        failed_notifications = api_client.get(
-            "/api/ingest/notifications/count?status=unread&kind=ingest_prepare_failed"
-        )
-        assert failed_notifications.status_code == 200
-        assert failed_notifications.json()["count"] == 1
-
-        unread_ready = api_client.get("/api/ingest/notifications/count?status=unread&kind=ingest_ready")
-        assert unread_ready.status_code == 200
-        assert unread_ready.json()["count"] == 0
 
     def test_fast_capture_returns_to_proposal_ready_when_execution_fails(
         self,
@@ -883,6 +900,26 @@ class TestIngest:
         approved_body = approved.json()
         assert approved_body["session"]["state"] == "approved_pending_execution"
         assert approved_body["session"]["proposed_actions"][0]["approval_state"] == "approved"
+
+    def test_ingest_review_answering_last_question_without_actions_enters_proposal_ready(self, api_client: TestClient):
+        session_id = _prepare_review_session(
+            api_client,
+            contradictions=[],
+            proposed_actions=[],
+        )
+
+        started = api_client.post(f"/api/ingest/sessions/{session_id}/start-review")
+        assert started.status_code == 200
+        assert started.json()["session"]["state"] == "in_review"
+
+        answered = api_client.patch(
+            f"/api/ingest/sessions/{session_id}/questions/oq_1",
+            json={"answer": "There are no follow-up note actions for this capture."},
+        )
+        assert answered.status_code == 200
+        answered_body = answered.json()
+        assert answered_body["session"]["state"] == "proposal_ready"
+        assert answered_body["session"]["proposed_actions"] == []
 
     def test_ingest_review_approve_all_does_not_promote_rejected_only_session(self, api_client: TestClient):
         session_id = _prepare_review_session(api_client, open_questions=[])
@@ -1160,11 +1197,6 @@ class TestIngest:
 # ===========================================================================
 
 class TestIngestFailures:
-    def test_list_failures_initially_empty(self, api_client: TestClient):
-        r = api_client.get("/api/ingest/failures")
-        assert r.status_code == 200
-        assert isinstance(r.json(), list)
-
     def test_delete_failure_404_for_missing(self, api_client: TestClient):
         r = api_client.delete("/api/ingest/failures/nonexistent-id-xyz")
         assert r.status_code == 404
@@ -1172,21 +1204,6 @@ class TestIngestFailures:
     def test_retry_failure_404_for_missing(self, api_client: TestClient):
         r = api_client.post("/api/ingest/failures/retry", json={"id": "nonexistent-id-xyz"})
         assert r.status_code == 404
-
-    def test_failures_newest_first(self, api_client: TestClient):
-        """After creating a failure entry manually, it should appear in the list."""
-        registry = api_client.app.state.failed_registry
-        registry.add(
-            source="web",
-            content_preview="Test content",
-            error_message="Test error",
-            sidecar_path=None,
-            step=3,
-        )
-        r = api_client.get("/api/ingest/failures")
-        assert r.status_code == 200
-        failures = r.json()
-        assert len(failures) >= 1
 
     def test_delete_removes_record(self, api_client: TestClient):
         registry = api_client.app.state.failed_registry
@@ -1199,7 +1216,7 @@ class TestIngestFailures:
         )
         r = api_client.delete(f"/api/ingest/failures/{record_id}")
         assert r.status_code == 204
-        # Should be gone
+        assert registry.get(record_id) is None
         r2 = api_client.delete(f"/api/ingest/failures/{record_id}")
         assert r2.status_code == 404
 
@@ -1222,10 +1239,161 @@ class TestIngestFailures:
         # content_truncated field must be present (False for short preview)
         assert "content_truncated" in body
         assert body["content_truncated"] is False  # 40-char preview < 200
+        assert registry.get(record_id)["status"] == "retried"
 
-        # Record should now be marked retried — verify it still appears (mark_retried ≠ delete)
-        r2 = api_client.get("/api/ingest/failures")
-        assert r2.status_code == 200
+
+# ===========================================================================
+# Capture Workbench
+# ===========================================================================
+
+class TestCaptureWorkbench:
+    def test_capture_workbench_aggregates_prepared_pending_and_failures(self, api_client: TestClient):
+        prepared_session_id = _prepare_review_session(api_client, open_questions=[])
+
+        pending = api_client.put(
+            "/api/notes/work/pending-workbench.md",
+            json={
+                "title": "Pending workbench note",
+                "body": "Needs explicit approval.",
+                "metadata": {
+                    "type": "observation",
+                    "domain": "work",
+                    "review_status": "pending",
+                    "confidence": 0.42,
+                },
+            },
+        )
+        assert pending.status_code in (200, 201)
+
+        failed_created = api_client.post(
+            "/api/ingest",
+            json={"content": "This prepared session should fail.", "source": "web"},
+        )
+        assert failed_created.status_code == 202
+        failed_session_id = failed_created.json()["session_id"]
+
+        store = api_client.app.state.ingest_session_store
+        failed_job = store.claim_prepare_job_for_session(failed_session_id)
+        assert failed_job is not None
+        store.fail_prepare_job(failed_job.job_id, failed_session_id, "prep exploded")
+
+        registry = api_client.app.state.failed_registry
+        registry.add(
+            source="web",
+            content_preview="URL capture timed out.",
+            error_message="summary timed out",
+            sidecar_path=None,
+            step=4,
+        )
+
+        response = api_client.get("/api/capture-workbench?limit_per_section=10")
+        assert response.status_code == 200
+        body = response.json()
+
+        assert body["actionable_count"] == 4
+        assert body["counts"] == {
+            "prepared": 1,
+            "pending_review": 1,
+            "failures": 2,
+        }
+
+        sections = {section["section"]: section for section in body["sections"]}
+        assert sections["prepared"]["count"] == 1
+        assert sections["prepared"]["items"][0]["session_id"] == prepared_session_id
+
+        assert sections["pending_review"]["count"] == 1
+        assert sections["pending_review"]["items"][0]["file_path"] == "work/pending-workbench.md"
+
+        assert sections["failures"]["count"] == 2
+        failure_types = {item["item_type"] for item in sections["failures"]["items"]}
+        assert failure_types == {"failed_session", "failed_ingest"}
+        assert any(item.get("session_id") == failed_session_id for item in sections["failures"]["items"])
+
+    def test_capture_workbench_failure_section_merges_by_newest_item_before_limit(self, api_client: TestClient):
+        registry = api_client.app.state.failed_registry
+        record_id = registry.add(
+            source="web",
+            content_preview="Older failed URL capture.",
+            error_message="summary timed out",
+            sidecar_path=None,
+            step=4,
+        )
+        registry_record = registry.get(record_id)
+        assert registry_record is not None
+        registry_record["timestamp"] = "2026-04-29T10:00:00+00:00"
+        registry._save()
+
+        failed_created = api_client.post(
+            "/api/ingest",
+            json={"content": "This prepared session should fail later.", "source": "web"},
+        )
+        assert failed_created.status_code == 202
+        failed_session_id = failed_created.json()["session_id"]
+
+        store = api_client.app.state.ingest_session_store
+        failed_job = store.claim_prepare_job_for_session(failed_session_id)
+        assert failed_job is not None
+        store.fail_prepare_job(failed_job.job_id, failed_session_id, "prep exploded")
+
+        with store._connect() as conn:
+            conn.execute(
+                "UPDATE ingest_sessions SET updated_at = ? WHERE session_id = ?",
+                ("2026-04-29T10:00:01Z", failed_session_id),
+            )
+
+        response = api_client.get("/api/capture-workbench?limit_per_section=1")
+        assert response.status_code == 200
+        body = response.json()
+
+        failures = next(section for section in body["sections"] if section["section"] == "failures")
+        assert failures["count"] == 2
+        assert len(failures["items"]) == 1
+        assert failures["items"][0]["item_type"] == "failed_session"
+        assert failures["items"][0]["session_id"] == failed_session_id
+
+    def test_capture_workbench_applies_queue_threshold_to_pending_review_items(
+        self,
+        api_client: TestClient,
+    ):
+        settings = api_client.app.state.settings
+        settings.review.queue_threshold = 0.5
+
+        low = api_client.put(
+            "/api/notes/work/pending-low.md",
+            json={
+                "title": "Low confidence pending note",
+                "body": "Should stay visible in the workbench.",
+                "metadata": {
+                    "type": "observation",
+                    "domain": "work",
+                    "review_status": "pending",
+                    "confidence": 0.4,
+                },
+            },
+        )
+        high = api_client.put(
+            "/api/notes/work/pending-high.md",
+            json={
+                "title": "High confidence pending note",
+                "body": "Should remain in legacy review but not the workbench count.",
+                "metadata": {
+                    "type": "observation",
+                    "domain": "work",
+                    "review_status": "pending",
+                    "confidence": 0.9,
+                },
+            },
+        )
+        assert low.status_code in (200, 201)
+        assert high.status_code in (200, 201)
+
+        workbench = api_client.get("/api/capture-workbench")
+        assert workbench.status_code == 200
+        workbench_body = workbench.json()
+        assert workbench_body["queue_threshold"] == 0.5
+        assert workbench_body["counts"]["pending_review"] == 1
+        pending_items = next(section for section in workbench_body["sections"] if section["section"] == "pending_review")["items"]
+        assert [item["file_path"] for item in pending_items] == ["work/pending-low.md"]
 
 
 # ===========================================================================

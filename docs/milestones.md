@@ -2,7 +2,7 @@
 type: milestone-archive
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-24
+last-updated: 2026-04-29
 ---
 
 # Monocle – Completed Milestones & Technical Spike Resolutions
@@ -1180,6 +1180,265 @@ eviewCount > 0); failed ? badge button (only when ailedCount > 0)
 - `monocle/tests/test_process_manager.py`
 
 **Test Results:** `uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q` → 39 passed, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_mcp.py -x --tb=short -q` → 133 passed, EXIT 0.
+
+---
+
+### M43: Consolidate Ingest Workflow Ownership
+
+**Goal:** Centralize ingest prepare/review/execute state ownership behind one workflow layer while keeping `IngestSessionStore` focused on persistence, archival, notifications, and mutation primitives.
+
+**Completed:** 2026-04-29
+
+**Deliverables completed:**
+
+- [x] Added `monocle/services/ingest_workflow.py` as the consolidated workflow owner for session detail hydration, review mutations, review-state synchronization, review execution, and fast-capture orchestration.
+- [x] Repointed `monocle/routers/ingest.py`, `monocle/services/ingest.py`, and `monocle/services/ingest_prepare.py` to the new workflow layer while converting `monocle/services/ingest_review.py` and `monocle/services/ingest_execute.py` into compatibility shims.
+- [x] Reduced scattered ingest state transitions by removing embedded review-state changes from `IngestSessionStore.answer_open_question()`, `update_proposed_action()`, and `approve_all_proposed_actions()`.
+- [x] Updated direct store-level regression coverage to reflect the new ownership boundary between workflow orchestration and persistence primitives.
+
+**Acceptance Criteria met:**
+
+- One workflow owner is now responsible for ingest state transitions and user-visible flow orchestration: review hydration, question answering, action editing/approval, explicit execution, and fast-capture orchestration all flow through `monocle/services/ingest_workflow.py`.
+- Session storage and archive concerns remain isolated from orchestration concerns: `IngestSessionStore` still owns SQLite/file persistence, notifications, and explicit mutation primitives, but no longer derives review-state transitions from review payload writes.
+
+**Implementation notes:**
+
+- The consolidated workflow layer now owns the two distinct review-state rules that previously leaked across modules: question answers advance to `proposal_ready` once blockers are cleared, while action edits and approval mutations keep the session `in_review` until all action decisions are resolved.
+- Compatibility wrappers preserve the existing `ingest_review` and `ingest_execute` import surface so the refactor does not force a wider rename sweep through the codebase.
+- `IngestPreparationWorker` now reloads prepared-session detail through the workflow layer, so background preparation and synchronous fast-capture both observe the same hydrated session shape.
+
+**Files modified:**
+
+- `monocle/services/ingest_workflow.py`
+- `monocle/services/ingest_review.py`
+- `monocle/services/ingest_execute.py`
+- `monocle/services/ingest_sessions.py`
+- `monocle/services/ingest.py`
+- `monocle/services/ingest_prepare.py`
+- `monocle/services/__init__.py`
+- `monocle/routers/ingest.py`
+- `monocle/tests/test_ingest_sessions.py`
+
+**Test Results:** `uv run python -m pytest monocle/tests/test_ingest.py monocle/tests/test_ingest_prepare.py monocle/tests/test_api.py -x --tb=short -q` → 164 passed, EXIT 0.
+
+---
+
+### M44: Unified Capture Workbench Backend Contract
+
+**Goal:** Add one aggregated backend contract for actionable capture work across prepared sessions, pending review notes, and failed captures while keeping existing route surfaces temporarily compatible.
+
+**Completed:** 2026-04-29
+
+**Deliverables completed:**
+
+- [x] Added unified capture-workbench response models plus `GET /api/capture-workbench` through `monocle/services/capture_workbench.py` and `monocle/routers/capture_workbench.py`.
+- [x] Aggregated prepared ingest sessions, queue-threshold-filtered pending review notes, failed prepare sessions, and failed-ingest registry entries into one response with per-section counts/items and one top-level actionable count.
+- [x] Preserved legacy compatibility surfaces by rewiring `monocle/routers/review.py` and `monocle/routers/ingest_failures.py` to shared normalization helpers instead of duplicating pending/failure aggregation logic.
+- [x] Added focused API coverage for the new workbench contract, regenerated `openapi.json` and `frontend/src/api/schema.d.ts`, and revalidated frontend type-check against the new schema.
+
+**Acceptance Criteria met:**
+
+- The frontend can now retrieve one capture workbench summary from `/api/capture-workbench` instead of needing to poll separate review, failure, and prepared-session count surfaces.
+- Prepared sessions, pending review items, and failures now share one backend response shape with section-specific item typing plus one top-level actionable count.
+
+**Implementation notes:**
+
+- The new workbench pending-review section honors `settings.review.queue_threshold`, so only lower-confidence pending notes contribute to the unified workbench count; the legacy `/api/review` compatibility endpoints remain unfiltered.
+- Failure records are normalized into a shared item model across both persisted failed ingest sessions and `FailedIngestRegistry` entries, with the visible failure list capped after the combined merge so the section limit applies consistently.
+- `IngestSessionStore.count_sessions()` now supplies cheap prepared/failed counts to the workbench service without forcing callers to materialize full session lists.
+
+**Files modified:**
+
+- `monocle/models.py`
+- `monocle/services/capture_workbench.py`
+- `monocle/services/ingest_sessions.py`
+- `monocle/routers/capture_workbench.py`
+- `monocle/routers/review.py`
+- `monocle/routers/ingest_failures.py`
+- `monocle/main.py`
+- `monocle/tests/test_api.py`
+- `openapi.json`
+- `frontend/src/api/schema.d.ts`
+
+**Test Results:** `uv run python -m pytest monocle/tests/test_api.py -k "capture_workbench" -x --tb=short -q` → 2 passed, 83 deselected, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_review.py monocle/tests/test_ingest.py -x --tb=short -q` → 201 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+
+---
+
+### M45: Unified Capture Workbench Frontend
+
+**Goal:** Replace the fragmented prepared-session, pending-review, and failed-capture app-shell surfaces with one coherent workbench while preserving the deeper review and edit routes.
+
+**Completed:** 2026-04-29
+
+**Deliverables completed:**
+
+- [x] Added `frontend/src/api/captureWorkbench.ts` plus `frontend/src/components/CaptureWorkbench/CaptureWorkbench.tsx` and `.css` to render one workbench drawer with section tabs for prepared sessions, pending review notes, and failures.
+- [x] Replaced the app-shell polling path in `frontend/src/App.tsx` with one `/api/capture-workbench` summary query and changed `Topbar`/`AppShell` to expose one workbench badge instead of separate prepared, review, and failure badges.
+- [x] Retired `ReviewQueue` and `FailedCaptures` as primary app-shell entry points while preserving deep workflow handoffs: prepared and failed sessions open `/ingest-review?session=...`, pending-note fixes open `/docs?path=...`.
+- [x] Added frontend regression coverage for the new drawer and updated existing topbar/app-shell tests to the unified workbench contract.
+
+**Acceptance Criteria met:**
+
+- Users can inspect prepared sessions, approve or reject pending notes, jump into note editing for fixes, and retry or dismiss failed captures from one coherent surface.
+- The topbar now exposes one actionable workbench affordance instead of separate review and failure affordances.
+
+**Implementation notes:**
+
+- `App.tsx` now treats `/api/capture-workbench` as the only capture-work polling surface; the single badge is hidden when `actionable_count` is 0, matching the UI design guidance.
+- The workbench remains a drawer rather than a new primary route, which keeps the app-shell interaction lightweight while preserving the dedicated `/ingest-review` route for detailed prepared-session work.
+- The legacy `IngestInbox`, `ReviewQueue`, and `FailedCaptures` surfaces were initially left behind as migration scaffolding and were removed entirely in M48 once the unified workbench path was validated.
+
+**Files modified:**
+
+- `frontend/src/App.tsx`
+- `frontend/src/App.test.tsx`
+- `frontend/src/CaptureWorkbench.test.tsx`
+- `frontend/src/api/captureWorkbench.ts`
+- `frontend/src/components/CaptureWorkbench/CaptureWorkbench.tsx`
+- `frontend/src/components/CaptureWorkbench/CaptureWorkbench.css`
+- `frontend/src/components/layout/AppShell.tsx`
+- `frontend/src/components/layout/Topbar.tsx`
+- `frontend/src/VoiceCapture.test.tsx`
+
+**Test Results:** `cd frontend && npm run test -- --run` → 473 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+
+---
+
+### M46: Lean Chat & Explicit URL Capture
+
+**Goal:** Remove automatic URL prefetch from chat and replace it with explicit capture actions that hand off to the ingest workbench while preserving deliberate `create_reference_from_url` tool use.
+
+**Completed:** 2026-04-29
+
+**Deliverables completed:**
+
+- [x] Removed the `ChatRequest.fetch_urls` router orchestration in `monocle/routers/chat.py`, so `/api/chat` no longer performs router-level URL fetch, summary, note creation, or context injection before the agent runs.
+- [x] Reworked the frontend chat composer in `frontend/src/components/Chat/ChatInput.tsx` and `frontend/src/components/Chat/ChatScreen.tsx` so detected links surface only as an explicit `Capture URLs` affordance that sends each URL through `POST /api/ingest` with `origin="chat"` and `template_hint="reference"`.
+- [x] Preserved `create_reference_from_url` as an explicit tool path by keeping the agent/MCP tool contracts untouched while updating the chat UI to present explicit tool activity generically instead of as hidden prefetch work.
+- [x] Regenerated `openapi.json` and `frontend/src/api/schema.d.ts`, updated the chat hook/request types, and added regression coverage for the new explicit-only behavior.
+
+**Acceptance Criteria met:**
+
+- `/api/chat` no longer performs hidden URL-capture side effects during a normal chat turn; even legacy `fetch_urls` payloads are ignored without triggering router-level capture work.
+- URL capture remains available only through an explicit user action in the composer, where detected URLs are handed off into the normal ingest workflow instead of being attached to a chat send automatically.
+
+**Implementation notes:**
+
+- The explicit UI path follows the simplified product direction from `docs/prd.md`: chat stays lean, while URL capture enters the same reviewable ingest pipeline as other UI/API capture flows.
+- The chat hook now marks still-running tool calls as `success` on `done`, which keeps the tool disclosure semantics accurate for explicit `create_reference_from_url` usage after the router prefetch path was removed.
+- The existing `frontend: gen-api` task expects a running server, so the schema refresh for this milestone was completed from the locally exported `openapi.json` instead.
+
+**Files modified:**
+
+- `monocle/routers/chat.py`
+- `monocle/tests/test_agents.py`
+- `openapi.json`
+- `frontend/src/api/chat.ts`
+- `frontend/src/api/schema.d.ts`
+- `frontend/src/components/Chat/ChatInput.tsx`
+- `frontend/src/components/Chat/ChatInput.css`
+- `frontend/src/components/Chat/ChatMessage.tsx`
+- `frontend/src/components/Chat/ChatScreen.tsx`
+- `frontend/src/hooks/useChat.ts`
+- `frontend/src/Chat.test.tsx`
+- `frontend/src/useChat.test.ts`
+
+**Test Results:** `cd frontend && npm run test -- --run src/Chat.test.tsx src/useChat.test.ts --reporter=dot` → 80 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0; `uv run python -m pytest monocle/tests/test_agents.py monocle/tests/test_mcp.py -x --tb=short -q` → 112 passed, EXIT 0.
+
+---
+
+### M47: Omnisearch Hardening
+
+**Goal:** Keep omnisearch distinct from semantic search while tightening the fast-match performance contract so topbar results stay responsive once the first three meaningful characters are typed.
+
+**Completed:** 2026-04-29
+
+**Deliverables completed:**
+
+- [x] Kept `/api/search/omni` fully separate from semantic search by moving it onto a dedicated AI-free cached catalog service instead of sharing embeddings, semantic ranking, or AI providers.
+- [x] Enforced the distinct fast-match behavior in both layers: `/api/search/omni` now trims whitespace before the 3-character minimum is applied, and the topbar omnisearch component only fires once the trimmed query reaches that threshold.
+- [x] Introduced a lighter cached catalog in `monocle/services/omni_search.py`, with per-file invalidation wired to the reindex callback so normal note writes refresh omnisearch without restoring per-request vault scans.
+
+**Acceptance Criteria met:**
+
+- Omnisearch remains a separate fast-match feature rather than drifting into semantic-search duplication: the endpoint still does text-only filename/frontmatter/body matching and only hands users to semantic search through the explicit UI option.
+- The user experience stays responsive once the first three characters are typed: the backend avoids repeated full-vault scans and the frontend now ignores stale results from older slower queries.
+
+**Implementation notes:**
+
+- The chosen implementation was the milestone’s lighter cached-catalog option rather than a prefix index, because it fit the existing architecture with the smallest change while still removing the expensive repeated vault scan path.
+- The cached catalog now indexes `people` as part of frontmatter matching, which brings the implementation back into line with the UI design contract for title/tags/people/type/domain matches.
+- The topbar component also now honors the design details that had drifted: `Ctrl+E` no longer steals focus from other form fields, `Escape` closes and blurs the omnisearch input, and grouped option IDs now line up with `aria-activedescendant` for non-filename buckets.
+
+**Files modified:**
+
+- `monocle/services/omni_search.py`
+- `monocle/main.py`
+- `monocle/routers/search.py`
+- `monocle/tests/conftest.py`
+- `monocle/tests/test_api.py`
+- `frontend/src/components/layout/OmniSearch.tsx`
+- `frontend/src/OmniSearch.test.tsx`
+
+**Test Results:** `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q` → 11 passed, EXIT 0; `cd frontend && npm run test -- --run src/OmniSearch.test.tsx --reporter=dot` → 15 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+
+---
+
+### M48: Cleanup & Contract Hardening
+
+**Goal:** Remove obsolete adapters, dead tests, stale docs, and legacy behaviors after the simplified workbench-first paths were validated.
+
+**Completed:** 2026-04-29
+
+**Deliverables completed:**
+
+- [x] Removed retired app-shell drawers/tests and obsolete adapter code for fragmented capture surfaces, review counts, ingest notifications, failed-ingest listing, and legacy chat URL-prefetch behavior.
+- [x] Refreshed generated API artifacts by exporting `openapi.json` and regenerating `frontend/src/api/schema.d.ts` from the local OpenAPI file after the standard frontend generation script failed without a running server.
+- [x] Updated the live docs so the unified capture workbench, explicit URL capture, distinct omnisearch, and unified runtime are the only documented mainline architecture.
+
+**Acceptance Criteria met:**
+
+- No obsolete user-facing drawers, count adapters, ingest-notification adapters, runtime flags, or legacy chat-prefetch paths remain in the mainline.
+- The live build plan and SRS now describe only the supported simplified architecture; historical details remain archived in `docs/milestones.md`.
+
+**Implementation notes:**
+
+- The app-shell now retains only one aggregated capture surface: `/api/capture-workbench` for prepared sessions, low-confidence pending notes, and failures, while action routes remain split only where the workbench still needs direct mutations (`approve`, `reject`, `retry`, `delete`).
+- Settings and telemetry examples were updated to treat `/api/capture-workbench` as the canonical noisy polling route, replacing the old review-count and failed-list examples.
+- `npm run gen-api` still assumes a live server on `localhost:8000`; for this milestone the checked-in schema was refreshed from the exported local `openapi.json` so the committed artifact matched the cleaned backend contract.
+
+**Files modified:**
+
+- `frontend/src/VoiceCapture.test.tsx`
+- `frontend/src/IngestInbox.test.tsx`
+- `frontend/src/components/ReviewQueue/ReviewQueue.tsx`
+- `frontend/src/components/ReviewQueue/ReviewQueue.css`
+- `frontend/src/components/FailedCaptures/FailedCaptures.tsx`
+- `frontend/src/components/FailedCaptures/FailedCaptures.css`
+- `frontend/src/components/IngestInbox/IngestInbox.tsx`
+- `frontend/src/components/IngestInbox/IngestInbox.css`
+- `frontend/src/api/review.ts`
+- `frontend/src/api/ingest.ts`
+- `frontend/src/components/SettingsModal/index.tsx`
+- `frontend/src/SettingsModal.test.tsx`
+- `monocle/routers/review.py`
+- `monocle/routers/ingest.py`
+- `monocle/routers/ingest_failures.py`
+- `monocle/main.py`
+- `monocle/config.py`
+- `monocle/telemetry.py`
+- `monocle/tests/test_api.py`
+- `monocle/tests/test_review.py`
+- `monocle/tests/test_agents.py`
+- `monocle/tests/test_settings.py`
+- `monocle/tests/test_telemetry.py`
+- `openapi.json`
+- `frontend/src/api/schema.d.ts`
+- `docs/srs.md`
+- `docs/build-plan.md`
+- `docs/milestones.md`
+
+**Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 942 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 432 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
 
 ---
 

@@ -65,8 +65,7 @@ const TRANSCRIBE_BACKENDS = ['subprocess', 'whisper_cpp', 'native']
 /** Well-known noisy routes surfaced as checkboxes in the Tracing Filters panel. */
 const KNOWN_FILTERS = [
   { route: '/api/health', label: 'Health checks (/api/health)' },
-  { route: '/api/review/count', label: 'Review count polling (/api/review/count)' },
-  { route: '/api/ingest/failures', label: 'Ingest failures polling (/api/ingest/failures)' },
+  { route: '/api/capture-workbench', label: 'Capture workbench polling (/api/capture-workbench)' },
 ]
 
 function modelStateBadge(available: boolean, loaded: boolean): { cls: string; label: string } {

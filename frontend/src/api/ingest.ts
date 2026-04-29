@@ -164,21 +164,6 @@ export interface IngestTrueUpResponse {
   last_true_up_at: string
 }
 
-export interface IngestNotificationSummary {
-  notification_id: string
-  session_id: string
-  kind: string
-  status: 'unread' | 'read' | 'dismissed'
-  created_at: string
-  session_state: string
-  session_title: string | null
-  session_digest: string | null
-  source_names: string[]
-  open_questions_count: number
-  contradictions_count: number
-  proposed_actions_count: number
-}
-
 /** List of failed-ingest records as returned by the API. */
 export interface FailedIngestRecord {
   id: string
@@ -260,34 +245,6 @@ export function executeIngestSession(sessionId: string): Promise<IngestSessionDe
 
 export function trueUpIngestSession(sessionId: string): Promise<IngestTrueUpResponse> {
   return apiPost<IngestTrueUpResponse>(`/api/ingest/sessions/${encodeURIComponent(sessionId)}/true-up`)
-}
-
-export function listIngestNotifications(params?: {
-  status?: 'unread' | 'read' | 'dismissed'
-  kind?: string
-  limit?: number
-  offset?: number
-}): Promise<IngestNotificationSummary[]> {
-  return apiGet<IngestNotificationSummary[]>('/api/ingest/notifications', params)
-}
-
-export function countIngestNotifications(params?: {
-  status?: 'unread' | 'read' | 'dismissed'
-  kind?: string
-}): Promise<CountResponse> {
-  return apiGet<CountResponse>('/api/ingest/notifications/count', params)
-}
-
-export function markIngestNotificationRead(notificationId: string): Promise<void> {
-  return apiPost<void>(`/api/ingest/notifications/${encodeURIComponent(notificationId)}/read`)
-}
-
-export function dismissIngestNotification(notificationId: string): Promise<void> {
-  return apiPost<void>(`/api/ingest/notifications/${encodeURIComponent(notificationId)}/dismiss`)
-}
-
-export function listIngestFailures(): Promise<FailedIngestRecord[]> {
-  return apiGet<FailedIngestRecord[]>('/api/ingest/failures')
 }
 
 export function retryIngestFailure(id: string): Promise<IngestResponse> {

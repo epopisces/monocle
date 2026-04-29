@@ -333,7 +333,7 @@ class TelemetryConfig(BaseModel):
     log_format: Literal["text", "json"] = "text"
     enable_sensitive_data: bool = True
     # Route prefixes whose spans are dropped before export.
-    # Useful for suppressing noisy polling routes (e.g. /api/review/count).
+    # Useful for suppressing noisy polling routes (e.g. /api/capture-workbench).
     trace_filters: list[str] = Field(default_factory=lambda: ["/api/health"])
 
 

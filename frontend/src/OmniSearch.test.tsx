@@ -64,6 +64,14 @@ async function flushDebounce() {
   await act(async () => {})
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>(res => {
+    resolve = res
+  })
+  return { promise, resolve }
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────────────────────────────────────
 
 describe('OmniSearch — render', () => {
@@ -131,6 +139,19 @@ describe('OmniSearch — search behaviour', () => {
     expect(mockOmniSearch).toHaveBeenCalledWith({ q: 'abc', limit: 20 })
   })
 
+  it('trims the query before the 3-character trigger and request', async () => {
+    mockOmniSearch.mockResolvedValue([FILENAME_RESULT])
+    renderOmniSearch()
+    const input = screen.getByTestId('omni-search-input')
+    fireEvent.change(input, { target: { value: '  ab  ' } })
+    await flushDebounce()
+    expect(mockOmniSearch).not.toHaveBeenCalled()
+
+    fireEvent.change(input, { target: { value: '  abc  ' } })
+    await flushDebounce()
+    expect(mockOmniSearch).toHaveBeenCalledWith({ q: 'abc', limit: 20 })
+  })
+
   it('shows results in dropdown after search', async () => {
     mockOmniSearch.mockResolvedValue([FILENAME_RESULT])
     renderOmniSearch()
@@ -177,7 +198,7 @@ describe('OmniSearch — navigation', () => {
     mockOmniSearch.mockResolvedValue([FILENAME_RESULT])
     renderOmniSearch()
     const input = screen.getByTestId('omni-search-input')
-    fireEvent.change(input, { target: { value: 'hello' } })
+    fireEvent.change(input, { target: { value: '  hello  ' } })
     await flushDebounce()
     fireEvent.click(screen.getByTestId('omni-semantic-btn'))
     expect(mockNavigate).toHaveBeenCalledWith(
@@ -202,8 +223,12 @@ describe('OmniSearch — keyboard navigation', () => {
     fireEvent.change(input, { target: { value: 'search' } })
     await flushDebounce()
     expect(screen.getByTestId('omni-search-dropdown')).toBeInTheDocument()
-    fireEvent.keyDown(input, { key: 'Escape' })
+    input.focus()
+    await act(async () => {
+      fireEvent.keyDown(input, { key: 'Escape' })
+    })
     expect(screen.queryByTestId('omni-search-dropdown')).toBeNull()
+    expect(document.activeElement).not.toBe(input)
   })
 
   it('navigates with Enter on first result', async () => {
@@ -230,5 +255,46 @@ describe('OmniSearch — keyboard navigation', () => {
     expect(screen.getByText('In filename')).toBeInTheDocument()
     expect(screen.getByText('In title / tags')).toBeInTheDocument()
     expect(screen.getByText('In body')).toBeInTheDocument()
+  })
+
+  it('uses bucket-local option ids for aria-activedescendant', async () => {
+    mockOmniSearch.mockResolvedValue([FILENAME_RESULT, FRONTMATTER_RESULT, BODY_RESULT])
+    renderOmniSearch()
+    const input = screen.getByTestId('omni-search-input')
+    fireEvent.change(input, { target: { value: 'note' } })
+    await flushDebounce()
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(input).toHaveAttribute('aria-activedescendant', 'omni-option-frontmatter-0')
+  })
+
+  it('ignores stale results from slower older queries', async () => {
+    const slow = deferred<typeof FILENAME_RESULT[]>()
+    const fast = deferred<typeof BODY_RESULT[]>()
+    mockOmniSearch.mockImplementation(({ q }: { q: string }) => {
+      if (q === 'alpha') return slow.promise
+      if (q === 'beta') return fast.promise
+      return Promise.resolve([])
+    })
+
+    renderOmniSearch()
+    const input = screen.getByTestId('omni-search-input')
+
+    fireEvent.change(input, { target: { value: 'alpha' } })
+    await flushDebounce()
+    fireEvent.change(input, { target: { value: 'beta' } })
+    await flushDebounce()
+
+    await act(async () => {
+      fast.resolve([BODY_RESULT])
+    })
+    expect(screen.getByText('Body Note')).toBeInTheDocument()
+
+    await act(async () => {
+      slow.resolve([FILENAME_RESULT])
+    })
+    expect(screen.queryByText('Search Test Note')).toBeNull()
+    expect(screen.getByText('Body Note')).toBeInTheDocument()
   })
 })

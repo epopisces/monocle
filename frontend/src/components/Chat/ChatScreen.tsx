@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { ingest } from '../../api/ingest'
 import { useChat } from '../../hooks/useChat'
 import ChatMessage from './ChatMessage'
-import ChatInput, { type ChatInputHandle } from './ChatInput'
+import ChatInput, { MAX_CAPTURE_URLS, type ChatInputHandle } from './ChatInput'
 import './ChatScreen.css'
 
 interface Starter {
@@ -68,14 +69,28 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
   }
 
   // Wrap send to resolve pending tool hints for populate-style starters
-  const handleSend = useCallback((content: string, inputToolHint?: string, fetchUrls?: string[]) => {
+  const handleSend = useCallback((content: string, inputToolHint?: string) => {
     let toolHint: string | undefined = inputToolHint
     if (!toolHint && pendingHint && content.startsWith(pendingHint.prefix)) {
       toolHint = pendingHint.tool
     }
     setPendingHint(null)
-    send(content, toolHint, fetchUrls)
+    send(content, toolHint)
   }, [pendingHint, send])
+
+  const handleCaptureUrls = useCallback(async (urls: string[]) => {
+    for (const url of urls.slice(0, MAX_CAPTURE_URLS)) {
+      await ingest({
+        content: url,
+        content_type: 'text/plain',
+        source: 'web',
+        origin: 'chat',
+        template_hint: 'reference',
+        allow_duplicate: false,
+        fast_capture: false,
+      })
+    }
+  }, [])
 
   const showStarters = thread.length === 0
 
@@ -142,7 +157,13 @@ export default function ChatScreen({ onVoiceOpen }: Props) {
 
       {/* Input area */}
       <div className="chat-screen__input-area">
-        <ChatInput ref={chatInputRef} onSend={handleSend} disabled={isStreaming} onVoiceClick={onVoiceOpen} />
+        <ChatInput
+          ref={chatInputRef}
+          onSend={handleSend}
+          onCaptureUrls={handleCaptureUrls}
+          disabled={isStreaming}
+          onVoiceClick={onVoiceOpen}
+        />
       </div>
     </div>
   )

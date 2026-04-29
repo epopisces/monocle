@@ -8,12 +8,8 @@ interface TopbarProps {
   onMenuToggle: () => void
   onSettingsOpen?: () => void
   onVoiceOpen?: () => void
-  onIngestOpen?: () => void
-  onReviewOpen?: () => void
-  onFailedOpen?: () => void
-  ingestCount?: number
-  reviewCount?: number
-  failedCount?: number
+  onWorkbenchOpen?: () => void
+  workbenchCount?: number
 }
 
 type HealthStatus = 'unknown' | 'ready' | 'degraded' | 'error'
@@ -38,12 +34,8 @@ export default function Topbar({
   onMenuToggle,
   onSettingsOpen,
   onVoiceOpen,
-  onIngestOpen,
-  onReviewOpen,
-  onFailedOpen,
-  ingestCount = 0,
-  reviewCount = 0,
-  failedCount = 0,
+  onWorkbenchOpen,
+  workbenchCount = 0,
 }: TopbarProps) {
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [status, setStatus] = useState<HealthStatus>('unknown')
@@ -274,46 +266,16 @@ export default function Topbar({
           ◎
         </button>
 
-        {ingestCount > 0 && (
-          <button
-            className="topbar-menu-btn topbar-badge-btn topbar-badge-btn--info"
-            onClick={onIngestOpen}
-            aria-label={`Prepared ingest sessions: ${ingestCount}`}
-            title={`${ingestCount} prepared ingest session(s) ready for review`}
-            data-testid="ingest-inbox-btn"
-          >
-            ▣
-            <span className="topbar-badge topbar-badge--info" data-testid="ingest-badge">{ingestCount}</span>
-          </button>
-        )}
-
-        {/* Review queue badge button — always visible when count > 0 */}
-        {reviewCount > 0 && (
+        {workbenchCount > 0 && (
           <button
             className="topbar-menu-btn topbar-badge-btn"
-            onClick={onReviewOpen}
-            aria-label={`Review queue: ${reviewCount} pending`}
-            title={`${reviewCount} notes pending review`}
-            data-testid="review-queue-btn"
+            onClick={onWorkbenchOpen}
+            aria-label={`Capture workbench: ${workbenchCount} actionable item(s)`}
+            title={`${workbenchCount} actionable capture item(s)`}
+            data-testid="capture-workbench-btn"
           >
-            ◌
-            <span className="topbar-badge" data-testid="review-badge">{reviewCount}</span>
-          </button>
-        )}
-
-        {/* Failed captures warning button — only when failures exist */}
-        {failedCount > 0 && (
-          <button
-            className="topbar-menu-btn topbar-badge-btn topbar-badge-btn--warning"
-            onClick={onFailedOpen}
-            aria-label={`Failed captures: ${failedCount}`}
-            title={`${failedCount} failed capture(s)`}
-            data-testid="failed-captures-btn"
-          >
-            !
-            <span className="topbar-badge topbar-badge--warning" data-testid="failed-badge">
-              {failedCount}
-            </span>
+            ▤
+            <span className="topbar-badge" data-testid="capture-workbench-badge">{workbenchCount}</span>
           </button>
         )}
 

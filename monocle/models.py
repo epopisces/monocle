@@ -40,6 +40,8 @@ T = TypeVar("T")
 NoteSource = Literal["web", "voice", "teams", "mcp", "import", "agent"]
 IngestSessionOrigin = Literal["api", "chat", "inbox"]
 IngestNotificationStatus = Literal["unread", "read", "dismissed"]
+CaptureWorkbenchSectionKind = Literal["prepared", "pending_review", "failures"]
+CaptureWorkbenchItemType = Literal["ingest_session", "pending_note", "failed_session", "failed_ingest"]
 IngestSessionState = Literal[
     "captured",
     "queued",
@@ -352,6 +354,18 @@ class CountResponse(BaseModel):
     count: int
 
 
+class FailedIngestRecord(BaseModel):
+    id: str
+    source: str
+    content_preview: str
+    content_truncated: bool = False
+    error_message: str
+    failed_at: str
+    sidecar_path: str | None = None
+    step: int | None = None
+    retried: bool = False
+
+
 class DiffPreviewHunk(BaseModel):
     section: str | None = None
     before: str | None = None
@@ -407,6 +421,48 @@ class ProposedAction(BaseModel):
     diff_preview: DiffPreview | dict[str, Any] | None = None
     proposed_content: dict[str, Any] = Field(default_factory=dict)
     execution_result: ProposedActionExecutionResult | dict[str, Any] | None = None
+
+
+class CaptureWorkbenchCounts(BaseModel):
+    prepared: int = 0
+    pending_review: int = 0
+    failures: int = 0
+
+
+class CaptureWorkbenchItem(BaseModel):
+    item_id: str
+    section: CaptureWorkbenchSectionKind
+    item_type: CaptureWorkbenchItemType
+    title: str
+    summary: str | None = None
+    source: str | None = None
+    state: str | None = None
+    confidence: float | None = None
+    file_path: str | None = None
+    note_type: NOTE_TYPES | None = None
+    session_id: str | None = None
+    failure_id: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    source_names: list[str] = Field(default_factory=list)
+    open_questions_count: int = 0
+    contradictions_count: int = 0
+    proposed_actions_count: int = 0
+    error_message: str | None = None
+    retryable: bool = False
+
+
+class CaptureWorkbenchSection(BaseModel):
+    section: CaptureWorkbenchSectionKind
+    count: int = 0
+    items: list[CaptureWorkbenchItem] = Field(default_factory=list)
+
+
+class CaptureWorkbenchResponse(BaseModel):
+    actionable_count: int = 0
+    queue_threshold: float = 1.0
+    counts: CaptureWorkbenchCounts = Field(default_factory=CaptureWorkbenchCounts)
+    sections: list[CaptureWorkbenchSection] = Field(default_factory=list)
 
 
 class SourceRecord(BaseModel):

@@ -37,7 +37,7 @@ class _RouteFilterSpanProcessor:
 
     The filter list is mutable at runtime — call ``set_filters()`` to update which
     routes are suppressed without restarting the server.  Useful for hiding noisy
-    polling endpoints (e.g. ``/api/review/count``) while troubleshooting.
+    polling endpoints (e.g. ``/api/capture-workbench``) while troubleshooting.
     """
 
     def __init__(self, wrapped_processor: Any, initial_filters: list[str]) -> None:
