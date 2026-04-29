@@ -8,26 +8,18 @@ interface AppShellProps {
   children: React.ReactNode
   onSettingsOpen?: () => void
   onVoiceOpen?: () => void
-  onIngestOpen?: () => void
-  onReviewOpen?: () => void
-  onFailedOpen?: () => void
+  onWorkbenchOpen?: () => void
   onChatDocumentDrop?: (payload: ChatDocumentDragPayload) => void
-  ingestCount?: number
-  reviewCount?: number
-  failedCount?: number
+  workbenchCount?: number
 }
 
 export default function AppShell({
   children,
   onSettingsOpen,
   onVoiceOpen,
-  onIngestOpen,
-  onReviewOpen,
-  onFailedOpen,
+  onWorkbenchOpen,
   onChatDocumentDrop,
-  ingestCount = 0,
-  reviewCount = 0,
-  failedCount = 0,
+  workbenchCount = 0,
 }: AppShellProps) {
   const [navOpen, setNavOpen] = React.useState(true)
 
@@ -37,12 +29,8 @@ export default function AppShell({
         onMenuToggle={() => setNavOpen(o => !o)}
         onSettingsOpen={onSettingsOpen}
         onVoiceOpen={onVoiceOpen}
-        onIngestOpen={onIngestOpen}
-        onReviewOpen={onReviewOpen}
-        onFailedOpen={onFailedOpen}
-        ingestCount={ingestCount}
-        reviewCount={reviewCount}
-        failedCount={failedCount}
+        onWorkbenchOpen={onWorkbenchOpen}
+        workbenchCount={workbenchCount}
       />
       <div className="app-body">
         <LeftNav collapsed={!navOpen} onChatDocumentDrop={onChatDocumentDrop} />

@@ -13,5 +13,6 @@ Modules:
     graph       — get_graph()
     references  — create_reference_from_url()
     ingest      — capture_thought(), capture_thought_session()
+    ingest_workflow — consolidated prepare/review/execute orchestration
     tags        — normalize_tags() shared utility
 """

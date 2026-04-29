@@ -5,18 +5,15 @@ import asyncio
 import json
 import logging
 import time
+from pathlib import Path
 from typing import AsyncIterator
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 
-from fastapi import Response
-
 from monocle.models import (
     ArchivedSourceContentResponse,
-    CountResponse,
     IngestOpenQuestionAnswerRequest,
-    IngestNotificationSummary,
     IngestRequest,
     IngestResponse,
     IngestSession,
@@ -26,15 +23,16 @@ from monocle.models import (
     SourceRecord,
 )
 from monocle.rate_limit import limiter
-from monocle.services.ingest_review import (
+from monocle.services.ingest_workflow import (
     answer_review_question,
     approve_all_review_actions,
-    load_review_session,
+    execute_fast_capture_session,
+    execute_review_session,
+    load_session_detail,
     set_review_action_approval,
     start_review_session,
     update_review_action,
 )
-from monocle.services.ingest_execute import execute_fast_capture_session, execute_review_session
 
 router = APIRouter(tags=["ingest"])
 logger = logging.getLogger(__name__)
@@ -140,7 +138,7 @@ async def get_session(session_id: str, request: Request) -> IngestSessionDetailR
     """Return the full persisted ingest session with its archived sources."""
     store = request.app.state.ingest_session_store
     vault = request.app.state.vault
-    detail = await load_review_session(store, vault, session_id)
+    detail = await load_session_detail(store, vault, session_id)
     if detail is None:
         raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
     return detail
@@ -309,53 +307,6 @@ async def true_up_session(session_id: str, request: Request) -> IngestTrueUpResp
     if response is None:
         raise HTTPException(status_code=404, detail=f"Ingest session not found: {session_id}")
     return response
-
-
-@router.get("/ingest/notifications", response_model=list[IngestNotificationSummary])
-async def list_notifications(
-    request: Request,
-    status: str | None = Query(default=None),
-    kind: str | None = Query(default=None),
-    limit: int = Query(default=20, ge=1, le=200),
-    offset: int = Query(default=0, ge=0),
-) -> list[IngestNotificationSummary]:
-    store = request.app.state.ingest_session_store
-    return await asyncio.to_thread(
-        store.list_notifications,
-        status=status,
-        kind=kind,
-        limit=limit,
-        offset=offset,
-    )
-
-
-@router.get("/ingest/notifications/count", response_model=CountResponse)
-async def count_notifications(
-    request: Request,
-    status: str | None = Query(default=None),
-    kind: str | None = Query(default=None),
-) -> CountResponse:
-    store = request.app.state.ingest_session_store
-    count = await asyncio.to_thread(store.count_notifications, status=status, kind=kind)
-    return CountResponse(count=count)
-
-
-@router.post("/ingest/notifications/{notification_id}/read", status_code=204)
-async def mark_notification_read(notification_id: str, request: Request) -> Response:
-    store = request.app.state.ingest_session_store
-    updated = await asyncio.to_thread(store.set_notification_status, notification_id, "read")
-    if not updated:
-        raise HTTPException(status_code=404, detail=f"Notification not found: {notification_id}")
-    return Response(status_code=204)
-
-
-@router.post("/ingest/notifications/{notification_id}/dismiss", status_code=204)
-async def dismiss_notification(notification_id: str, request: Request) -> Response:
-    store = request.app.state.ingest_session_store
-    updated = await asyncio.to_thread(store.set_notification_status, notification_id, "dismissed")
-    if not updated:
-        raise HTTPException(status_code=404, detail=f"Notification not found: {notification_id}")
-    return Response(status_code=204)
 
 
 @router.post("/ingest/stream")

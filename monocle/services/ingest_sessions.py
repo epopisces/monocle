@@ -11,7 +11,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator, get_args
+from typing import TYPE_CHECKING, Any, Iterator, Literal, get_args
 
 from monocle.models import (
     IngestNotificationSummary,
@@ -190,6 +190,7 @@ class IngestSessionStore:
         state: str | None = None,
         origin: str | None = None,
         ready_only: bool = False,
+        sort_by: Literal["created_at", "updated_at"] = "created_at",
         limit: int = 50,
         offset: int = 0,
     ) -> list[IngestSession]:
@@ -205,6 +206,7 @@ class IngestSessionStore:
             clauses.append("state IN ('dormant_ready','in_review','awaiting_user','proposal_ready')")
 
         where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        order_column = "updated_at" if sort_by == "updated_at" else "created_at"
         params.extend([max(1, min(limit, 200)), max(offset, 0)])
 
         with self._connect() as conn:
@@ -216,7 +218,7 @@ class IngestSessionStore:
                        execution_summary_json
                 FROM ingest_sessions
                 {where_sql}
-                ORDER BY created_at DESC
+                  ORDER BY {order_column} DESC
                 LIMIT ? OFFSET ?
                 """,
                 params,
@@ -235,6 +237,32 @@ class IngestSessionStore:
             ]
 
         return sessions
+
+    def count_sessions(
+        self,
+        *,
+        state: str | None = None,
+        origin: str | None = None,
+        ready_only: bool = False,
+    ) -> int:
+        clauses: list[str] = []
+        params: list[Any] = []
+        if state:
+            clauses.append("state = ?")
+            params.append(state)
+        if origin:
+            clauses.append("origin = ?")
+            params.append(origin)
+        if ready_only:
+            clauses.append("state IN ('dormant_ready','in_review','awaiting_user','proposal_ready')")
+
+        where_sql = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        with self._connect() as conn:
+            row = conn.execute(
+                f"SELECT COUNT(*) AS count FROM ingest_sessions {where_sql}",
+                params,
+            ).fetchone()
+        return int(row["count"] if row is not None else 0)
 
     def get_session(self, session_id: str) -> IngestSessionDetailResponse | None:
         with self._connect() as conn:
@@ -750,17 +778,13 @@ class IngestSessionStore:
             if not updated:
                 return None
 
-            next_state = "proposal_ready"
-            if any(not str(item.get("answer") or "").strip() for item in questions):
-                next_state = "awaiting_user"
-
             conn.execute(
                 """
                 UPDATE ingest_sessions
-                SET open_questions_json = ?, state = ?, updated_at = ?
+                SET open_questions_json = ?, updated_at = ?
                 WHERE session_id = ?
                 """,
-                (_json_dumps(questions), next_state, now, session_id),
+                (_json_dumps(questions), now, session_id),
             )
             return questions
 
@@ -819,11 +843,7 @@ class IngestSessionStore:
             if result.rowcount == 0:
                 return None
             conn.execute(
-                """
-                UPDATE ingest_sessions
-                SET state = 'in_review', updated_at = ?
-                WHERE session_id = ? AND state IN ('dormant_ready', 'awaiting_user', 'proposal_ready')
-                """,
+                "UPDATE ingest_sessions SET updated_at = ? WHERE session_id = ?",
                 (now, session_id),
             )
             return self._get_action(conn, session_id, action_id)
@@ -923,19 +943,11 @@ class IngestSessionStore:
                 """,
                 (session_id,),
             )
+            conn.execute(
+                "UPDATE ingest_sessions SET updated_at = ? WHERE session_id = ?",
+                (now, session_id),
+            )
             actions = self._get_actions(conn, session_id)
-            if actions and all(action.approval_state in ('approved', 'rejected') for action in actions):
-                next_state = 'approved_pending_execution' if any(
-                    action.approval_state == 'approved' for action in actions
-                ) else 'proposal_ready'
-                conn.execute(
-                    """
-                    UPDATE ingest_sessions
-                    SET state = ?, updated_at = ?
-                    WHERE session_id = ?
-                    """,
-                    (next_state, now, session_id),
-                )
             return actions
 
     def _create_session(

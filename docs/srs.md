@@ -723,42 +723,29 @@ Response:
 
 **FR-API-15:** The FastAPI app SHALL mount the Vite build output at `/` and serve `index.html` for all non-API paths (SPA fallback).
 
-#### 2.7.7 Review Queue Compatibility
+#### 2.7.7 Capture Workbench & Review Actions
 
-**FR-API-16:** `GET /api/review` — Returns notes with `review_status: pending` whose `confidence <= threshold`. Query params: `threshold` (float, overrides `review.queue_threshold`), `sort` (`confidence|date`, default `confidence`), `n` (max 100). Response:
+**FR-API-16:** `GET /api/capture-workbench` — Returns the unified app-shell capture summary. Query param: `limit_per_section` (default `10`, max `100`). The response includes one top-level `actionable_count`, the active `queue_threshold`, section counts, and sectioned items for `prepared`, `pending_review`, and `failures`. The near-term mainline SHALL NOT expose separate review-list, review-count, or failed-ingest list endpoints for app-shell aggregation.
 ```json
 {
-  "pending_count": 3,
-  "threshold": 1.0,
-  "items": [ { "note": { ...NoteRef }, "confidence": 0.48, "confidence_rationale": "Low metadata_coverage: missing fields [status, date]" } ]
-}
-```
-
-**FR-API-17:** `PATCH /api/review/{file_path:path}/approve` — Sets `review_status: approved`, `approval_mode: manual`, `approved_by`, and `approved_at` in the note's YAML frontmatter. Returns the updated `Note`. Also re-indexes the affected chunks so the approved status is reflected in search metadata.
-
-**FR-API-18:** `POST /api/review/approve-all` — Bulk-approves all notes currently matching the pending + threshold filter. Accepts optional `threshold` body param. Bulk approval records `approval_mode: manual`, `approved_by`, and `approved_at` for each note. Returns `{ "approved_count": n }`.
-
-**FR-API-19:** `GET /api/review/count` — Returns `{ "pending_count": n, "queue_threshold": 1.0 }`. Called by the frontend on load and after every ingest to refresh the notification badge count without fetching full items.
-
-**FR-API-19a:** `GET /api/ingest/failures` — Returns the current failed-ingest list sorted by newest first. Response example:
-```json
-{
-  "count": 2,
-  "items": [
-    {
-      "source": "vault/inbox/capture-2026-03-13.webm",
-      "failed_at": "2026-03-13T09:12:00Z",
-      "step": "routing",
-      "retryable": true,
-      "sidecar_path": "vault/inbox/capture-2026-03-13.error.md"
-    }
+  "actionable_count": 4,
+  "queue_threshold": 0.5,
+  "counts": { "prepared": 1, "pending_review": 1, "failures": 2 },
+  "sections": [
+    { "section": "prepared", "count": 1, "items": [ { "item_type": "ingest_session", "session_id": "ing_123" } ] },
+    { "section": "pending_review", "count": 1, "items": [ { "item_type": "pending_note", "file_path": "work/pending-note.md" } ] },
+    { "section": "failures", "count": 2, "items": [ { "item_type": "failed_ingest", "failure_id": "fail_123" } ] }
   ]
 }
 ```
 
-**FR-API-19b:** `POST /api/ingest/failures/retry` — Retries a failed ingest by source path or sidecar path. Returns `202 Accepted` when the retry is queued and removes the failed-ingest record on success.
+**FR-API-17:** `PATCH /api/review/{file_path:path}/approve` — Sets `review_status: approved`, `approval_mode: manual`, `approved_by`, and `approved_at` in the note's YAML frontmatter and mirrors the new status into index metadata. Returns a lightweight approval result containing `file_path`, `review_status`, `approval_mode`, `approved_by`, and `approved_at`.
 
-**FR-API-19c:** `DELETE /api/ingest/failures/{id}` — Deletes a single failed-ingest record (by source path or sidecar path). Removes the record from the failed-ingest list but does not delete the `.error.md` file itself. Returns `204 No Content`.
+**FR-API-18:** `PATCH /api/review/{file_path:path}/reject` — Sets `review_status: rejected`, `approval_mode: manual`, `approved_by`, and `approved_at` in the note's YAML frontmatter and mirrors the new status into index metadata. Returns the same lightweight approval result shape as approval.
+
+**FR-API-19:** `POST /api/ingest/failures/retry` — Retries a failed-ingest registry record by failure id using the stored preview/source context. Returns an ingest response payload for the retried capture and marks the original registry entry as retried.
+
+**FR-API-19a:** `DELETE /api/ingest/failures/{id}` — Deletes a single failed-ingest registry record. It removes the record from actionable workbench failures but does not delete the associated `.error.md` sidecar file. Returns `204 No Content`.
 
 #### 2.7.8 Chat
 
@@ -1073,7 +1060,7 @@ The shared service layer (`monocle/services/`) is the single authoritative imple
 
 ### 2.14 Capture Review Semantics (FR-REV)
 
-The user-facing destination for these semantics is the unified capture workbench. Existing `/api/review` and `/api/ingest/failures` endpoints remain compatibility surfaces until the workbench aggregation milestones land.
+The user-facing destination for these semantics is the unified capture workbench. Separate review-list, review-count, and failed-ingest list endpoints are no longer part of the supported mainline contract.
 
 **FR-REV-01:** Every note created by the ingest pipeline SHALL have two additional frontmatter fields written at creation time:
 
@@ -1095,14 +1082,14 @@ Composite score formula: `confidence = 0.35 * template_match + 0.30 * metadata_c
 
 **FR-REV-03:** Notes written directly by the user (not via ingest, e.g., created in the Document Browser editor) SHALL have `confidence: 1.0`, `review_status: approved`, `approval_mode: manual`, `approved_by: "user"`, and `approved_at: <now>` written at creation time and SHALL NOT appear as actionable items in the capture workbench.
 
-**FR-REV-04:** The notification badge count is: `count of notes where review_status == "pending" AND confidence <= queue_threshold`. **Source of truth for review behaviour (in priority order):** (1) the values persisted server-side via `PATCH /api/settings` (stored in process memory and written back to `config.yaml`), (2) the values from `config.yaml` on startup. `review.queue_threshold` governs queue visibility. `review.auto_approve_threshold_pct` governs whether a newly ingested note is auto-approved. The Settings modal reads the current values from `GET /api/settings` on open, and writes back via `PATCH /api/settings` on save. `localStorage` caches them only for instant UI render before the first API response arrives; the server is authoritative.
+**FR-REV-04:** Pending-review notes contribute to the capture-workbench actionable count when `review_status == "pending" AND confidence <= queue_threshold`; prepared sessions and failures contribute through their own workbench sections. **Source of truth for review behaviour (in priority order):** (1) the values persisted server-side via `PATCH /api/settings` (stored in process memory and written back to `config.yaml`), (2) the values from `config.yaml` on startup. `review.queue_threshold` governs workbench visibility for pending notes. `review.auto_approve_threshold_pct` governs whether a newly ingested note is auto-approved. The Settings modal reads the current values from `GET /api/settings` on open, and writes back via `PATCH /api/settings` on save. `localStorage` caches them only for instant UI render before the first API response arrives; the server is authoritative.
 
 **FR-REV-05:** Approving a note (`PATCH /api/review/{path}/approve`) SHALL:
-1. Set `review_status: approved`, `approval_mode: manual`, `approved_by`, `approved_at: <now>`, and `updated: <now>` in the frontmatter via `VaultLayer.patch_frontmatter()`
-2. Patch the ChromaDB metadata for all chunks of the affected note to reflect the new `review_status`
-3. Return the updated `Note` object
+1. Set `review_status: approved`, `approval_mode: manual`, `approved_by`, and `approved_at: <now>` in the frontmatter via `VaultLayer.patch_frontmatter()`
+2. Patch the index metadata for the affected note so the new `review_status` is reflected in search/query consumers
+3. Return the lightweight approval-result object documented in `FR-API-17`
 
-**FR-REV-06:** There is no `rejected` state. If the user clicks **Fix**, the note opens in the Document Browser editor. On the next ingest of new content, the previous note is unaffected. The user manually edits it and then approves it from the editor toolbar (which calls `PATCH /api/review/{path}/approve`).
+**FR-REV-06:** Rejecting a note (`PATCH /api/review/{path}/reject`) SHALL set `review_status: rejected`, remove it from actionable workbench sections, and preserve the note for later inspection. If the user clicks **Edit** instead, the note opens in the Document Browser editor so it can be corrected and then approved from the editor toolbar.
 
 **FR-REV-07:** The Document Browser editor toolbar SHALL show an **Approve** button when a note has `review_status: pending`.
 
@@ -1449,7 +1436,7 @@ monocle/
 │   │   │   ├── Graph/
 │   │   │   ├── Stats/
 │   │   │   ├── VoiceModal/
-│   │   │   ├── ReviewQueue/
+│   │   │   ├── CaptureWorkbench/
 │   │   │   ├── CommandPalette/
 │   │   │   ├── SettingsModal/
 │   │   │   └── shared/
@@ -1513,8 +1500,9 @@ monocle/
     │   └── scheduler.py               # APScheduler setup
     ├── routers/
     │   ├── health.py                  # GET /api/health
+    │   ├── capture_workbench.py       # GET /api/capture-workbench
     │   ├── ingest.py                  # POST /api/ingest, POST /api/ingest/stream
-    │   ├── ingest_failures.py         # GET /api/ingest/failures, POST /api/ingest/failures/retry, DELETE /api/ingest/failures/{id}
+    │   ├── ingest_failures.py         # POST /api/ingest/failures/retry, DELETE /api/ingest/failures/{id}
     │   ├── notes.py                   # GET/PUT/PATCH/DELETE /api/notes/*
     │   ├── search.py                  # GET /api/search, /api/search/keyword
     │   ├── graph.py                   # GET /api/graph
@@ -1522,7 +1510,7 @@ monocle/
     │   ├── transcribe.py              # POST /api/transcribe
     │   ├── chat.py                    # POST /api/chat (SSE streaming)
     │   ├── agents.py                  # POST /api/agents/*
-    │   ├── review.py                  # GET/PATCH /api/review/* (compatibility surface during workbench migration)
+    │   ├── review.py                  # PATCH /api/review/{path}/approve, PATCH /api/review/{path}/reject
     │   └── settings.py                # GET/PATCH /api/settings, POST /api/settings/rotate-mcp-key
     └── tests/
         ├── conftest.py                # tmp_vault fixture + memory_index fixture

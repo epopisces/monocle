@@ -331,8 +331,7 @@ describe('SettingsModal — Tracing Filters', () => {
     renderModal()
     await screen.findByTestId('chat-model-select')
     expect(screen.getByTestId('trace-filter-api-health')).toBeInTheDocument()
-    expect(screen.getByTestId('trace-filter-api-review-count')).toBeInTheDocument()
-    expect(screen.getByTestId('trace-filter-api-ingest-failures')).toBeInTheDocument()
+    expect(screen.getByTestId('trace-filter-api-capture-workbench')).toBeInTheDocument()
   })
 
   it('health check filter is checked by default (in mockSettings)', async () => {
@@ -345,18 +344,18 @@ describe('SettingsModal — Tracing Filters', () => {
   it('other filters are unchecked by default', async () => {
     renderModal()
     await screen.findByTestId('chat-model-select')
-    const reviewCheckbox = screen.getByTestId('trace-filter-api-review-count').querySelector('input')
-    expect(reviewCheckbox).not.toBeChecked()
+    const workbenchCheckbox = screen.getByTestId('trace-filter-api-capture-workbench').querySelector('input')
+    expect(workbenchCheckbox).not.toBeChecked()
   })
 
   it('toggles a filter on and calls patchSettings with updated list', async () => {
     renderModal()
     await screen.findByTestId('chat-model-select')
-    const reviewCheckbox = screen.getByTestId('trace-filter-api-review-count').querySelector('input')!
-    fireEvent.click(reviewCheckbox)
+    const workbenchCheckbox = screen.getByTestId('trace-filter-api-capture-workbench').querySelector('input')!
+    fireEvent.click(workbenchCheckbox)
     await waitFor(() =>
       expect(patchSettings).toHaveBeenCalledWith({
-        telemetry: { trace_filters: ['/api/health', '/api/review/count'] },
+        telemetry: { trace_filters: ['/api/health', '/api/capture-workbench'] },
       }),
     )
   })

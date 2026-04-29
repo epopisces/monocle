@@ -30,8 +30,8 @@ async function* makeStream(...events: Array<{ event: string; data: Record<string
   }
 }
 
-const DONE = (sessionId = 'sess-test') =>
-  ({ event: 'done', data: { session_id: sessionId } }) as const
+const DONE = (sessionId = 'sess-test', status: 'success' | 'error' = 'success', error?: string) =>
+  ({ event: 'done', data: { session_id: sessionId, status, ...(error ? { error } : {}) } }) as const
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -145,7 +145,6 @@ describe('useChat — send() message construction', () => {
         ],
         session_id: 'sess-grounding',
         tool_hint: undefined,
-        fetch_urls: undefined,
       },
       expect.any(AbortSignal),
     )
@@ -247,6 +246,34 @@ describe('useChat — send() SSE events', () => {
     const { result } = renderHook(() => useChat())
     await act(async () => { await result.current.send('hello') })
     expect(result.current.currentSessionId).toBe('server-assigned-id')
+  })
+
+  it('done event marks completed tool calls as success', async () => {
+    mockStreamChat.mockReturnValue(makeStream(
+      { event: 'tool_call', data: { name: 'create_reference_from_url', call_id: 'ref-1' } },
+      DONE(),
+    ))
+    const { result } = renderHook(() => useChat())
+    await act(async () => { await result.current.send('capture this URL') })
+    expect(result.current.thread[1].toolCalls?.[0]).toMatchObject({
+      name: 'create_reference_from_url',
+      status: 'success',
+    })
+  })
+
+  it('done error marks unfinished tool calls as error instead of success', async () => {
+    mockStreamChat.mockReturnValue(makeStream(
+      { event: 'tool_call', data: { name: 'create_reference_from_url', call_id: 'ref-1' } },
+      { event: 'error', data: { message: 'Agent failed while processing your request.' } },
+      DONE('sess-test', 'error', 'Agent failed while processing your request.'),
+    ))
+    const { result } = renderHook(() => useChat())
+    await act(async () => { await result.current.send('capture this URL') })
+    expect(result.current.thread[1].toolCalls?.[0]).toMatchObject({
+      name: 'create_reference_from_url',
+      status: 'error',
+      error: 'Agent failed while processing your request.',
+    })
   })
 
   it('error SSE event sets error message on assistant content and stops streaming', async () => {

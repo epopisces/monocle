@@ -1,4 +1,4 @@
-"""monocle/routers/ingest_failures.py — Failed-ingest management endpoints."""
+"""monocle/routers/ingest_failures.py — Failed-ingest retry and dismissal endpoints."""
 from __future__ import annotations
 
 import logging
@@ -12,13 +12,6 @@ logger = logging.getLogger(__name__)
 
 class RetryRequest(BaseModel):
     id: str  # record id to retry
-
-
-@router.get("/ingest/failures")
-async def list_failures(request: Request) -> list[dict]:
-    """Return all failed-ingest records, newest first."""
-    registry = request.app.state.failed_registry
-    return registry.get_all()
 
 
 @router.post("/ingest/failures/retry", status_code=200)

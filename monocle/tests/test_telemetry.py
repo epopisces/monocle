@@ -123,17 +123,17 @@ class TestHealthCheckFilterSpanProcessor:
         wrapped = MagicMock()
         filter_processor = _RouteFilterSpanProcessor(wrapped, initial_filters=["/api/health"])
 
-        # Verify /api/review/count is NOT filtered initially
-        review_count_span = MagicMock()
-        review_count_span.attributes = {"http.route": "/api/review/count"}
-        filter_processor.on_end(review_count_span)
-        wrapped.on_end.assert_called_once_with(review_count_span)
+        # Verify /api/capture-workbench is NOT filtered initially
+        workbench_span = MagicMock()
+        workbench_span.attributes = {"http.route": "/api/capture-workbench"}
+        filter_processor.on_end(workbench_span)
+        wrapped.on_end.assert_called_once_with(workbench_span)
         wrapped.reset_mock()
 
-        # Update filters to suppress /api/review/count as well
-        filter_processor.set_filters(["/api/health", "/api/review/count"])
+        # Update filters to suppress /api/capture-workbench as well
+        filter_processor.set_filters(["/api/health", "/api/capture-workbench"])
 
-        filter_processor.on_end(review_count_span)
+        filter_processor.on_end(workbench_span)
         wrapped.on_end.assert_not_called()
 
     def test_set_filters_can_remove_all_filters(self):
@@ -154,10 +154,10 @@ class TestHealthCheckFilterSpanProcessor:
         wrapped = MagicMock()
         filter_processor = _RouteFilterSpanProcessor(
             wrapped,
-            initial_filters=["/api/health", "/api/review/count", "/api/ingest/failures"],
+            initial_filters=["/api/health", "/api/capture-workbench", "/api/search/omni"],
         )
 
-        for route in ["/api/health", "/api/review/count", "/api/ingest/failures"]:
+        for route in ["/api/health", "/api/capture-workbench", "/api/search/omni"]:
             span = MagicMock()
             span.attributes = {"http.route": route}
             filter_processor.on_end(span)

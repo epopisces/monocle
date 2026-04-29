@@ -237,6 +237,7 @@ def api_client(tmp_path: Path, mock_ai):
         from monocle.ingest.plugins import register_default_plugins
         from monocle.mcp_server import init_mcp_state
         from monocle.services.activity import ActivityMonitor
+        from monocle.services.omni_search import OmniSearchCatalog
         from monocle.services.ingest_prepare import IngestPreparationWorker
         from monocle.services.ingest_sessions import IngestSessionStore
 
@@ -291,6 +292,7 @@ def api_client(tmp_path: Path, mock_ai):
 
         from monocle.graph import GraphBuilder
         app.state.graph_builder = GraphBuilder(vault)
+        app.state.omni_search_catalog = OmniSearchCatalog(vault)
         init_mcp_state(
             vault,
             index,

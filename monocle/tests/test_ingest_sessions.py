@@ -233,7 +233,7 @@ class TestIngestSessionStore:
 
         detail = store.get_session(created.session_id)
         assert detail is not None
-        assert detail.session.state == "in_review"
+        assert detail.session.state == "dormant_ready"
         assert detail.session.proposed_actions[0].rationale == "Capture the clarified meeting details."
 
     def test_complete_prepare_job_rejects_mismatched_job_and_session(self, tmp_path: Path):

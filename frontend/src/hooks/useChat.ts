@@ -41,7 +41,7 @@ export function useChat() {
   }, [refreshSessions])
 
   // send is stable (empty deps) — reads latest values via refs
-  const send = useCallback(async (content: string, toolHint?: string, fetchUrls?: string[]) => {
+  const send = useCallback(async (content: string, toolHint?: string) => {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
@@ -63,7 +63,7 @@ export function useChat() {
     setIsStreaming(true)
 
     try {
-      for await (const evt of streamChat({ messages: messagesForApi, session_id: sessionId, tool_hint: toolHint, fetch_urls: fetchUrls }, controller.signal)) {
+      for await (const evt of streamChat({ messages: messagesForApi, session_id: sessionId, tool_hint: toolHint }, controller.signal)) {
         if (controller.signal.aborted) break
 
         switch (evt.event) {
@@ -114,28 +114,6 @@ export function useChat() {
             })
             break
 
-          case 'prefetch_complete':
-            setThread(prev => {
-              const next = [...prev]
-              const last = { ...next[next.length - 1] }
-              const calls = [...(last.toolCalls ?? [])]
-              for (let i = calls.length - 1; i >= 0; i--) {
-                if ((evt.data.call_id && calls[i].callId === evt.data.call_id) || calls[i].name === evt.data.name) {
-                  calls[i] = {
-                    ...calls[i],
-                    url: evt.data.url,
-                    durationMs: evt.data.duration_ms,
-                    status: evt.data.status,
-                  }
-                  break
-                }
-              }
-              last.toolCalls = calls
-              next[next.length - 1] = last
-              return next
-            })
-            break
-
           case 'note_created':
             setThread(prev => {
               const next = [...prev]
@@ -148,10 +126,21 @@ export function useChat() {
 
           case 'done': {
             const finalSessionId = evt.data.session_id ?? sessionId
+            const completedWithError = evt.data.status === 'error'
+            const unfinishedToolError = evt.data.error ?? 'Tool execution did not finish before the request ended.'
             setCurrentSessionId(finalSessionId)
             setThread(prev => {
               const next = [...prev]
-              next[next.length - 1] = { ...next[next.length - 1], isStreaming: false }
+              const last = { ...next[next.length - 1] }
+              last.isStreaming = false
+              last.toolCalls = (last.toolCalls ?? []).map(call =>
+                call.status === 'running'
+                  ? completedWithError
+                    ? { ...call, status: 'error', error: call.error ?? unfinishedToolError }
+                    : { ...call, status: 'success' }
+                  : call,
+              )
+              next[next.length - 1] = last
               const title = content.slice(0, 60)
               const session: Session = {
                 id: finalSessionId,

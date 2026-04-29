@@ -39,21 +39,15 @@ function VaultLink({ href, children }: { href?: string; children?: React.ReactNo
 
 const MARKDOWN_COMPONENTS: Components = { a: VaultLink }
 
-function isRunningUrlPrefetch(call: ToolCallEntry): boolean {
-  return call.name === 'create_reference_from_url' && call.status === 'running'
-}
-
 function getPendingStatus(message: ThreadMessage): string {
-  const toolCalls = message.toolCalls ?? []
-  const activePrefetches = toolCalls.filter(isRunningUrlPrefetch)
-  if (activePrefetches.length === 0) {
+  const runningCalls = (message.toolCalls ?? []).filter(call => call.status === 'running')
+  if (runningCalls.length === 0) {
     return 'Thinking...'
   }
-  if (activePrefetches.length === 1) {
-    const url = activePrefetches[0].url
-    return url ? `Prefetching URL: ${url}` : 'Prefetching URL...'
+  if (runningCalls.length === 1) {
+    return `Using ${runningCalls[0].name}...`
   }
-  return `Prefetching ${activePrefetches.length} URLs...`
+  return `Using ${runningCalls.length} tools...`
 }
 
 function ToolCallDisclosure({ call }: { call: ToolCallEntry }) {
@@ -66,23 +60,18 @@ function ToolCallDisclosure({ call }: { call: ToolCallEntry }) {
     call.resultCount !== undefined
       ? ` — ${call.resultCount} result${call.resultCount === 1 ? '' : 's'}`
       : ''
-  const isPrefetch = call.name === 'create_reference_from_url'
   let label = hasError
     ? `⚠ \`${call.name}\` failed${durationLabel}`
     : `Used \`${call.name}\`${countLabel}${durationLabel}`
 
-  if (isPrefetch && call.status === 'running') {
-    label = call.url ? `Prefetching URL: ${call.url}` : 'Prefetching URL...'
-  } else if (isPrefetch && call.status === 'success') {
-    label = call.url ? `Prefetched URL: ${call.url}${durationLabel}` : `Prefetched URL${durationLabel}`
-  } else if (isPrefetch && hasError) {
-    label = call.url ? `⚠ Failed to prefetch URL: ${call.url}${durationLabel}` : `⚠ Failed to prefetch URL${durationLabel}`
+  if (call.status === 'running' && !hasError) {
+    label = `Using \`${call.name}\`...`
   }
 
   return (
     <details className={`tool-call${hasError ? ' tool-call--error' : ''}`}>
       <summary className="tool-call__summary">{label}</summary>
-      {call.url && !isPrefetch && <div className="tool-call__meta">URL: {call.url}</div>}
+      {call.url && <div className="tool-call__meta">URL: {call.url}</div>}
       {call.error && <pre className="tool-call__error-detail">{call.error}</pre>}
     </details>
   )

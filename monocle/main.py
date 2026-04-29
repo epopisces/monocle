@@ -24,6 +24,7 @@ from monocle.telemetry import configure_telemetry
 # Router imports
 from monocle.routers import (
     agents,
+    capture_workbench,
     chat,
     graph,
     health,
@@ -121,9 +122,6 @@ async def lifespan(app: FastAPI):
     app.state.settings = cfg
     app.state.route_filter_processor = route_filter_processor
     app.state.activity_monitor = ActivityMonitor()
-    # Lazy pending-review count cache; invalidated on any vault write.
-    # review_count endpoint reads this before falling back to a full scan.
-    app.state._review_pending_count = None
 
     # ------------------------------------------------------------------
     # Graph builder (in-memory cache; invalidated on any vault file change)
@@ -132,6 +130,11 @@ async def lifespan(app: FastAPI):
 
     graph_builder = GraphBuilder(vault)
     app.state.graph_builder = graph_builder
+
+    from monocle.services.omni_search import OmniSearchCatalog
+
+    omni_search_catalog = OmniSearchCatalog(vault)
+    app.state.omni_search_catalog = omni_search_catalog
 
     # ------------------------------------------------------------------
     # AI Provider
@@ -187,8 +190,7 @@ async def lifespan(app: FastAPI):
         from monocle.ingest.chunker import chunk_text
 
         logger.debug("[API] ReindexQueue: re-indexing %s", file_path)
-        # Any vault file change may alter review_status — invalidate count cache.
-        app.state._review_pending_count = None
+        omni_search_catalog.invalidate(file_path)
         # Always invalidate the graph cache when a vault file changes,
         # regardless of whether re-indexing succeeds or the file is gone.
         graph_builder.invalidate()
@@ -520,6 +522,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(search.router, prefix="/api")
     app.include_router(ingest.router, prefix="/api")
     app.include_router(ingest_failures.router, prefix="/api")
+    app.include_router(capture_workbench.router, prefix="/api")
     app.include_router(transcribe.router, prefix="/api")
     app.include_router(graph.router, prefix="/api")
     app.include_router(stats.router, prefix="/api")

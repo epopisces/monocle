@@ -1011,281 +1011,47 @@ class TestChatSSEErrorContract:
 
 
 # ---------------------------------------------------------------------------
-#region #*   Tests: fetch_urls parallel pre-fetch
+#region #*   Tests: explicit-only URL capture boundaries
 # ---------------------------------------------------------------------------
 
 
-class TestFetchUrlsPreFetch:
-    """Tests for the fetch_urls pre-fetch behaviour in POST /api/chat."""
+class TestChatUrlCaptureBoundaries:
+    """Tests that /api/chat no longer performs hidden URL capture work."""
 
-    def test_fetch_urls_emits_note_created_and_injects_context(self, api_client):
-        """When fetch_urls is provided, a note_created event is emitted for each
-        successfully pre-fetched URL, and the agent receives injected context."""
-        prefetch_result = json.dumps({
+    def test_chat_still_surfaces_explicit_create_reference_tool_calls(self, api_client):
+        """Explicit agent tool use of create_reference_from_url remains visible in chat."""
+        fn_call = _fn_call_content("create_reference_from_url", call_id="ref-1")
+        fn_result = _fn_result_content(
+            json.dumps(
+                {
+                    "status": "created",
+                    "file_path": "technologies/example-ref.md",
+                    "type": "reference",
+                }
+            ),
+            call_id="ref-1",
+        )
+        mock_agent = MagicMock()
+        mock_agent.run_stream = MagicMock(return_value=_updates_gen(_fake_update([fn_call, fn_result]), _fake_update([_text_content("saved")])) )
+
+        with patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent):
+            resp = api_client.post(
+                "/api/chat",
+                json={"messages": [{"role": "user", "content": "capture this URL as a reference"}]},
+            )
+
+        assert resp.status_code == 200
+        events = _parse_sse(resp.text)
+        tool_calls = [event for event in events if event.get("event") == "tool_call"]
+        assert len(tool_calls) == 1
+        assert tool_calls[0]["data"] == {"name": "create_reference_from_url", "call_id": "ref-1"}
+
+        note_created = [event for event in events if event.get("event") == "note_created"]
+        assert len(note_created) == 1
+        assert note_created[0]["data"] == {
             "file_path": "technologies/example-ref.md",
-            "title": "Example Site",
-            "url": "https://example.com",
-            "status": "created",
-        })
-
-        update = _fake_update([_text_content("Summarized!")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch(
-                "monocle.agents.tools.VaultTools.create_reference_from_url",
-                new=AsyncMock(return_value=prefetch_result),
-            ),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "summarize this"}],
-                    "fetch_urls": ["https://example.com"],
-                },
-            )
-
-        assert resp.status_code == 200
-        events = _parse_sse(resp.text)
-        tool_events = [e for e in events if e.get("event") == "tool_call"]
-        assert len(tool_events) == 1
-        assert tool_events[0]["data"]["name"] == "create_reference_from_url"
-        assert tool_events[0]["data"]["url"] == "https://example.com"
-        complete_events = [e for e in events if e.get("event") == "prefetch_complete"]
-        assert len(complete_events) == 1
-        assert complete_events[0]["data"]["status"] == "success"
-        assert complete_events[0]["data"]["url"] == "https://example.com"
-        nc_events = [e for e in events if e.get("event") == "note_created"]
-        assert len(nc_events) == 1
-        assert nc_events[0]["data"]["file_path"] == "technologies/example-ref.md"
-
-    def test_fetch_urls_failed_prefetch_emits_tool_error(self, api_client):
-        """A failed pre-fetch emits tool_error so URL work is visible in the stream."""
-        update = _fake_update([_text_content("continuing")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch(
-                "monocle.agents.tools.VaultTools.create_reference_from_url",
-                new=AsyncMock(side_effect=RuntimeError("network error")),
-            ),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "what is this?"}],
-                    "fetch_urls": ["https://unreachable.example"],
-                },
-            )
-
-        assert resp.status_code == 200
-        events = _parse_sse(resp.text)
-        tool_errors = [e for e in events if e.get("event") == "tool_error"]
-        assert len(tool_errors) == 1
-        assert tool_errors[0]["data"]["name"] == "create_reference_from_url"
-        complete_events = [e for e in events if e.get("event") == "prefetch_complete"]
-        assert len(complete_events) == 1
-        assert complete_events[0]["data"]["status"] == "error"
-
-    def test_fetch_urls_context_injected_into_last_user_message(self, api_client):
-        """Pre-fetch context prefix is prepended to the last user message text."""
-        prefetch_result = json.dumps({
-            "file_path": "technologies/ref.md",
-            "title": "Ref",
-            "url": "https://example.com",
-            "status": "created",
-        })
-
-        captured_messages = []
-
-        def _capture_agent(*args, **kwargs):
-            mock_agent = MagicMock()
-            mock_agent.run_stream = MagicMock(return_value=_updates_gen())
-            # Capture the af_messages via tool_hint kwarg â€” we inspect message text
-            # after agent creation by checking what text was passed to run_stream
-            return mock_agent
-
-        with (
-            patch("monocle.routers.chat.create_chat_agent", side_effect=_capture_agent),
-            patch(
-                "monocle.agents.tools.VaultTools.create_reference_from_url",
-                new=AsyncMock(return_value=prefetch_result),
-            ),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "tell me about this"}],
-                    "fetch_urls": ["https://example.com"],
-                },
-            )
-
-        assert resp.status_code == 200
-
-    def test_fetch_urls_parallel_multiple_urls(self, api_client):
-        """Multiple fetch_urls are pre-fetched; multiple note_created events emitted."""
-        make_result = lambda url, fp: json.dumps({  # noqa: E731
-            "file_path": fp, "title": fp, "url": url, "status": "created",
-        })
-
-        side_effects = [
-            make_result("https://a.com", "technologies/a.md"),
-            make_result("https://b.com", "technologies/b.md"),
-        ]
-
-        update = _fake_update([_text_content("ok")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch(
-                "monocle.agents.tools.VaultTools.create_reference_from_url",
-                new=AsyncMock(side_effect=side_effects),
-            ),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "compare these"}],
-                    "fetch_urls": ["https://a.com", "https://b.com"],
-                },
-            )
-
-        assert resp.status_code == 200
-        events = _parse_sse(resp.text)
-        nc_events = [e for e in events if e.get("event") == "note_created"]
-        assert len(nc_events) == 2
-
-    def test_fetch_urls_failed_prefetch_continues_chat(self, api_client):
-        """A failure in pre-fetching one URL should not abort the whole chat stream."""
-        update = _fake_update([_text_content("continuing")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch(
-                "monocle.agents.tools.VaultTools.create_reference_from_url",
-                new=AsyncMock(side_effect=RuntimeError("network error")),
-            ),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "what is this?"}],
-                    "fetch_urls": ["https://unreachable.example"],
-                },
-            )
-
-        assert resp.status_code == 200
-        events = _parse_sse(resp.text)
-        # Chat still completes; no note_created for failed fetch
-        nc_events = [e for e in events if e.get("event") == "note_created"]
-        assert len(nc_events) == 0
-        token_events = [e for e in events if e.get("event") == "token"]
-        assert any(e["data"]["delta"] == "continuing" for e in token_events)
-
-    def test_fetch_urls_invalid_scheme_ignored(self, api_client):
-        """Non-http/https URLs in fetch_urls are silently filtered out."""
-        update = _fake_update([_text_content("ok")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        mock_fetch = AsyncMock()
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "test"}],
-                    "fetch_urls": ["ftp://example.com", "file:///etc/passwd"],
-                },
-            )
-
-        assert resp.status_code == 200
-        # create_reference_from_url should NOT be called for invalid schemes
-        mock_fetch.assert_not_called()
-
-    def test_fetch_urls_trailing_punctuation_sanitized(self, api_client):
-        """Trailing prose punctuation is stripped before pre-fetching URLs."""
-        prefetch_result = json.dumps({
-            "file_path": "technologies/example-ref.md",
-            "title": "Example Site",
-            "url": "https://github.com/github/awesome-copilot",
-            "status": "created",
-        })
-        update = _fake_update([_text_content("ok")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        mock_fetch = AsyncMock(return_value=prefetch_result)
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "summarize this"}],
-                    "fetch_urls": ["https://github.com/github/awesome-copilot,"],
-                },
-            )
-
-        assert resp.status_code == 200
-        mock_fetch.assert_awaited_once_with("https://github.com/github/awesome-copilot")
-
-    def test_fetch_urls_capped_at_five(self, api_client):
-        """More than 5 fetch_urls are silently capped to the first 5."""
-        results = [
-            json.dumps({"file_path": f"ref{i}.md", "title": f"R{i}", "url": f"https://url{i}.com", "status": "created"})
-            for i in range(6)
-        ]
-        update = _fake_update([_text_content("done")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        mock_fetch = AsyncMock(side_effect=results)
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={
-                    "messages": [{"role": "user", "content": "many urls"}],
-                    "fetch_urls": [f"https://url{i}.com" for i in range(6)],
-                },
-            )
-
-        assert resp.status_code == 200
-        # Only 5 fetch calls should have been made
-        assert mock_fetch.call_count == 5
-
-    def test_no_fetch_urls_does_not_call_vault_tools(self, api_client):
-        """When fetch_urls is absent, VaultTools is not instantiated for pre-fetch."""
-        update = _fake_update([_text_content("hi")])
-        mock_agent = MagicMock()
-        mock_agent.run_stream = MagicMock(return_value=_updates_gen(update))
-
-        mock_fetch = AsyncMock()
-        with (
-            patch("monocle.routers.chat.create_chat_agent", return_value=mock_agent),
-            patch("monocle.agents.tools.VaultTools.create_reference_from_url", new=mock_fetch),
-        ):
-            resp = api_client.post(
-                "/api/chat",
-                json={"messages": [{"role": "user", "content": "hello"}]},
-            )
-
-        assert resp.status_code == 200
-        mock_fetch.assert_not_called()
+            "type": "reference",
+        }
 
     def test_tool_call_event_includes_call_id(self, api_client):
         """FunctionCallContent emits a tool_call SSE event with call_id field."""

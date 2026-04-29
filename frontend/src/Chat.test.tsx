@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { BrowserRouter } from 'react-router-dom'
 import ChatScreen from './components/Chat/ChatScreen'
 import ChatMessage from './components/Chat/ChatMessage'
@@ -10,8 +10,10 @@ import type { ThreadMessage } from './components/Chat/sessionStore'
 
 // Mock useChat so ChatScreen tests don't depend on localStorage / SSE
 const mockSend = vi.fn()
+const mockCaptureUrls = vi.fn()
 const mockSelectSession = vi.fn()
 const mockNewSession = vi.fn()
+const mockIngest = vi.fn()
 
 vi.mock('./hooks/useChat', () => ({
   useChat: () => ({
@@ -23,6 +25,10 @@ vi.mock('./hooks/useChat', () => ({
     selectSession: mockSelectSession,
     newSession: mockNewSession,
   }),
+}))
+
+vi.mock('./api/ingest', () => ({
+  ingest: (...args: unknown[]) => mockIngest(...args),
 }))
 
 // Mock streamChat so it doesn't open real connections in ChatMessage/useChat tests
@@ -41,6 +47,8 @@ function renderWithRouter(ui: React.ReactElement) {
 describe('ChatInput', () => {
   beforeEach(() => {
     mockSend.mockReset()
+    mockCaptureUrls.mockReset()
+    mockCaptureUrls.mockResolvedValue(undefined)
   })
 
   it('renders textarea and send button', () => {
@@ -54,7 +62,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'hello' } })
     fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    expect(mockSend).toHaveBeenCalledWith('hello', undefined, undefined)
+    expect(mockSend).toHaveBeenCalledWith('hello', undefined)
   })
 
   it('does not call onSend on Shift+Enter', () => {
@@ -70,7 +78,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'world' } })
     fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith('world', undefined, undefined)
+    expect(mockSend).toHaveBeenCalledWith('world', undefined)
   })
 
   it('does not send empty or whitespace-only input', () => {
@@ -98,20 +106,20 @@ describe('ChatInput', () => {
   })
 
   it('shows URL pills when message contains a URL', () => {
-    render(<ChatInput onSend={mockSend} />)
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'Check out https://example.com/page' } })
     expect(screen.getByTestId('url-pills')).toBeInTheDocument()
-    // The pill should be active (opted-in) by default
-    expect(screen.getByTestId('url-pill-active')).toBeInTheDocument()
+    expect(screen.getByTestId('url-pill')).toBeInTheDocument()
+    expect(screen.getByTestId('capture-urls-btn')).toBeInTheDocument()
   })
 
   it('strips trailing punctuation from detected URL pills', () => {
-    render(<ChatInput onSend={mockSend} />)
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'Check out https://github.com/github/awesome-copilot,' } })
     expect(screen.getByTestId('url-pills')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /github\.com/ })).toBeInTheDocument()
+    expect(screen.getByTestId('url-pill')).toHaveTextContent('github.com')
   })
 
   it('does not show URL pills when message has no URL', () => {
@@ -122,88 +130,63 @@ describe('ChatInput', () => {
   })
 
   it('shows a pill for each distinct URL', () => {
-    render(<ChatInput onSend={mockSend} />)
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'https://foo.com and https://bar.com' } })
-    expect(screen.getAllByTestId('url-pill-active')).toHaveLength(2)
+    expect(screen.getAllByTestId('url-pill')).toHaveLength(2)
   })
 
   it('deduplicates repeated URLs in pills', () => {
-    render(<ChatInput onSend={mockSend} />)
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'https://example.com https://example.com' } })
-    expect(screen.getAllByTestId('url-pill-active')).toHaveLength(1)
+    expect(screen.getAllByTestId('url-pill')).toHaveLength(1)
   })
 
-  it('clicking an active pill opts it out (dims it)', () => {
-    render(<ChatInput onSend={mockSend} />)
-    const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
-    const pill = screen.getByTestId('url-pill-active')
-    fireEvent.click(pill)
-    expect(screen.getByTestId('url-pill-opted-out')).toBeInTheDocument()
-    expect(screen.queryByTestId('url-pill-active')).toBeNull()
-  })
-
-  it('clicking an opted-out pill re-activates it', () => {
-    render(<ChatInput onSend={mockSend} />)
-    const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
-    fireEvent.click(screen.getByTestId('url-pill-active'))
-    fireEvent.click(screen.getByTestId('url-pill-opted-out'))
-    expect(screen.getByTestId('url-pill-active')).toBeInTheDocument()
-  })
-
-  it('Send button passes opted-in URLs as fetchUrls', () => {
-    render(<ChatInput onSend={mockSend} />)
-    const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
-    fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined, ['https://example.com'])
-  })
-
-  it('Enter key passes opted-in URLs as fetchUrls (default-on)', () => {
-    render(<ChatInput onSend={mockSend} />)
+  it('send button does not auto-capture detected URLs', () => {
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'Check this https://example.com' } })
-    fireEvent.keyDown(textarea, { key: 'Enter', shiftKey: false })
-    expect(mockSend).toHaveBeenCalledWith('Check this https://example.com', undefined, ['https://example.com'])
+    fireEvent.click(screen.getByTestId('send-btn'))
+    expect(mockSend).toHaveBeenCalledWith('Check this https://example.com', undefined)
+    expect(mockCaptureUrls).not.toHaveBeenCalled()
   })
 
-  it('Send button strips trailing punctuation from fetchUrls', () => {
-    render(<ChatInput onSend={mockSend} />)
+  it('capture button passes normalized detected URLs explicitly', async () => {
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'See https://github.com/github/awesome-copilot,' } })
-    fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith(
-      'See https://github.com/github/awesome-copilot,',
-      undefined,
-      ['https://github.com/github/awesome-copilot'],
+    fireEvent.click(screen.getByTestId('capture-urls-btn'))
+    await waitFor(() => expect(mockCaptureUrls).toHaveBeenCalledWith(['https://github.com/github/awesome-copilot']))
+    expect(screen.getByTestId('url-capture-feedback')).toHaveTextContent('Captured 1 URL to the capture workbench.')
+  })
+
+  it('capture button caps explicit URL capture to the first five distinct URLs', async () => {
+    render(<ChatInput onSend={mockSend} onCaptureUrls={mockCaptureUrls} />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, {
+      target: {
+        value: [
+          'https://one.example',
+          'https://two.example',
+          'https://three.example',
+          'https://four.example',
+          'https://five.example',
+          'https://six.example',
+        ].join(' '),
+      },
+    })
+    fireEvent.click(screen.getByTestId('capture-urls-btn'))
+    await waitFor(() => expect(mockCaptureUrls).toHaveBeenCalledWith([
+      'https://one.example',
+      'https://two.example',
+      'https://three.example',
+      'https://four.example',
+      'https://five.example',
+    ]))
+    expect(screen.getByTestId('url-capture-feedback')).toHaveTextContent(
+      'Captured 5 URLs to the capture workbench. Skipped 1 additional detected URL to keep capture bounded.',
     )
-  })
-
-  it('opting out a URL removes it from fetchUrls', () => {
-    render(<ChatInput onSend={mockSend} />)
-    const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'https://example.com' } })
-    fireEvent.click(screen.getByTestId('url-pill-active'))
-    fireEvent.click(screen.getByTestId('send-btn'))
-    // fetchUrls should be undefined since all URLs opted-out
-    expect(mockSend).toHaveBeenCalledWith('https://example.com', undefined, undefined)
-  })
-
-  it('opting out one URL in multi-URL message only excludes that URL', () => {
-    render(<ChatInput onSend={mockSend} />)
-    const textarea = screen.getByTestId('chat-input-textarea')
-    fireEvent.change(textarea, { target: { value: 'https://foo.com and https://bar.com' } })
-    // Opt out the first pill
-    const pills = screen.getAllByTestId('url-pill-active')
-    fireEvent.click(pills[0])
-    fireEvent.click(screen.getByTestId('send-btn'))
-    const call = mockSend.mock.calls[0]
-    // fetchUrls should contain only the second URL
-    expect(call[2]).toHaveLength(1)
-    expect(call[2][0]).toBe('https://bar.com')
   })
 
   it('no URL in message sends without fetchUrls', () => {
@@ -211,7 +194,7 @@ describe('ChatInput', () => {
     const textarea = screen.getByTestId('chat-input-textarea')
     fireEvent.change(textarea, { target: { value: 'just text' } })
     fireEvent.click(screen.getByTestId('send-btn'))
-    expect(mockSend).toHaveBeenCalledWith('just text', undefined, undefined)
+    expect(mockSend).toHaveBeenCalledWith('just text', undefined)
   })
 })
 
@@ -337,7 +320,7 @@ describe('ChatMessage', () => {
     expect(tools?.textContent).toContain('4 results')
   })
 
-  it('renders explicit URL prefetch progress', () => {
+  it('renders running create_reference_from_url tool activity generically', () => {
     const msg: ThreadMessage = {
       role: 'assistant',
       content: '',
@@ -345,17 +328,17 @@ describe('ChatMessage', () => {
       toolCalls: [{ name: 'create_reference_from_url', url: 'https://example.com', status: 'running' }],
     }
     render(<ChatMessage message={msg} />)
-    expect(screen.getByText('Prefetching URL: https://example.com', { selector: 'p' })).toBeInTheDocument()
+    expect(screen.getByText('Using create_reference_from_url...', { selector: 'p' })).toBeInTheDocument()
   })
 
-  it('renders completed URL prefetch timing', () => {
+  it('renders completed create_reference_from_url timing generically', () => {
     const msg: ThreadMessage = {
       role: 'assistant',
       content: '',
       toolCalls: [{ name: 'create_reference_from_url', url: 'https://example.com', status: 'success', durationMs: 2450 }],
     }
     render(<ChatMessage message={msg} />)
-    expect(screen.getByText('Prefetched URL: https://example.com in 2.5s')).toBeInTheDocument()
+    expect(screen.getByText('Used `create_reference_from_url` in 2.5s')).toBeInTheDocument()
   })
 
   it('renders tool call with singular result count', () => {
@@ -458,6 +441,8 @@ describe('ChatMessage', () => {
 describe('ChatScreen', () => {
   beforeEach(() => {
     mockSend.mockReset()
+    mockIngest.mockReset()
+    mockIngest.mockResolvedValue({ session_id: 'ing_url_1', state: 'queued' })
     mockNewSession.mockReset()
     mockSelectSession.mockReset()
   })
@@ -499,5 +484,48 @@ describe('ChatScreen', () => {
     const picker = screen.getByTestId('session-picker')
     fireEvent.change(picker, { target: { value: '' } })
     expect(mockNewSession).toHaveBeenCalled()
+  })
+
+  it('Capture URLs ingests detected URLs explicitly without sending a chat turn', async () => {
+    renderWithRouter(<ChatScreen />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, { target: { value: 'Check https://example.com' } })
+    fireEvent.click(screen.getByTestId('capture-urls-btn'))
+
+    await waitFor(() => expect(mockIngest).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'https://example.com',
+      source: 'web',
+      origin: 'chat',
+      template_hint: 'reference',
+      fast_capture: false,
+    })))
+    expect(mockSend).not.toHaveBeenCalled()
+  })
+
+  it('Capture URLs limits ingest fan-out to five requests', async () => {
+    renderWithRouter(<ChatScreen />)
+    const textarea = screen.getByTestId('chat-input-textarea')
+    fireEvent.change(textarea, {
+      target: {
+        value: [
+          'https://one.example',
+          'https://two.example',
+          'https://three.example',
+          'https://four.example',
+          'https://five.example',
+          'https://six.example',
+        ].join(' '),
+      },
+    })
+    fireEvent.click(screen.getByTestId('capture-urls-btn'))
+
+    await waitFor(() => expect(mockIngest).toHaveBeenCalledTimes(5))
+    expect(mockIngest.mock.calls.map(([arg]) => arg.content)).toEqual([
+      'https://one.example',
+      'https://two.example',
+      'https://three.example',
+      'https://four.example',
+      'https://five.example',
+    ])
   })
 })

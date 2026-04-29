@@ -1129,13 +1129,13 @@ class TestPatchTelemetryTraceFilters:
         """PATCH telemetry.trace_filters must return 200."""
         r = api_client.patch(
             "/api/settings",
-            json={"telemetry": {"trace_filters": ["/api/health", "/api/review/count"]}},
+            json={"telemetry": {"trace_filters": ["/api/health", "/api/capture-workbench"]}},
         )
         assert r.status_code == 200
 
     def test_patch_trace_filters_reflected_in_response(self, api_client: TestClient) -> None:
         """Updated trace_filters must appear in response body."""
-        new_filters = ["/api/health", "/api/ingest/failures"]
+        new_filters = ["/api/health", "/api/capture-workbench"]
         r = api_client.patch(
             "/api/settings",
             json={"telemetry": {"trace_filters": new_filters}},
@@ -1145,7 +1145,7 @@ class TestPatchTelemetryTraceFilters:
 
     def test_patch_trace_filters_updates_app_state(self, api_client: TestClient) -> None:
         """Updated trace_filters must be visible on subsequent GET."""
-        new_filters = ["/api/review/count"]
+        new_filters = ["/api/capture-workbench"]
         api_client.patch(
             "/api/settings",
             json={"telemetry": {"trace_filters": new_filters}},
@@ -1161,10 +1161,10 @@ class TestPatchTelemetryTraceFilters:
         api_client.app.state.route_filter_processor = mock_processor
         api_client.patch(
             "/api/settings",
-            json={"telemetry": {"trace_filters": ["/api/health", "/api/review/count"]}},
+            json={"telemetry": {"trace_filters": ["/api/health", "/api/capture-workbench"]}},
         )
         mock_processor.set_filters.assert_called_once_with(
-            ["/api/health", "/api/review/count"]
+            ["/api/health", "/api/capture-workbench"]
         )
 
     def test_patch_empty_trace_filters_list_accepted(self, api_client: TestClient) -> None:

@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-28
-active-milestone: M43
+last-updated: 2026-04-29
+active-milestone: none
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,10 +26,34 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** M43 — Consolidate Ingest Workflow Ownership
-**Last Completed:** M42 — Remove Separate-Process Support (2026-04-28)
-**Note:** The near-term product direction is now documented and implemented around trust-first capture, a unified capture workbench, lean chat, distinct omnisearch, and one supported unified runtime topology. M24, M26, and M33 remain deferred to a future phase, and M41 remains paused until it is reconciled with the simplified track.
+**Active Milestone:** None — simplification track complete
+**Last Completed:** M48 — Cleanup & Contract Hardening (2026-04-29)
+**Note:** The near-term product direction is now documented and implemented only around trust-first capture, a unified capture workbench, lean chat, distinct omnisearch, and one supported unified runtime topology. M24, M26, and M33 remain deferred to a future phase, and M41 remains paused until it is reconciled against this simplified baseline.
 **Blocked By:** None
+**Session Notes (M48 — Cleanup & Contract Hardening):**
+- **Status:** COMPLETE (2026-04-29)
+- Removed the remaining fragmented capture drawers/tests and obsolete review, failure, and ingest-notification adapter routes, refreshed the generated API artifacts, and aligned the live docs to the workbench-first simplified contract.
+- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 942 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 432 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+**Session Notes (M47 — Omnisearch Hardening):**
+- **Status:** COMPLETE (2026-04-29)
+- Replaced per-request full-vault omnisearch scans with an AI-free cached catalog, tightened the meaningful 3-character fast-match contract on both sides of `/api/search/omni`, and hardened the topbar omnisearch UI against stale responses plus keyboard/accessibility edge cases.
+- **Test Results:** `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q` → 11 passed, EXIT 0; `cd frontend && npm run test -- --run src/OmniSearch.test.tsx --reporter=dot` → 15 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+**Session Notes (M46 — Lean Chat & Explicit URL Capture):**
+- **Status:** COMPLETE (2026-04-29)
+- Removed the router-level `fetch_urls` prefetch path from `/api/chat`, replaced the chat composer’s implicit URL side effects with an explicit `Capture URLs` action that sends detected links into `POST /api/ingest`, and kept `create_reference_from_url` available only through explicit agent or MCP tool use.
+- **Test Results:** `cd frontend && npm run test -- --run src/Chat.test.tsx src/useChat.test.ts --reporter=dot` → 80 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0; `uv run python -m pytest monocle/tests/test_agents.py monocle/tests/test_mcp.py -x --tb=short -q` → 112 passed, EXIT 0.
+**Session Notes (M45 — Unified Capture Workbench Frontend):**
+- **Status:** COMPLETE (2026-04-29)
+- Replaced the separate prepared-session, review-queue, and failed-capture topbar entry points with one capture-workbench drawer backed by `/api/capture-workbench`, while keeping `/ingest-review` and `/docs` as the deep handoff routes for prepared sessions and pending-note edits.
+- **Test Results:** `cd frontend && npm run test -- --run` → 473 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+**Session Notes (M44 — Unified Capture Workbench Backend Contract):**
+- **Status:** COMPLETE (2026-04-29)
+- Added `GET /api/capture-workbench` plus a shared capture-workbench service so prepared ingest sessions, low-confidence pending review notes, and failure records now ship in one backend shape with one top-level actionable count; the temporary legacy adapters introduced here were removed later in M48.
+- **Test Results:** `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_review.py monocle/tests/test_ingest.py -x --tb=short -q` → 201 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
+**Session Notes (M43 — Consolidate Ingest Workflow Ownership):**
+- **Status:** COMPLETE (2026-04-29)
+- Added `monocle/services/ingest_workflow.py` as the single workflow owner for ingest review and execution orchestration, moved routers and service callers onto it, and reduced `IngestSessionStore` review mutations to persistence-only updates.
+- **Test Results:** `uv run python -m pytest monocle/tests/test_ingest.py monocle/tests/test_ingest_prepare.py monocle/tests/test_api.py -x --tb=short -q` → 164 passed, EXIT 0.
 **Session Notes (D1 — Simplification Docs Alignment):**
 - **Status:** COMPLETE (2026-04-28)
 - Aligned `docs/prd.md`, `docs/srs.md`, `docs/architecture.md`, `docs/ui-design.md`, and `docs/build-plan.md` around trust-first capture, a unified capture workbench, explicit URL capture handoff, lean chat, distinct omnisearch, and one supported runtime topology.
@@ -38,74 +62,8 @@ This is the primary reference document for building Monocle. Read it at the star
 - **Status:** COMPLETE (2026-04-28)
 - Collapsed the backend to one supported runtime path by removing split-runtime gating from `monocle/main.py`, deleting the `ProcessManager` module and standalone split CLI commands, and cleaning the related config/example/tasks/test surfaces.
 - **Test Results:** `uv run python -m pytest monocle/tests/test_cli.py monocle/tests/test_imports.py -x --tb=short -q` → 39 passed, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_mcp.py -x --tb=short -q` → 133 passed, EXIT 0.
-**Session Notes (M40 — Add Documents & Snippets To Chat Context):**
-- **Status:** COMPLETE (2026-04-25)
-- Added explicit user-grounding flows from the Docs explorer and Document Viewer: file-tree document drag-and-drop onto the persistent Chat nav target, plus right-click add-to-chat actions for documents, sections, sentences, and selected text across preview, YAML, and form modes.
-- Chat sessions now persist user-added grounding as first-class localStorage entries and reopen target sessions via the existing `session_id` route wiring, so manually added context stays visibly distinct from implicit vault retrieval inside the destination chat.
-- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1007 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 468 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
-**Session Notes (M39 — File History, Revert & Diff Viewer):**
-- **Status:** COMPLETE (2026-04-24)
-- Extended the existing vault `.versions` history into a first-class note-history feature with configurable retention, note history/diff/revert APIs, and live settings support so manual and ingest-driven edits share the same rollback path.
-- Added retained-version browsing, diff inspection, and one-click restore in the Document Viewer, and refreshed the example config plus generated API artifacts to expose the new settings and endpoints.
-- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 1002 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 460 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
-**Session Notes (M38 — Fast-Capture Path):**
-- **Status:** COMPLETE (2026-04-24)
-- Added fast-capture orchestration on top of persisted ingest sessions so `fast_capture=true` runs synchronous prepare → fallback-or-approve → execute using the existing ingest-session, MCP execution, provenance, validation, and reindex paths.
-- Added an explicit `Fast Capture` action in the voice modal plus fast-capture labeling in the ingest review workspace; clean captures complete immediately, while sessions with open questions or contradiction warnings fall back into the normal review flow.
-- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 994 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 457 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
-**Session Notes (M38 post-review hardening):**
-- Preserved `failed` fast-capture sessions instead of remapping them into review states, and made synchronous fast capture wait briefly when a background prepare job already owns the same session so the request does not race into a stale fallback.
-- Added regression coverage for prepare failure, execution-failure recovery back to `proposal_ready`, and the running-prepare wait path; aligned `VoiceCapture.test.tsx` ingest mocks to the current session-based `POST /api/ingest` contract.
-- **Test Results:** `uv run python -m pytest e:\development\_agents\monocle\monocle\tests\test_api.py -k "fast_capture" -x --tb=short -q` → 4 passed, 77 deselected, EXIT 0; `uv run python -m pytest e:\development\_agents\monocle\monocle\tests\test_ingest_prepare.py -k "prepare_session_now_waits_for_running_job_completion" -x --tb=short -q` → 1 passed, 6 deselected, EXIT 0; `cd frontend && npm run test -- --run src/VoiceCapture.test.tsx` → 83 passed, EXIT 0.
-**Session Notes (M36 — Ingest Review Workspace & Proposal Flow):**
-- **Status:** COMPLETE (2026-04-24)
-- Added the dedicated `/ingest-review` workflow with prepared-session loading, explicit review state transitions, question answering, contradiction cards with document links, editable proposed deltas, per-action approve/reject controls, visible diff previews, and approve-all semantics that stop at `approved_pending_execution` for M37.
-- Added backend review orchestration over persisted ingest sessions: hydrated contradiction metadata, diff-preview generation against current vault notes, editable proposal mutations, question-answer persistence, review-state transitions, and new ingest review APIs under `/api/ingest/sessions/{id}`.
-- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 973 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 449 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
-**Session Notes (M35 — Background Session Preparation & Notifications):**
-- **Status:** COMPLETE (2026-04-24)
-- Added idle-gated background preparation for persisted ingest sessions using the SQLite-backed job queue, with prepared digest, related-note candidates, contradiction warnings, draft proposed actions, and true-up requeue support.
-- Added ingest-ready notification APIs plus a separate app-shell badge and drawer so dormant sessions can be opened later without re-running initial preparation.
-- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 971 passed, 8 deselected, EXIT 0; `cd frontend && npm run test -- --run` → 448 passed, EXIT 0; `cd frontend && npx tsc --noEmit` → EXIT 0.
-**Session Notes (M34 — Ingest Session Schema & Persistence):**
-- **Status:** COMPLETE (2026-04-24)
-- Implemented a SQLite-backed `IngestSessionStore`, immutable out-of-vault `data/sources/` archival, session/source/proposed-action schemas, `GET /api/ingest/sessions` and `GET /api/ingest/sessions/{id}`, and switched `/api/ingest`, `/api/ingest/stream`, and the inbox watcher to capture persisted ingest sessions instead of writing pending notes directly.
-- Persisted queued notification/job scaffolding for the M35 handoff, normalized archived voice MIME types for watcher captures, and added focused persistence/security/API coverage.
-- **Test Results:** `uv run python -m pytest monocle/tests/ -x --tb=short -q` → 961 passed, 8 deselected, EXIT 0.
-**Session Notes (M29-M32 Post-Completion Validation & Security Hardening):**
-- **Status:** COMPLETE (2026-04-09)
-- Conducted comprehensive security audit and quality review of MCP-First milestones (M29-M32). Identified and fixed 8 issues: 1 HIGH (SSRF in URL fetcher), 2 MEDIUM (exception disclosure in SSE stream, stale docs), 2 LOW (hard limit on note discovery, invalid note_type accepted), 3 coverage gaps (SSRF boundary tests, confidence=None path, MCP auth non-HTTP scope).
-- **Security Fixes:** Added `_is_private_url()` function with `ipaddress` module validation for SSRF protection (blocks loopback, private ranges 10/172/192, link-local 169.254/fe80::/10, multicast); exception handler in chat.py now returns generic message instead of raw exception to prevent information leakage; `fetch_url_text()` validates before HTTP request.
-- **UX/Data Quality Fixes:** `update_note()` agent tool now paginated (1000-item pages) to discover notes across entire vault (was hard-capped at 500); `create_note()` service validates note_type at boundary before template creation.
-- **Follow-up Hardening:** Resolved remaining review findings by blocking hostname-resolution and redirect-based SSRF, making `/api/chat` stop work on client disconnect, unifying MCP/chat search fallback behavior through the shared search service, and normalizing template aliases like `person`/`meeting`/`blank` at the create-note service boundary.
-- **Test Coverage:** Added 19 new backend tests total, including DNS/redirect SSRF cases, MemoryIndex no-AI search parity, note-type alias normalization, and disconnect-aware chat stream cancellation.
-- **Results:** 900 backend tests passing (baseline 881 → +19), 416 frontend tests passing, EXIT 0, no regressions, all security improvements validated.
-**Session Notes (M28 — Provider & Model Status Detection):**
-- **Status:** COMPLETE (2026-04-02)
-- Added provider reachability and model status detection to backend & frontend. Backend: `ModelStatus` + `ProviderModelsResponse` models; `get_model_status()` method on `AIProvider` ABC with provider-specific implementations (Ollama: `list()` + `ps()` APIs; Foundry: `models.list()`; Azure: reachability ping); `GET /api/health/models` endpoint. Frontend: model status polling (15s interval), SettingsModal model status panel with provider reachability and per-model rows, Topbar model status badges (green ✓ when loaded, amber ⏳ when cold-start, always shown when available). 
-- **807 backend tests passing (no regressions), 411 frontend tests passing, EXIT 0**
-**Session Notes (M27 — Topbar Omnisearch):**
-- **Status:** COMPLETE (2026-04-02)
-- Implemented omnisearch feature with always-accessible topbar search bar. Backend: `GET /api/search/omni` endpoint with pagination loop (scans full vault), optimized parsing (filename/frontmatter use NoteRef fields only; body search only reads needed notes), and rate limiting (60 req/min). Frontend: OmniSearch component (Ctrl+E focus, 300ms debounce, keyboard nav), integrated into Topbar, SearchScreen URL params handling. **April 2 security/performance hardening:** Fixed keyboard navigation bug (semanticIdx collision), added @limiter.limit decorator, implemented pagination for unbounded vault scan, optimized parse strategy reducing I/O for 90%+ of queries (filename/frontmatter hits avoid vault.read_note()).
-- **793 backend tests passing (7 omni-specific + optimizations), 408 frontend tests passing, EXIT 0**
-**Session Notes (M22 — Process Manager & Dev Automation):**
-- **Status:** COMPLETE (2026-03-21), post-review hardened (2026-03-26)
-- Implemented `ProcessManager` + `SubprocessHandle` (exponential-backoff crash-restart); `watch`, `scheduler`, `capture` CLI commands operational; `--separate-processes` flag on `serve`/`dev`; lifespan gating in `main.py`.
-- Post-review additions: `_is_separate_processes_enabled()` method for env var override (config OR `MONOCLE_SEPARATE_PROCESSES=1`); idempotency guard preventing duplicate spawning on repeated `start_all()` calls; 15 additional tests (env override scenarios, process lifecycle, handle leak prevention, crash recovery); converted weak integration tests to focused unit tests on ProcessManager effective flag computation.
-- **730 backend tests passing (37 total process_manager tests), EXIT 0**
-**Session Notes (M13 — Settings & Review API):** M13 fully executed + post-review hardened. `monocle/config.py`: `save_config_patch(patch: dict)` function — deep-merges allowed sections (`ai`, `vault`, `index`, `agents`, `review`, `server`, `telemetry`, `ui`) into `config.yaml` atomically via mkstemp+os.replace; respects `MONOCLE_CONFIG` env var. `monocle/index/base.py`: `patch_file_metadata(file_path, updates)` abstract method added. `monocle/index/chroma.py`: `patch_file_metadata` implementation uses `collection.get(where=file_path_filter)` + `collection.update()` with scalar-only metadata merge. `monocle/index/memory.py`: `patch_file_metadata` implementation updates `chunk.metadata` dict in-place. `monocle/routers/settings.py`: `GET /api/settings` returns all settings sections + `mcp_key_last4` (masked); `PATCH /api/settings` accepts `{review: ..., ai: ...}` partial patch — `AIPatch.provider` and `AIPatch.transcribe_backend` typed as `Literal` (invalid values → 422); `ReviewPatch` fields have `ge`/`le` range guards (out-of-range → 422); writes to config.yaml via `save_config_patch`, hot-reloads `AIProvider` when `ai.provider` changes; rate-limited 30/min; `POST /api/settings/rotate-mcp-key` generates `secrets.token_hex(32)`, writes to `.env` atomically, updates `os.environ`, rate-limited 10/min; `_write_env_key` strips newlines from value. `monocle/routers/review.py`: `GET /api/review` warms `app.state._review_pending_count` cache as side-effect; `GET /api/review/count` returns O(1) from cache when warm, falls back to vault scan; `PATCH /api/review/{path}/approve` rate-limited 60/min, decrements count cache; `POST /api/review/approve-all` parallelized via `asyncio.gather` + `asyncio.Semaphore(10)`, rate-limited 30/min, sets cache to remainder. `app.state._review_pending_count` initialized `None` in lifespan and in `_reindex_file` callback; `notes.py` PUT/PATCH/DELETE and `ingest.py` POST/stream also invalate cache on vault write. `monocle/tests/test_settings.py`: 28 tests (was 19); added `TestInputValidation` (9 tests: Literal constraints, range validators), `TestAIProviderHotReload` (2 tests: hot-reload triggered, not triggered), `TestRotateMcpKey.test_rotate_replaces_old_key_in_os_environ`. `monocle/tests/test_review.py`: 34 tests (was 25); added `test_approve_all_sets_all_approval_fields`, `test_approve_all_partial_failure_count`, `TestPendingCountCache` (3 tests), `TestPaginationEdgeCases` (1 test). `monocle/tests/test_security.py`: added `test_approve_path_traversal_blocked`, `test_approve_absolute_path_blocked`. **644 tests passing (18 new post-review), 6 deselected, EXIT 0.**
-**Session Notes (M12 — MCP Server):** M12 fully executed. `monocle/mcp_server.py`: `FastMCP("monocle", stateless_http=True)` + 8 tools (`search_vault`, `read_note`, `browse_recent`, `capture_thought`, `create_note`, `update_note`, `get_graph`, `get_stats`); `_MCPState` singleton (instance attrs, `assert_ready()`, `reindex_queue` field) populated via `init_mcp_state(vault, index, ai, ingest_pipeline, graph_builder, reindex_queue)`; `_MCPAuthMiddleware` ASGI wrapper validates `x-monocle-key` header or `?key=` query param using `hmac.compare_digest` (constant-time); logs WARNING when `?key=` path is taken; returns HTTP 401 JSON if missing or invalid; `create_mcp_app(mcp_key)` → `_MCPAuthMiddleware`; MCP key loaded from env at `create_app()` time. `capture_thought` forwards `source` param to `IngestPipeline`. `create_note`/`update_note` push to `reindex_queue` after write; `update_note` sets `metadata.updated = datetime.now(utc)`. `get_stats` paginates via `_fetch_all_refs()` (500-note batches). `monocle/main.py`: `init_mcp_state(...)` called in lifespan with `reindex_queue=reindex_queue`; `create_mcp_app(mcp_key)` mounted at `/mcp`. `monocle/tests/test_mcp.py`: 40 tests across 4 classes — `TestMCPAuth` (6), `TestMCPTools` (26), `TestMCPSecurityBoundaries` (5), `TestMCPServerConfig` (3). SPIKE-2 outcome recorded. **589 tests passing (40 MCP), 6 deselected, EXIT 0.**
-**Session Notes (M11 — Scheduled Agents):** M11 fully executed. `monocle/agents/weekly_summary.py`: `WeeklySummaryAgent.run(vault, index, ai, settings)` — collects notes updated within 7 days via `vault.list_notes(limit=500)`, fetches embeddings via new `index.get_embeddings_by_file()`, clusters with `AgglomerativeClustering(metric="cosine", linkage="average")` (scikit-learn) for batches ≥4; `_llm_group_notes` JSON-prompt fallback for small batches; `_summarise_cluster` per-cluster chat call using `prompts/weekly_review.md`; writes `summaries/YYYY-WW.md` via `vault.write_note(file_path, Note(...))`. `monocle/index/base.py`: new `get_embeddings_by_file(file_paths) -> dict[str, list[float]]` abstract method. `monocle/index/chroma.py`: pages `_GET_PAGE_SIZE` batches via `collection.get(where={"file_path": {"$in": batch}})`, returns `chunk_index=0` embedding per file. `monocle/index/memory.py`: returns `{}` (triggers LLM fallback in tests). `monocle/main.py`: weekly summary cron job wired — `_weekly_summary_agent` instance + `scheduler.add_cron_job("weekly_summary", ...)` + `app.state.weekly_summary_agent`. `monocle/routers/agents.py`: both endpoints implemented — `POST /api/agents/weekly-summary` StreamingResponse SSE (`start`/`done`/`error` events), `POST /api/agents/reindex` 202 via `BackgroundTasks`. `monocle/tests/test_scheduler.py`: 12 new tests — `TestWeeklySummaryAgent` (7 tests), `TestAgentAPIEndpoints` (5 tests). `tests/test_api.py`: agents routes removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: scheduler` task added. **542 tests passing (12 new), 6 deselected, EXIT 0.**
-**Session Notes (2026-03-18 M10 post-review):** M10 code review resolved 13 issues. **Bugs**: `AIProvider.chat()` ABC now accepts `tools: list[dict] | None = None`; all 3 providers (`OllamaProvider`, `FoundryLocalProvider`, `AzureOpenAIProvider`) forward `tools=`, check `response.message.tool_calls` / `choices[0].message.tool_calls`, and serialize non-empty tool_calls to JSON string; `_inner_get_response` and `_inner_get_streaming_response` in `agents/__init__.py` pass `tools=tools` directly; streaming adapter detects and yields `FunctionCallContent` via `_try_parse_tool_calls`; `create_from_template` now followed by `write_note` in `create_note` tool (notes were never written to disk). **Security**: `create_note` sets `review_status="pending"` so agent-created notes land in the review queue; `_MAX_BODY_LENGTH = 50_000` constant enforced in both `write_note` and `create_note`. **Minor**: `tags=[]` mutable default changed to `tags: list[str] | None = None`; `import asyncio` moved to module-level in `tools.py`; OTel port detection uses `urlparse` instead of fragile string match. **Tests**: 9 new tests in `test_ai.py` (`TestOllamaChatWithTools`, `TestFoundryLocalChatWithTools`, `TestAzureChatWithTools`); ~30 new tests in `test_agents.py` (`TestVaultToolsExecution` 14 tests, `TestToDictMessages` 5 tests, `TestTryParseToolCalls` 5 tests, `TestChatSSEErrorContract` 2 tests); existing mocks updated with `tool_calls=None` to prevent MagicMock auto-attribute false-positive. **530 tests passing (33 new), EXIT 0.**
-**Session Notes (2026-03-18 M10):** M10 fully executed. `monocle/agents/tools.py`: `VaultTools` class with 7 `@ai_function` decorated tools (`search_vault`, `read_note`, `write_note`, `create_note`, `get_stats`, `list_notes`, `get_person_graph`); each tool wraps vault/index/ai operations with try/except; `_to_thread` helper for sync→async conversion; `.tools` list exposed for `ChatAgent`. `monocle/agents/__init__.py`: `_AIProviderChatClient(BaseChatClient)` adapter with `@use_function_invocation` — `_to_dict_messages()` converts ChatMessage list (including FunctionCallContent/FunctionResultContent) to OpenAI-style dicts; `_build_openai_tools()` calls `.to_json_schema_spec()` on each AIFunction; `_inner_get_response()` and `_inner_get_streaming_response()` bridge to `AIProvider.chat()`; `_try_parse_tool_calls()` detects inline JSON tool calls; `_configure_agent_otel()` calls `configure_otel_providers` once; `create_chat_agent(ai, vault, index, settings, graph_builder)` factory returns ready `ChatAgent`. `routers/chat.py`: full SSE streaming `POST /api/chat`; `ChatRequest(messages, session_id)`; creates agent per request via `create_chat_agent`; translates `AgentRunResponseUpdate` contents to SSE events (TextContent→`token`, FunctionCallContent→`tool_call`, FunctionResultContent with status=created→`note_created`); records `chat.ttft` and `chat.total_duration` OTel histograms; echoes `session_id` in `done` event; 60/minute rate limit; exceptions emit `error` event. `monocle/tests/test_agents.py`: 14 tests across 3 classes (TestChatSSEStream 10 tests, TestVaultTools 3 tests, TestCreateChatAgent 2 tests). `tests/test_api.py`: `POST /api/chat` removed from `STILL_STUB_ROUTES`. `.vscode/tasks.json`: `test: agents` task added. SPIKE-3 RESOLVED — see Technical Spikes. **497 tests passing (14 new + 10 from test_api adjustment), EXIT 0.**
-**Session Notes (2026-03-18 M9):** M9 fully executed. `monocle/graph.py`: `GraphBuilder` class with `build(focus, max_degree, types, n) -> GraphData`; reads all vault notes via `VaultLayer`; extracts edges from (1) structured `links` frontmatter (`edge_type="structured"`), (2) body `[[wikilinks]]` (`edge_type="wikilink"`, relation=`"links-to"`), (3) `people` co-mentions (`edge_type="co-mention"`, relation=`"mentioned-in"`), (4) shared tags (`edge_type="co-mention"`, relation=`"shares-tag"`; capped at 20 notes-per-tag to prevent O(n²) explosion); name resolution via `resolve_wikilink()`; BFS degree computation from focus node (unreachable nodes/edges pruned); `types` filter applied post-BFS; weights tracked via internal dict before converting to `GraphEdge`; in-memory cache keyed on `(focus, max_degree, types_tuple, n)` — full invalidation on `invalidate()`. `routers/graph.py`: wired to `GraphBuilder` with `focus`, `max_degree`, `types`, `n` query params; runs in `asyncio.to_thread`. `monocle/main.py`: `GraphBuilder` created after `VaultLayer` in lifespan; stored on `app.state.graph_builder`; `_reindex_file` callback calls `graph_builder.invalidate()` at the top so any vault file change (write, delete, re-index) clears the cache. `monocle/tests/conftest.py`: `api_client` fixture test lifespan now sets `app.state.graph_builder`. `monocle/tests/test_api.py`: `GET /api/graph` removed from `STILL_STUB_ROUTES`. `monocle/tests/test_graph.py`: 33 tests across 8 test classes (`TestGraphBuilderFullVault`, `TestCoMentionEdges`, `TestWikilinkEdges`, `TestStructuredLinkEdges`, `TestSharedTagEdges`, `TestFocusedGraph`, `TestTypesFilter`, `TestGraphCache`, `TestGraphAPIEndpoint`). `.vscode/tasks.json`: `test: graph` task added. **469 tests passing (33 new), EXIT 0.**
-**Session Notes (2026-03-18 M8 post-review):** M8 code review resolved 12 issues across 8 files. **Security**: raw exception strings replaced with generic user-facing messages in `routers/ingest.py`, `routers/transcribe.py`, and `routers/ingest_failures.py` (internal details still logged). **Bugs fixed**: `_note_to_markdown` in `vault/__init__.py` iterated over `raw["links"]` (already-dumped dicts from `model_dump()`) and tried to call `.model_dump()` on them again — fixed to iterate over `note.metadata.links` (live `LinkRef` objects) and pop `links` from raw after; `routers/health.py` now returns `"degraded"` instead of `"ready"` when `ai_reachable=False` or watcher is down; `overall_status` no longer uses `__import__("asyncio")` (now imports normally); `routers/ingest.py` SSE stream now emits step events as each pipeline step completes via an `on_step` async callback instead of firing all events upfront — `IngestPipeline.run()` extended with optional `on_step: Callable[[int], Awaitable[None]] | None` parameter and calls it after each of the 8 steps; SSE `_run_pipeline` task now uses `try/finally` to always put the sentinel on the queue even on exception; `routers/ingest_failures.py` retry response now includes `content_truncated: bool` flag; `main.py` `_reindex_file` callback uses the note's `metadata.updated` (or `created`) timestamp for `updated_at` instead of the re-index wall clock; `import re` inside inner loop and dead `parse_links_field` import removed from `routers/notes.py`. **Build-plan**: `stats.py` latency fields deferred explicitly to M11 (in-process OTel MetricReader readback). **Tests**: 10 new tests added — `test_backlinks_structured_link`, `test_backlinks_people_co_mention` (backlinks M9-prep), backlink identity assertion fixed in `test_backlinks_returns_list`, `test_ingest_stream_emits_step_and_done_events` (SSE event content), `test_semantic_search_type_filter`, `test_semantic_search_domain_filter`, `test_semantic_search_source_filter`, `test_keyword_search_domain_filter` (search filters), `test_retry_success_creates_note` (ingest failure retry), `test_cors_dev_origin_excluded_in_non_dev_mode` (CORS isolation), `test_move_note_to_path_traversal_blocked` (move security). **436 tests passing (10 new), EXIT 0.**
-**Session Notes (2026-03-18 M8):** M8 fully executed. All 7 stub routers replaced with real implementations wired to `VaultLayer`, `IngestPipeline`, `FailedIngestRegistry`, `IndexLayer`, and `AIProvider`. `monocle/main.py` lifespan fully rewritten: `AIProvider` init (non-fatal), `FailedIngestRegistry`, `IngestPipeline`, `ReindexQueue._reindex_file` callback (embed chunks → upsert), `InboxWatcher._inbox_ingest_callback` (reads file → IngestRequest → pipeline), `ReindexAgent(embed_fn=ai.embed)`. `monocle/models.py`: `IngestResponse(note, confidence)` added; `BrainStats` gains `latency_p50_ms` + `latency_p95_ms` fields; `audio_bytes` changed to custom `AudioBytesField` (`Annotated[bytes | None, BeforeValidator]`) that decodes base64 strings from JSON but passes raw bytes through unchanged. `routers/health.py`: pings AI via embed, reads watcher status, includes `telemetry_endpoint` and `watcher_running`. `routers/notes.py`: full CRUD + backlinks (structured links + wikilinks + people co-mention) + optimistic-concurrency 409. `routers/search.py`: semantic (embed + index.search) + keyword (vault text scan). `routers/ingest.py`: POST wired with `DuplicateSuspected→409`; SSE stream emits step events. `routers/ingest_failures.py`: GET/retry/DELETE all wired. `routers/transcribe.py`: multipart upload + 25 MB guard. `routers/stats.py`: aggregates vault counts by type/domain/pending, index chunk count, failed count. `tests/conftest.py`: added `mock_ai` and `api_client` fixtures (test lifespan patches `monocle.main.lifespan` with `_test_lifespan` using temp VaultLayer + MemoryIndex). `tests/test_api.py`: complete M8 integration test suite (7 test classes, ~40 tests). `tests/test_security.py`: 17 tests across 5 classes (path traversal, audio size, optimistic concurrency, CORS, duplicate detection) — path traversal tests use `%2e%2e` percent-encoding so httpx doesn't normalise `..` before routing. `.vscode/tasks.json`: `test: api` and `test: security` tasks added. **426 tests passing (32 new), EXIT 0.**
-**Session Notes (2026-03-18 M7):** M7 fully executed: `monocle/ingest/plugin.py` (`IngestPlugin` ABC + `IngestPluginRegistry` singleton — `source_id/source_label` ClassVars, `can_handle()`, `extract()`; first-match-wins `resolve()`; `.reset()` for tests); `monocle/ingest/plugins/text_plugin.py`, `audio_plugin.py`, `teams_plugin.py` (three built-in plugins, priority-registered via `register_default_plugins()`); `monocle/prompts.py` — `load_prompt(name)` checks `prompts/local/<name>.md` before `prompts/<name>.md`, strips frontmatter; `monocle/agents/routing.py` — `RoutingAgent` with sentence-starter fast path (no LLM, confidence=0.9), template_hint shortcut (confidence=1.0), LLM JSON fallback via `load_prompt("routing")`; all 10 template YAMLs already had `sentence_starters` (no change needed); `monocle/ingest/confidence.py` — deterministic `score_confidence()` (0.35×template_match + 0.30×metadata_coverage + 0.20×tag_plausibility + 0.15×entity_match; tag plausibility is text substring match, NOT embedding; entity_match via `vault.resolve_wikilink`) + `compute_approval_metadata()`; `monocle/ingest/failed_registry.py` — JSON array persistence with atomic write (mkstemp + os.replace), add/get/mark_retried/delete/count; `monocle/ingest/__init__.py` — full `IngestPipeline` 8-step run(); `DuplicateSuspected` exception; duplicate detection (score≥0.95 AND within 7 days); OTel histograms + counters per step; `.error.md` sidecar + failed_registry on steps 3–5 failure; `monocle/models.py` extended — `IngestConfidence` gains `similar_note_detected: bool` and `similar_note_path: str | None`; `monocle/tests/test_ingest.py` — 66 tests across 14 test classes; `.vscode/tasks.json` — `test: ingest` task. **385 tests passing (66 new + 5 deselected/prior), EXIT 0.**
-**Session Notes (2026-03-18 M7 post-review):** Code review resolved 9 issues: greedy regex in `_parse_routing_response` (non-greedy `{.*?}` truncated nested JSON — changed to `{.*}`); LLM-returned unknown template names now normalised to `blank`; routing decision template overwritten by NoteMetadata default `"blank"` in `_construct_note` — `"template"` key excluded from `metadata_dict`; Windows-illegal chars in sidecar filenames now stripped via `_UNSAFE_FILENAME_RE`; OTel instruments moved to module-level lazy singleton (eliminate per-instance duplicate-instrument warnings); `RoutingAgent` cached as `self._routing_agent` in `__init__` (eliminates per-run YAML I/O); error message wrapped in fenced code block in sidecar body (prevent `---` frontmatter injection); `threading.Lock` added to all `FailedIngestRegistry` mutation methods; `register_default_plugins` made idempotent (skips `source_id` already present). 9 new tests added (7-day cutoff, `DuplicateSuspected` skips registry, step-8 propagation, unparseable date conservative path, `register_default_plugins` idempotency, unknown LLM template, greedy-regex nested JSON × 2); fixed no-op assertion. **394 tests passing, EXIT 0.**
-**Session Notes (2026-03-18):** Pluggable `TranscriptionProvider` abstraction implemented. `monocle/ai/transcription.py`: `TranscriptionProvider` ABC; `WhisperCppTranscriptionProvider` (httpx POST to whisper.cpp `POST /inference`); `SubprocessTranscriptionProvider` (openai-whisper CLI executor); `NativeOpenAITranscriptionProvider` (OpenAI client adapter for Foundry/Azure); `get_transcription_provider(settings)` factory (returns `None` for `"native"`). `AIProvider.transcribe()` made concrete — delegates to `self._transcription_provider`. `OllamaProvider` subprocess transcription removed; accepts `transcription_provider=` param. `FoundryLocalProvider` + `AzureOpenAIProvider` accept `transcription_provider=`; default to `NativeOpenAITranscriptionProvider`. `get_provider()` factory calls `get_transcription_provider()` and passes provider to all three constructors. `config.py` extended with `ai.transcribe_backend` + `ai.transcribe_url`. `pyproject.toml` adds `httpx` to runtime deps. 12 new tests in `test_ai.py` (`TestWhisperCppTranscriptionProvider`, `TestSubprocessTranscriptionProvider`, `TestNativeOpenAITranscriptionProvider`, `TestGetTranscriptionProvider`, `TestOllamaTranscription`). **314 tests passing, EXIT 0.**
-**Session Notes (2026-03-17):** M6 fully executed: `monocle/ai/base.py` (`AIProvider` ABC with `embed`, `embed_batch`, `chat`, `transcribe`, `extract_note_metadata`; `_open_span` sync span helper for async-generator compatibility; `_load_extract_prompt()` loads `prompts/extract.md` with frontmatter stripping and inline default fallback; `_parse_json_response()` handles markdown-fenced and plain JSON); `monocle/ai/ollama_provider.py` (`OllamaProvider` — `ollama.AsyncClient`, auto-pull on first use via `_ensure_model()`, streaming via `_stream_chat()` async generator without await, SPIKE-1 fallback via `openai-whisper` subprocess in `_whisper_subprocess()`); `monocle/ai/foundry_local_provider.py` (`FoundryLocalProvider` — `openai.AsyncOpenAI` with custom base_url, `embed_dimensions` parameter support, OpenAI-compatible transcription); `monocle/ai/azure_provider.py` (`AzureOpenAIProvider` — `openai.AsyncAzureOpenAI`, `dimensions` on embed, Azure Whisper transcription); `monocle/ai/__init__.py` (`get_provider(settings)` factory selecting all three providers); `monocle/config.py` extended with `ai.transcribe_model` field; OTel instrumentation: `span()` + `timed()` on all methods, `_open_span()` sync helper for streaming generators; **SPIKE-1 RESOLVED (FAILED)**: Ollama Python client has no transcription API; fallback is `openai-whisper` subprocess; `monocle/tests/test_ai.py` (27 tests, 3 integration tests deselected by default via `addopts`); `monocle/telemetry.py` `span()` fixed for Python 3.14 double-yield bug (`_yielded` flag prevents re-yield after `athrow()`); `pyproject.toml` updated with `addopts = "-m 'not integration'"` and `integration` marker registration; `.vscode/tasks.json` extended with `test: ai` task. **All 302 tests passing (27 new), EXIT 0.**
-**Session Notes:** M5 fully executed: `monocle/ingest/chunker.py` (`chunk_text()` via tiktoken cl100k_base, 512-token chunks, 64-token overlap); `monocle/watcher.py` (`ReindexQueue` — asyncio-based per-file coalescing queue with 10-second idle window, thread-safe `push()` via `call_soon_threadsafe`; `InboxWatcher` — watchdog.Observer non-recursive on inbox dir, 2-second per-file debounce via threading.Timer, `_InboxEventHandler` with dynamic watchdog base-class inheritance, `.error.md` sidecar on failure); `monocle/agents/reindex.py` (`ReindexAgent` — stale detection via `get_file_timestamps()`, `run(vault, index, force=False)`, `startup_check(vault, index)`, `health_status` attribute); `monocle/agents/scheduler.py` (`MonocleScheduler` wrapping `AsyncIOScheduler`, `add_cron_job()` from 5-field cron string); `monocle/index/base.py`, `memory.py`, `chroma.py` extended with `get_file_timestamps() -> dict[str, str]`; `monocle/main.py` lifespan wired with VaultLayer, IndexLayer, ReindexQueue, ReindexAgent, MonocleScheduler, InboxWatcher, and startup_check. Post-M5 code review resolved 14 issues: timestamp Z/+00:00 normalisation (`_normalise_ts()`), `.error.md` exclusion from `_collect_md_files()`, `status()` timer-lock race, ReindexQueue callback exception logging, `MonocleScheduler` typo rename (alias retained), symlink traversal guard in `_collect_md_files()`, YAML injection fix in `_write_error_sidecar()`, `push()` trust-boundary doc, tiktoken encoder caching; 21 new tests in `test_scheduler.py` + additions to `test_watcher.py` and `test_reindex.py`; pinned `apscheduler<4`. Second-pass review resolved 4 more issues: `.error.md` cascade dispatch filter, vault-relative hidden-dir guard in `_collect_md_files()`, per-note try/except in `ReindexAgent.run()`, `os.path.basename` dedup; 4 more tests added. Post-review hardening: `_fire()` shutdown-race (loop.is_running() guard + RuntimeError TOCTOU catch + coroutine close) and unobserved-Future fix (`_log_future_exception` done-callback); 5 more tests. `ReindexQueue.stop()` now gathers cancelled tasks to completion (no pending-task teardown warnings); 1 more test. `ChromaIndex.get_file_timestamps()` now pages through chunks in batches of 1 000 (`_GET_PAGE_SIZE`) instead of one unbounded `collection.get()`; fake updated; 2 pagination tests. `_reindex_note()` now returns `bool` (`True`=chunks upserted, `False`=empty body); `run()` gates `reindexed += 1` on the return value so empty-body notes (chunk-deleted but nothing written) no longer inflate the count; 1 new test. `_collect_md_files()` hidden-dir check narrowed to `rel_parts[:-1]` so dotfiles (e.g. `.frontmatter.md`) are no longer silently excluded — only hidden *directory* components are filtered; docstring updated; 1 new test. Staleness comparison fix: skip condition now requires `note_updated` to be non-empty so notes without an `updated` frontmatter field are always re-indexed rather than frozen in the index; 1 new test. `InboxWatcher` now accepts `debounce_s` constructor arg; `main.py` passes `cfg.vault.debounce_ms / 1000` eliminating drift between the class constant and `vault.debounce_ms` config; 2 new tests. `ReindexAgent.run()` now guards against `embed_fn=None` + non-memory backend at the top of `run()`: if `get_stats().backend != "memory"` and no `embed_fn`, it logs a WARNING and returns 0 immediately — preventing the delete-before-upsert wipe cycle that would silently destroy all indexed chunks on every startup_check/scheduled run until M6 wires a real AIProvider. `_reindex_note()` reordered to **prepare-then-swap**: all chunks are built (and embedded) before `delete_file()` is called, so if chunk preparation fails the existing index data is preserved; `main.py` `ReindexAgent()` call annotated with TODO comment for M6 embed_fn wiring; 4 new tests in `TestReindexAgentEmbedGuard`. `main.py` lifespan now respects `cfg.vault.watch`: `InboxWatcher` creation, `start()`, and `stop()` are all gated behind `if cfg.vault.watch`; when disabled a `[WATCHER]` INFO log is emitted and `app.state.watcher` is set to `None`; shutdown guard changed to `if watcher is not None`. No new tests needed (covered by existing watcher tests and API lifecycle tests). **All 275 tests passing** on Python 3.14.3, EXIT 0.
+
+**Older milestone details:** archived in [docs/milestones.md](milestones.md).
 
 ---
 
@@ -208,12 +166,12 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M41 | MCP Session-Based Capture                                      | PAUSED      |
 | D1  | Simplification Docs Alignment                                  | COMPLETE    |
 | M42 | Remove Separate-Process Support                                | COMPLETE    |
-| M43 | Consolidate Ingest Workflow Ownership                          | NOT STARTED |
-| M44 | Unified Capture Workbench Backend Contract                     | NOT STARTED |
-| M45 | Unified Capture Workbench Frontend                             | NOT STARTED |
-| M46 | Lean Chat & Explicit URL Capture                               | NOT STARTED |
-| M47 | Omnisearch Hardening                                           | NOT STARTED |
-| M48 | Cleanup & Contract Hardening                                   | NOT STARTED |
+| M43 | Consolidate Ingest Workflow Ownership                          | COMPLETE    |
+| M44 | Unified Capture Workbench Backend Contract                     | COMPLETE    |
+| M45 | Unified Capture Workbench Frontend                             | COMPLETE    |
+| M46 | Lean Chat & Explicit URL Capture                               | COMPLETE    |
+| M47 | Omnisearch Hardening                                           | COMPLETE    |
+| M48 | Cleanup & Contract Hardening                                   | COMPLETE    |
 
 ---
 
@@ -627,7 +585,7 @@ tests/e2e/            Playwright tests (require running server)
 
 **Status:** COMPLETE (2026-03-18)
 
-**Summary:** `GET/PATCH /api/settings` with masked MCP key and atomic config.yaml persistence; `POST /api/settings/rotate-mcp-key`; full review queue CRUD (`GET /api/review`, `GET /api/review/count`, `PATCH /api/review/{path}/approve`, `POST /api/review/approve-all`) with frontmatter + ChromaDB metadata sync. `patch_file_metadata` added to IndexLayer, ChromaIndex, and MemoryIndex.
+**Summary:** Historical milestone: `GET/PATCH /api/settings` with masked MCP key and atomic config.yaml persistence; `POST /api/settings/rotate-mcp-key`; an early review-queue CRUD surface was added here and later superseded by the unified capture-workbench plus approve/reject-only review actions in M44-M48. `patch_file_metadata` was added to IndexLayer, ChromaIndex, and MemoryIndex.
 
 **Full details:** [docs/milestones.md#m13-settings--review-api](milestones.md#m13-settings--review-api)
 
@@ -684,7 +642,7 @@ Force-directed graph screen with focus input (autocomplete), depth [1][2][3] tog
 ### M19: Voice Capture & Review Queue UI
 
 **Status:** COMPLETE (2026-03-21)
-Added voice capture modal (Web Speech API primary, MediaRecorder + Whisper fallback), review-queue slide-over sorted by confidence ascending, and failed-captures warning panel. Badge counts poll `GET /api/review/count` and ingest-failure list every 30 s. 224 frontend tests passing.
+Added voice capture modal (Web Speech API primary, MediaRecorder + Whisper fallback) plus the original review/failure drawers. That fragmented app-shell surface was later replaced by the unified capture workbench in M45 and fully removed in M48. 224 frontend tests passing.
 **Full details:** [docs/milestones.md#m19-voice-capture--review-queue-ui](milestones.md#m19-voice-capture--review-queue-ui)
 
 ---
@@ -710,7 +668,7 @@ Implemented StatsScreen with live stat cards and Recharts charts, useHotkeys hoo
 ### M22: Dev Automation & Optional Process Separation
 
 **Status:** COMPLETE (2026-03-21)
-Implemented optional process separation: `ProcessManager` + `SubprocessHandle` with exponential-backoff crash-restart; `watch`, `scheduler`, `capture` CLI commands operational as standalone process entry points; `--separate-processes` flag on `serve`/`dev`; lifespan gating in `main.py`. 715 tests passing (22 new in `test_process_manager.py`).
+Implemented optional process separation: `ProcessManager` + `SubprocessHandle` with exponential-backoff crash-restart; `watch`, `scheduler`, `capture` CLI commands as standalone process entry points; and `--separate-processes` support on `serve`/`dev`. This topology was later removed from the supported mainline in M42. 715 tests passing (22 new in `test_process_manager.py`).
 **Full details:** [docs/milestones.md#m22--dev-automation--optional-process-separation](milestones.md#m22--dev-automation--optional-process-separation)
 
 ---
@@ -981,126 +939,54 @@ Health and startup behavior now follow one path only, and `uv run python -m mono
 
 ### M43: Consolidate Ingest Workflow Ownership
 
-**Status:** NOT STARTED — depends on D1
-
-Centralize ingest prepare/review/execute state ownership behind one workflow layer while keeping `IngestSessionStore` focused on persistence and archival.
-
-**Deliverables:**
-
-- [ ] Consolidate prepare/review/execute orchestration behind one workflow owner
-- [ ] Reduce scattered ingest state transitions across multiple modules
-- [ ] Keep `IngestSessionStore` focused on storage, archival, notifications, and mutation primitives
-
-**Acceptance Criteria:**
-
-- [ ] One workflow owner is responsible for ingest state transitions and user-visible flow orchestration
-- [ ] Session storage and archive concerns remain isolated from orchestration concerns
-
+**Status:** COMPLETE (2026-04-29)
+Centralized ingest workflow ownership behind `monocle/services/ingest_workflow.py`, moved routers and service callers onto that layer, and reduced `IngestSessionStore` review mutations to storage-only primitives.
+**Full details:** [docs/milestones.md#m43-consolidate-ingest-workflow-ownership](milestones.md#m43-consolidate-ingest-workflow-ownership)
 **Test command:** `uv run python -m pytest monocle/tests/test_ingest.py monocle/tests/test_ingest_prepare.py monocle/tests/test_api.py -x --tb=short -q`
 
 ---
 
 ### M44: Unified Capture Workbench Backend Contract
 
-**Status:** NOT STARTED — depends on M43
-
-Add one aggregated backend contract for actionable capture work across prepared sessions, pending review notes, and failed captures.
-
-**Deliverables:**
-
-- [ ] Add one summary/list contract for capture workbench items and counts
-- [ ] Preserve legacy review/failure/session endpoints temporarily as compatibility adapters where needed
-- [ ] Make one top-level actionable count available to the frontend
-
-**Acceptance Criteria:**
-
-- [ ] The frontend can retrieve one capture workbench summary without polling three separate count surfaces
-- [ ] Prepared sessions, pending review items, and failures can all be represented in one backend shape
-
+**Status:** COMPLETE (2026-04-29)
+Added `/api/capture-workbench` plus shared aggregation helpers so prepared sessions, threshold-filtered pending review notes, and failure records now ship in one backend shape with one actionable count while legacy review and failure routes remain adapters.
+**Full details:** [docs/milestones.md#m44-unified-capture-workbench-backend-contract](milestones.md#m44-unified-capture-workbench-backend-contract)
 **Test command:** `uv run python -m pytest monocle/tests/test_api.py monocle/tests/test_review.py monocle/tests/test_ingest.py -x --tb=short -q`
 
 ---
 
 ### M45: Unified Capture Workbench Frontend
 
-**Status:** NOT STARTED — depends on M44
-
-Replace the separate prepared-session, review-queue, and failed-capture surfaces with one unified workbench in the app shell.
-
-**Deliverables:**
-
-- [ ] Add a unified workbench route or drawer with sections/tabs for prepared, pending review, and failures
-- [ ] Replace topbar/app polling for separate counts with one workbench summary query
-- [ ] Retire `IngestInbox`, `ReviewQueue`, and `FailedCaptures` as separate primary entry points
-
-**Acceptance Criteria:**
-
-- [ ] Users can inspect prepared sessions, approve/fix pending notes, and retry failures from one coherent surface
-- [ ] The topbar exposes one actionable workbench affordance instead of separate review/failure affordances
-
+**Status:** COMPLETE (2026-04-29)
+Replaced the separate prepared-session, review-queue, and failed-capture app-shell surfaces with one capture-workbench drawer, one topbar badge, and one polling contract while keeping `/ingest-review` and `/docs` as deep workflow handoff routes.
+**Full details:** [docs/milestones.md#m45-unified-capture-workbench-frontend](milestones.md#m45-unified-capture-workbench-frontend)
 **Test command:** `cd frontend && npm run test -- --run`
 
 ---
 
 ### M46: Lean Chat & Explicit URL Capture
 
-**Status:** NOT STARTED — depends on M44
-
-Remove automatic URL prefetch from chat and replace it with explicit capture actions that hand off to the capture workbench or deliberate reference capture.
-
-**Deliverables:**
-
-- [ ] Remove `fetch_urls`-style automatic chat prefetch orchestration
-- [ ] Keep URL detection in the composer only as an explicit `Capture URLs` affordance
-- [ ] Preserve `create_reference_from_url` as an explicit service/tool, not hidden router-level automation
-
-**Acceptance Criteria:**
-
-- [ ] `/api/chat` no longer performs hidden URL-capture side effects during a normal chat turn
-- [ ] URL capture remains available, but only through an explicit user action
-
+**Status:** COMPLETE (2026-04-29)
+Removed the hidden `/api/chat` URL-prefetch path, added an explicit chat-composer `Capture URLs` handoff into the ingest workflow, and kept `create_reference_from_url` available only through explicit tool use.
+**Full details:** [docs/milestones.md#m46-lean-chat--explicit-url-capture](milestones.md#m46-lean-chat--explicit-url-capture)
 **Test command:** `uv run python -m pytest monocle/tests/test_agents.py monocle/tests/test_mcp.py -x --tb=short -q`
 
 ---
 
 ### M47: Omnisearch Hardening
 
-**Status:** NOT STARTED — depends on D1
-
-Keep omnisearch distinct from semantic search while tightening its fast-match behavior and performance contract.
-
-**Deliverables:**
-
-- [ ] Keep `/api/search/omni` separate from semantic search
-- [ ] Enforce the distinct fast-match behavior, including the 3-character trigger assumption
-- [ ] Introduce a lighter cached catalog or prefix/text index if full-vault scans become too expensive
-
-**Acceptance Criteria:**
-
-- [ ] Omnisearch remains a separate fast-match feature rather than drifting into semantic-search duplication
-- [ ] The user experience stays responsive once the first three characters are typed
-
+**Status:** COMPLETE (2026-04-29)
+Hardened omnisearch with an AI-free cached catalog, trimmed-query 3-character gating, and topbar UI stale-result/keyboard fixes while preserving the separate semantic-search handoff.
+**Full details:** [docs/milestones.md#m47-omnisearch-hardening](milestones.md#m47-omnisearch-hardening)
 **Test command:** `uv run python -m pytest monocle/tests/test_api.py::TestOmniSearch -x --tb=short -q`
 
 ---
 
 ### M48: Cleanup & Contract Hardening
 
-**Status:** NOT STARTED — depends on M42, M45, M46, and M47
-
-Remove obsolete adapters, dead tests, stale docs, and legacy behaviors after the simplified paths are validated.
-
-**Deliverables:**
-
-- [ ] Remove retired tests and adapter code for separate-process runtime, fragmented capture surfaces, and legacy chat URL prefetch
-- [ ] Refresh generated API artifacts and docs once the replacement contracts are stable
-- [ ] Leave the simplified architecture as the only architecture documented and supported in the mainline
-
-**Acceptance Criteria:**
-
-- [ ] No obsolete user-facing drawers, counts, runtime flags, or legacy chat prefetch paths remain in the mainline
-- [ ] Tests and docs describe only the supported simplified architecture
-
+**Status:** COMPLETE (2026-04-29)
+Removed the last fragmented capture compatibility drawers, obsolete review/failure/notification adapters, and stale contract docs after the unified workbench, lean chat, and omnisearch simplifications were validated.
+**Full details:** [docs/milestones.md#m48-cleanup--contract-hardening](milestones.md#m48-cleanup--contract-hardening)
 **Test command:** `uv run python -m pytest monocle/tests/ -x --tb=short -q`
 
 ---

@@ -1,40 +1,20 @@
 /**
- * M19 – Voice Capture & Review Queue UI
+ * Voice capture and topbar UI regressions.
  *
  * Tests for:
  *  - VoiceModal (state machine, template selector, save/discard)
- *  - ReviewQueue (sort by confidence, approve, approve-all, empty state)
- *  - FailedCaptures (retry, dismiss, empty state)
- *  - Topbar badge visibility (review badge, failed badge)
+ *  - Topbar capture-workbench badge visibility
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
 import VoiceModal from './components/VoiceModal/VoiceModal'
-import ReviewQueue from './components/ReviewQueue/ReviewQueue'
-import FailedCaptures from './components/FailedCaptures/FailedCaptures'
 import Topbar from './components/layout/Topbar'
 
 // ── Module mocks ──────────────────────────────────────────────────────────────
 
-vi.mock('./api/review', () => ({
-  listReview: vi.fn(),
-  getReviewCount: vi.fn(),
-  approveNote: vi.fn(),
-  rejectNote: vi.fn(),
-  approveAll: vi.fn(),
-}))
-
-vi.mock('./api/notes', () => ({
-  getNote: vi.fn(),
-}))
-
 vi.mock('./api/ingest', () => ({
   ingest: vi.fn(),
-  listIngestFailures: vi.fn(),
-  retryIngestFailure: vi.fn(),
-  deleteIngestFailure: vi.fn(),
 }))
 
 vi.mock('./api/transcribe', () => ({
@@ -60,60 +40,11 @@ vi.mock('react-router-dom', async () => {
 })
 
 import {
-  listReview,
-  approveNote,
-  rejectNote,
-  approveAll,
-} from './api/review'
-
-import { getNote } from './api/notes'
-
-import {
   ingest,
-  listIngestFailures,
-  retryIngestFailure,
-  deleteIngestFailure,
 } from './api/ingest'
 
 import { transcribeAudio } from './api/transcribe'
-
 import { useNavigate } from 'react-router-dom'
-
-// ── Fixtures ─────────────────────────────────────────────────────────────────
-
-const NOTE_LOW_CONFIDENCE = {
-  file_path: 'ideas/note-a.md',
-  title: 'Low confidence note',
-  type: 'idea' as const,
-  domain: 'work',
-  tags: [],
-  confidence: 0.42,
-  review_status: 'pending' as const,
-  created: '2026-03-01T10:00:00Z',
-  updated: '2026-03-01T10:00:00Z',
-}
-
-const NOTE_HIGH_CONFIDENCE = {
-  file_path: 'ideas/note-b.md',
-  title: 'High confidence note',
-  type: 'observation' as const,
-  domain: 'personal',
-  tags: [],
-  confidence: 0.88,
-  review_status: 'pending' as const,
-  created: '2026-03-01T11:00:00Z',
-  updated: '2026-03-01T11:00:00Z',
-}
-
-const FAILED_ITEM = {
-  id: 'fail-001',
-  content_preview: 'Draft thoughts on project',
-  content_truncated: false,
-  error_message: 'Routing agent timed out',
-  failed_at: '2026-03-15T08:30:00Z',
-  source: 'web',
-  retried: false,
-}
 
 function makeIngestResponse(overrides: Record<string, unknown> = {}) {
   return {
@@ -126,12 +57,6 @@ function makeIngestResponse(overrides: Record<string, unknown> = {}) {
     notification: null,
     ...overrides,
   }
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function renderInRouter(ui: React.ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -446,442 +371,27 @@ describe('VoiceModal — MediaRecorder/Whisper fallback', () => {
   })})
 
 // ═══════════════════════════════════════════════════════════════════════════════
-//  ReviewQueue
+//  Topbar workbench badge visibility
 // ═══════════════════════════════════════════════════════════════════════════════
 
-describe('ReviewQueue — closed', () => {
-  it('renders nothing when open=false', () => {
-    renderInRouter(<ReviewQueue open={false} onClose={vi.fn()} />)
-    expect(screen.queryByTestId('review-queue')).toBeNull()
-  })
-})
-
-describe('ReviewQueue — loading state', () => {
-  beforeEach(() => {
-    vi.mocked(listReview).mockReturnValue(new Promise(() => undefined))
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows loading indicator while fetching', () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    expect(screen.getByTestId('review-loading')).toBeInTheDocument()
-  })
-})
-
-describe('ReviewQueue — empty state', () => {
-  beforeEach(() => {
-    vi.mocked(listReview).mockResolvedValue({
-      items: [],
-      total: 0,
-      offset: 0,
-      limit: 50,
-    })
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows empty state when no pending items', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    await screen.findByTestId('review-empty')
-    expect(screen.getByTestId('review-empty')).toBeInTheDocument()
-  })
-
-  it('does not show Approve All when empty', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    await screen.findByTestId('review-empty')
-    expect(screen.queryByTestId('approve-all-btn')).toBeNull()
-  })
-})
-
-describe('ReviewQueue — loaded state', () => {
-  const mockNavigate = vi.fn()
-
-  beforeEach(() => {
-    vi.mocked(listReview).mockResolvedValue({
-      items: [NOTE_HIGH_CONFIDENCE, NOTE_LOW_CONFIDENCE],
-      total: 2,
-      offset: 0,
-      limit: 50,
-    })
-    vi.mocked(useNavigate).mockReturnValue(mockNavigate)
-    vi.mocked(getNote).mockResolvedValue({
-      file_path: NOTE_LOW_CONFIDENCE.file_path,
-      title: NOTE_LOW_CONFIDENCE.title,
-      body: 'Preview body content.',
-      type: NOTE_LOW_CONFIDENCE.type,
-      domain: NOTE_LOW_CONFIDENCE.domain,
-      tags: NOTE_LOW_CONFIDENCE.tags,
-      confidence: NOTE_LOW_CONFIDENCE.confidence,
-      review_status: NOTE_LOW_CONFIDENCE.review_status,
-      created: NOTE_LOW_CONFIDENCE.created,
-      updated: NOTE_LOW_CONFIDENCE.updated,
-    })
-  })
-  afterEach(() => {
-    vi.clearAllMocks()
-    mockNavigate.mockClear()
-  })
-
-  it('renders review items after load', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const items = await screen.findAllByTestId('review-item')
-    expect(items).toHaveLength(2)
-  })
-
-  it('sorts items by confidence ascending (lowest first)', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const confidences = await screen.findAllByTestId('review-item-confidence')
-    // First card should be 42% (low), second 88% (high)
-    expect(confidences[0]).toHaveTextContent('42%')
-    expect(confidences[1]).toHaveTextContent('88%')
-  })
-
-  it('shows Approve All button when items exist', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    await screen.findAllByTestId('review-item')
-    expect(screen.getByTestId('approve-all-btn')).toBeInTheDocument()
-  })
-
-  it('shows review badge count', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    await screen.findAllByTestId('review-item')
-    expect(screen.getByTestId('review-queue-count')).toHaveTextContent('2')
-  })
-
-  it('approve button calls approveNote and removes card', async () => {
-    vi.mocked(approveNote).mockResolvedValue({
-      file_path: NOTE_LOW_CONFIDENCE.file_path,
-      review_status: 'approved',
-      approved_by: 'manual',
-      approved_at: new Date().toISOString(),
-      approval_mode: 'manual',
-    })
-    const onApprove = vi.fn()
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} onApprove={onApprove} />)
-    const approveBtns = await screen.findAllByTestId('approve-btn')
-    // First item is low confidence (sorted ascending)
-    await act(async () => { fireEvent.click(approveBtns[0]) })
-    await waitFor(() => {
-      expect(approveNote).toHaveBeenCalledWith(NOTE_LOW_CONFIDENCE.file_path)
-    })
-    await waitFor(() => {
-      expect(onApprove).toHaveBeenCalledOnce()
-    })
-    // Card for low-confidence note is removed
-    await waitFor(() => {
-      const remainingTitles = screen.getAllByTestId('review-item-title')
-      expect(remainingTitles).toHaveLength(1)
-      expect(remainingTitles[0]).toHaveTextContent('High confidence note')
-    })
-  })
-
-  it('Approve All button calls approveAll and clears all cards', async () => {
-    vi.mocked(approveAll).mockResolvedValue({ approved: 2, skipped: 0, errors: 0 })
-    const onApprove = vi.fn()
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} onApprove={onApprove} />)
-    await screen.findAllByTestId('review-item')
-    await act(async () => { fireEvent.click(screen.getByTestId('approve-all-btn')) })
-    await waitFor(() => {
-      expect(approveAll).toHaveBeenCalledOnce()
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('review-empty')).toBeInTheDocument()
-    })
-    expect(onApprove).toHaveBeenCalledOnce()
-  })
-
-  it('closes on Escape key', async () => {
-    const onClose = vi.fn()
-    renderInRouter(<ReviewQueue open={true} onClose={onClose} />)
-    await screen.findAllByTestId('review-item')
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(onClose).toHaveBeenCalledOnce()
-  })
-
-  it('Edit button closes panel', async () => {
-    const onClose = vi.fn()
-    renderInRouter(<ReviewQueue open={true} onClose={onClose} />)
-    const editBtns = await screen.findAllByTestId('edit-btn')
-    fireEvent.click(editBtns[0])
-    expect(onClose).toHaveBeenCalledOnce()
-  })
-
-  it('uses file_path in aria-labels when title is empty', async () => {
-    const noteNoTitle = { ...NOTE_LOW_CONFIDENCE, title: '' }
-    vi.mocked(listReview).mockResolvedValue({
-      items: [noteNoTitle],
-      total: 1,
-      offset: 0,
-      limit: 50,
-    })
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const approveBtns = await screen.findAllByTestId('approve-btn')
-    const editBtns = await screen.findAllByTestId('edit-btn')
-    expect(approveBtns[0]).toHaveAttribute('aria-label', `Approve ${noteNoTitle.file_path}`)
-    expect(editBtns[0]).toHaveAttribute('aria-label', `Edit ${noteNoTitle.file_path}`)
-  })
-  it('navigates to /docs?path=<encoded> on Edit click', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const editBtns = await screen.findAllByTestId('edit-btn')
-    fireEvent.click(editBtns[0])
-
-    const expectedPath = NOTE_LOW_CONFIDENCE.file_path
-    const expectedEncoded = encodeURIComponent(expectedPath)
-    const expectedUrl = `/docs?path=${expectedEncoded}`
-
-    expect(mockNavigate).toHaveBeenCalledWith(expectedUrl)
-  })
-
-  it('Reject button calls rejectNote and removes card', async () => {
-    vi.mocked(rejectNote).mockResolvedValue({
-      file_path: NOTE_LOW_CONFIDENCE.file_path,
-      review_status: 'rejected',
-      approved_by: 'user',
-      approved_at: new Date().toISOString(),
-      approval_mode: 'manual',
-    })
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const rejectBtns = await screen.findAllByTestId('reject-btn')
-    await act(async () => { fireEvent.click(rejectBtns[0]) })
-    await waitFor(() => {
-      expect(rejectNote).toHaveBeenCalledWith(NOTE_LOW_CONFIDENCE.file_path)
-    })
-    await waitFor(() => {
-      const remainingTitles = screen.getAllByTestId('review-item-title')
-      expect(remainingTitles).toHaveLength(1)
-      expect(remainingTitles[0]).toHaveTextContent('High confidence note')
-    })
-  })
-
-  it('Reject button keeps item when rejectNote fails', async () => {
-    vi.mocked(rejectNote).mockRejectedValue(new Error('HTTP 500'))
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const initialItems = await screen.findAllByTestId('review-item')
-    expect(initialItems).toHaveLength(2)
-    const rejectBtns = await screen.findAllByTestId('reject-btn')
-    await act(async () => { fireEvent.click(rejectBtns[0]) })
-    await waitFor(() => {
-      expect(screen.getAllByTestId('review-item')).toHaveLength(2)
-    })
-  })
-
-  it('approve button keeps item in list when error occurs', async () => {
-    vi.mocked(approveNote).mockRejectedValue(new Error('HTTP 500'))
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const initialItems = await screen.findAllByTestId('review-item')
-    expect(initialItems).toHaveLength(2)
-    const approveBtns = await screen.findAllByTestId('approve-btn')
-    await act(async () => { fireEvent.click(approveBtns[0]) })
-    // Items must still be present because error doesn't remove them
-    await waitFor(() => {
-      const remainingItems = screen.getAllByTestId('review-item')
-      expect(remainingItems).toHaveLength(2)
-    })
-  })
-
-  it('Approve All button keeps items when approveAll fails', async () => {
-    vi.mocked(approveAll).mockRejectedValue(new Error('HTTP 500'))
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    await screen.findAllByTestId('review-item')
-    const initialCount = screen.getAllByTestId('review-item').length
-    await act(async () => { fireEvent.click(screen.getByTestId('approve-all-btn')) })
-    // All items must still be present after error
-    await waitFor(() => {
-      expect(screen.getAllByTestId('review-item')).toHaveLength(initialCount)
-    })
-  })})
-
-describe('ReviewQueue — error state', () => {
-  beforeEach(() => {
-    vi.mocked(listReview).mockRejectedValue(new Error('Network error'))
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows error message when load fails', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-  })
-
-  it('displays user-friendly error message mapping', async () => {
-    renderInRouter(<ReviewQueue open={true} onClose={vi.fn()} />)
-    const alert = await screen.findByRole('alert')
-    // mapErrorToUserMessage converts 'Network error' to user-friendly text
-    expect(alert.textContent).toBe('Network error. Please check your connection and try again.')
-  })
-})
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  FailedCaptures
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('FailedCaptures — closed', () => {
-  it('renders nothing when open=false', () => {
-    render(<FailedCaptures open={false} onClose={vi.fn()} />)
-    expect(screen.queryByTestId('failed-captures')).toBeNull()
-  })
-})
-
-describe('FailedCaptures — loading state', () => {
-  beforeEach(() => {
-    vi.mocked(listIngestFailures).mockReturnValue(new Promise(() => undefined))
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows loading indicator while fetching', () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    expect(screen.getByTestId('failed-loading')).toBeInTheDocument()
-  })
-})
-
-describe('FailedCaptures — empty state', () => {
-  beforeEach(() => {
-    vi.mocked(listIngestFailures).mockResolvedValue([])
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows empty state when no failures', async () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    await screen.findByTestId('failed-empty')
-    expect(screen.getByTestId('failed-empty')).toBeInTheDocument()
-  })
-})
-
-describe('FailedCaptures — loaded state', () => {
-  beforeEach(() => {
-    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('renders failed items', async () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    const items = await screen.findAllByTestId('failed-item')
-    expect(items).toHaveLength(1)
-  })
-
-  it('shows content preview', async () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    await screen.findByTestId('failed-item-preview')
-    expect(screen.getByTestId('failed-item-preview')).toHaveTextContent('Draft thoughts on project')
-  })
-
-  it('shows error message', async () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    await screen.findByTestId('failed-item-error')
-    expect(screen.getByTestId('failed-item-error')).toHaveTextContent('Routing agent timed out')
-  })
-
-  it('retry button calls retryIngestFailure and removes item', async () => {
-    vi.mocked(retryIngestFailure).mockResolvedValue(makeIngestResponse() as never)
-    const onUpdate = vi.fn()
-    render(<FailedCaptures open={true} onClose={vi.fn()} onUpdate={onUpdate} />)
-    const retryBtn = await screen.findByTestId('retry-btn')
-    await act(async () => { fireEvent.click(retryBtn) })
-    await waitFor(() => {
-      expect(retryIngestFailure).toHaveBeenCalledWith(FAILED_ITEM.id)
-    })
-    await waitFor(() => {
-      expect(onUpdate).toHaveBeenCalledOnce()
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('failed-empty')).toBeInTheDocument()
-    })
-  })
-
-  it('dismiss button calls deleteIngestFailure and removes item', async () => {
-    vi.mocked(deleteIngestFailure).mockResolvedValue(undefined)
-    const onUpdate = vi.fn()
-    render(<FailedCaptures open={true} onClose={vi.fn()} onUpdate={onUpdate} />)
-    const dismissBtn = await screen.findByTestId('dismiss-btn')
-    await act(async () => { fireEvent.click(dismissBtn) })
-    await waitFor(() => {
-      expect(deleteIngestFailure).toHaveBeenCalledWith(FAILED_ITEM.id)
-    })
-    await waitFor(() => {
-      expect(onUpdate).toHaveBeenCalledOnce()
-    })
-    await waitFor(() => {
-      expect(screen.getByTestId('failed-empty')).toBeInTheDocument()
-    })
-  })
-
-  it('closes on Escape key', async () => {
-    const onClose = vi.fn()
-    render(<FailedCaptures open={true} onClose={onClose} />)
-    await screen.findAllByTestId('failed-item')
-    fireEvent.keyDown(window, { key: 'Escape' })
-    expect(onClose).toHaveBeenCalledOnce()
-  })
-
-  it('does NOT call onUpdate when panel closes', async () => {
-    const onUpdate = vi.fn()
-    const { rerender } = render(
-      <FailedCaptures open={true} onClose={vi.fn()} onUpdate={onUpdate} />
-    )
-    // Wait for item load and the initial onCountUpdate call
-    await screen.findByTestId('failed-item')
-    const initialCalls = onUpdate.mock.calls.length
-    onUpdate.mockClear()
-
-    // Close the panel
-    rerender(<FailedCaptures open={false} onClose={vi.fn()} onUpdate={onUpdate} />)
-
-    // onUpdate must NOT be called on close
-    await waitFor(() => {}, { timeout: 100 })
-    expect(onUpdate).not.toHaveBeenCalled()
-  })
-})
-
-describe('FailedCaptures — error state', () => {
-  beforeEach(() => {
-    vi.mocked(listIngestFailures).mockRejectedValue(new Error('Network error'))
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows error message when load fails', async () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-  })
-
-  it('displays user-friendly error message mapping', async () => {
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    const alert = await screen.findByRole('alert')
-    // mapErrorToUserMessage converts 'Network error' to user-friendly text
-    expect(alert.textContent).toBe('Network error. Please check your connection and try again.')
-  })
-})
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  Topbar badge visibility
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('Topbar — review and failed capture badges', () => {
+describe('Topbar — capture workbench badge', () => {
   afterEach(() => vi.clearAllMocks())
 
   it('shows voice capture button always', () => {
-    render(<Topbar onMenuToggle={vi.fn()} reviewCount={0} failedCount={0} />)
+    render(<Topbar onMenuToggle={vi.fn()} workbenchCount={0} />)
     expect(screen.getByTestId('voice-capture-btn')).toBeInTheDocument()
   })
 
-  it('does not show review badge when count is 0', () => {
-    render(<Topbar onMenuToggle={vi.fn()} reviewCount={0} failedCount={0} />)
-    expect(screen.queryByTestId('review-queue-btn')).toBeNull()
-    expect(screen.queryByTestId('review-badge')).toBeNull()
+  it('does not show workbench badge when count is 0', () => {
+    render(<Topbar onMenuToggle={vi.fn()} workbenchCount={0} />)
+    expect(screen.queryByTestId('capture-workbench-btn')).toBeNull()
+    expect(screen.queryByTestId('capture-workbench-badge')).toBeNull()
   })
 
-  it('shows review badge when reviewCount > 0', () => {
-    render(<Topbar onMenuToggle={vi.fn()} reviewCount={5} failedCount={0} />)
-    expect(screen.getByTestId('review-queue-btn')).toBeInTheDocument()
-    expect(screen.getByTestId('review-badge')).toHaveTextContent('5')
-  })
-
-  it('does not show failed captures button when count is 0', () => {
-    render(<Topbar onMenuToggle={vi.fn()} reviewCount={0} failedCount={0} />)
-    expect(screen.queryByTestId('failed-captures-btn')).toBeNull()
-  })
-
-  it('shows failed captures button when failedCount > 0', () => {
-    render(<Topbar onMenuToggle={vi.fn()} reviewCount={0} failedCount={3} />)
-    expect(screen.getByTestId('failed-captures-btn')).toBeInTheDocument()
-    expect(screen.getByTestId('failed-badge')).toHaveTextContent('3')
+  it('shows one workbench badge when actionable work exists', () => {
+    render(<Topbar onMenuToggle={vi.fn()} workbenchCount={5} />)
+    expect(screen.getByTestId('capture-workbench-btn')).toBeInTheDocument()
+    expect(screen.getByTestId('capture-workbench-badge')).toHaveTextContent('5')
   })
 
   it('calls onVoiceOpen when voice button clicked', () => {
@@ -891,94 +401,11 @@ describe('Topbar — review and failed capture badges', () => {
     expect(onVoiceOpen).toHaveBeenCalledOnce()
   })
 
-  it('calls onReviewOpen when review badge button clicked', () => {
-    const onReviewOpen = vi.fn()
-    render(<Topbar onMenuToggle={vi.fn()} reviewCount={2} onReviewOpen={onReviewOpen} />)
-    fireEvent.click(screen.getByTestId('review-queue-btn'))
-    expect(onReviewOpen).toHaveBeenCalledOnce()
-  })
-
-  it('calls onFailedOpen when failed captures button clicked', () => {
-    const onFailedOpen = vi.fn()
-    render(<Topbar onMenuToggle={vi.fn()} failedCount={1} onFailedOpen={onFailedOpen} />)
-    fireEvent.click(screen.getByTestId('failed-captures-btn'))
-    expect(onFailedOpen).toHaveBeenCalledOnce()
-  })
-})
-
-// ═══════════════════════════════════════════════════════════════════════════════
-//  FailedCaptures — error state recovery
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('FailedCaptures — retry error state', () => {
-  beforeEach(() => {
-    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows error alert when retry fails', async () => {
-    vi.mocked(retryIngestFailure).mockRejectedValue(new Error('HTTP 422'))
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    const retryBtn = await screen.findByTestId('retry-btn')
-    await act(async () => { fireEvent.click(retryBtn) })
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-  })
-
-  it('keeps item in list when retry fails', async () => {
-    vi.mocked(retryIngestFailure).mockRejectedValue(new Error('HTTP 422'))
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    const retryBtn = await screen.findByTestId('retry-btn')
-    await act(async () => { fireEvent.click(retryBtn) })
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-    // Item must still be present
-    expect(screen.getAllByTestId('failed-item')).toHaveLength(1)
-  })
-})
-
-describe('FailedCaptures — dismiss error state', () => {
-  beforeEach(() => {
-    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
-  })
-  afterEach(() => vi.clearAllMocks())
-
-  it('shows error alert when dismiss fails', async () => {
-    vi.mocked(deleteIngestFailure).mockRejectedValue(new Error('HTTP 404'))
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    const dismissBtn = await screen.findByTestId('dismiss-btn')
-    await act(async () => { fireEvent.click(dismissBtn) })
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-  })
-
-  it('keeps item in list when dismiss fails', async () => {
-    vi.mocked(deleteIngestFailure).mockRejectedValue(new Error('HTTP 404'))
-    render(<FailedCaptures open={true} onClose={vi.fn()} />)
-    const dismissBtn = await screen.findByTestId('dismiss-btn')
-    await act(async () => { fireEvent.click(dismissBtn) })
-    await waitFor(() => expect(screen.getByRole('alert')).toBeInTheDocument())
-    expect(screen.getAllByTestId('failed-item')).toHaveLength(1)
-  })
-})
-
-describe('FailedCaptures — badge count persistence after panel close', () => {
-  afterEach(() => vi.clearAllMocks())
-
-  it('does NOT call onCountUpdate(0) when panel closes (badge must persist)', async () => {
-    vi.mocked(listIngestFailures).mockResolvedValue([FAILED_ITEM])
-    const onCountUpdate = vi.fn()
-
-    const { rerender } = render(
-      <FailedCaptures open={true} onClose={vi.fn()} onCountUpdate={onCountUpdate} />
-    )
-    // Wait for the load to complete and count to be reported
-    await waitFor(() => expect(onCountUpdate).toHaveBeenCalledWith(1))
-    onCountUpdate.mockClear()
-
-    // Close the panel
-    rerender(<FailedCaptures open={false} onClose={vi.fn()} onCountUpdate={onCountUpdate} />)
-
-    // onCountUpdate must NOT be called with 0 on close
-    await waitFor(() => {}, { timeout: 100 })
-    expect(onCountUpdate).not.toHaveBeenCalled()
+  it('calls onWorkbenchOpen when workbench button clicked', () => {
+    const onWorkbenchOpen = vi.fn()
+    render(<Topbar onMenuToggle={vi.fn()} workbenchCount={2} onWorkbenchOpen={onWorkbenchOpen} />)
+    fireEvent.click(screen.getByTestId('capture-workbench-btn'))
+    expect(onWorkbenchOpen).toHaveBeenCalledOnce()
   })
 })
 

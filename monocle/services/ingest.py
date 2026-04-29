@@ -62,7 +62,7 @@ async def capture_thought_session(
         raise ValueError(f"content exceeds {_MAX_BODY_LENGTH:,} character limit")
 
     from monocle.models import IngestRequest
-    from monocle.services.ingest_execute import execute_fast_capture_session
+    from monocle.services.ingest_workflow import execute_fast_capture_session
 
     req = IngestRequest(content=content, source=source, fast_capture=True)  # type: ignore[arg-type]
     response = await asyncio.to_thread(store.create_api_session, req)

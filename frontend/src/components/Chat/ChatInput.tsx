@@ -1,9 +1,11 @@
 import React, { useRef, useState, forwardRef, useMemo } from 'react'
+import { mapErrorToUserMessage } from '../../utils/errorMessages'
 import './ChatInput.css'
 
 // Detect all http/https URLs in the input text (global flag — finds every match)
 const URL_RE_GLOBAL = /https?:\/\/[^\s)>\]"']+/g
 const TRAILING_URL_PUNCT_RE = /[.,;:!?]+$/
+export const MAX_CAPTURE_URLS = 5
 
 
 function normalizeDetectedUrl(url: string): string {
@@ -11,7 +13,8 @@ function normalizeDetectedUrl(url: string): string {
 }
 
 interface Props {
-  onSend: (content: string, toolHint?: string, fetchUrls?: string[]) => void
+  onSend: (content: string, toolHint?: string) => void
+  onCaptureUrls?: (urls: string[]) => Promise<void> | void
   onVoiceClick?: () => void
   disabled?: boolean
 }
@@ -21,9 +24,10 @@ export interface ChatInputHandle {
   focus: () => void
 }
 
-const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, disabled }, ref) => {
+const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onCaptureUrls, onVoiceClick, disabled }, ref) => {
   const [value, setValue] = useState('')
-  const [optedOutUrls, setOptedOutUrls] = useState<Set<string>>(new Set())
+  const [isCapturingUrls, setIsCapturingUrls] = useState(false)
+  const [captureFeedback, setCaptureFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // History navigation — shell-like ArrowUp/Down through sent messages
@@ -47,32 +51,11 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     return result
   }, [value])
 
-  // Prune opted-out set to only URLs still present in the input (removes stale entries)
-  const activeOptedOut = useMemo<Set<string>>(() => {
-    const urlSet = new Set(detectedUrls)
-    const pruned = new Set<string>()
-    for (const u of optedOutUrls) {
-      if (urlSet.has(u)) pruned.add(u)
-    }
-    return pruned
-  }, [detectedUrls, optedOutUrls])
-
-  const toggleOptOut = (url: string) => {
-    setOptedOutUrls(prev => {
-      const next = new Set(prev)
-      if (next.has(url)) {
-        next.delete(url)
-      } else {
-        next.add(url)
-      }
-      return next
-    })
-  }
-
   // Expose methods for parent to populate the input
   React.useImperativeHandle(ref, () => ({
     populate: (text: string) => {
       setValue(text)
+      setCaptureFeedback(null)
       // Focus and position cursor at end
       setTimeout(() => {
         if (textareaRef.current) {
@@ -99,12 +82,40 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     }
     historyIndexRef.current = -1
     draftRef.current = ''
-    const fetchUrls = detectedUrls.filter(u => !activeOptedOut.has(u))
-    onSend(trimmed, toolHint, fetchUrls.length > 0 ? fetchUrls : undefined)
+    setCaptureFeedback(null)
+    onSend(trimmed, toolHint)
     setValue('')
-    setOptedOutUrls(new Set())
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
+    }
+  }
+
+  const handleCaptureUrls = async () => {
+    if (!onCaptureUrls || detectedUrls.length === 0 || disabled || isCapturingUrls) {
+      return
+    }
+
+    const captureUrls = detectedUrls.slice(0, MAX_CAPTURE_URLS)
+    const skippedCount = Math.max(0, detectedUrls.length - captureUrls.length)
+
+    setCaptureFeedback(null)
+    setIsCapturingUrls(true)
+    try {
+      await onCaptureUrls(captureUrls)
+      setCaptureFeedback({
+        kind: 'success',
+        message:
+          skippedCount > 0
+            ? `Captured ${captureUrls.length} URLs to the capture workbench. Skipped ${skippedCount} additional detected URL${skippedCount === 1 ? '' : 's'} to keep capture bounded.`
+            : `Captured ${captureUrls.length} URL${captureUrls.length === 1 ? '' : 's'} to the capture workbench.`,
+      })
+    } catch (error) {
+      setCaptureFeedback({
+        kind: 'error',
+        message: mapErrorToUserMessage(error),
+      })
+    } finally {
+      setIsCapturingUrls(false)
     }
   }
 
@@ -119,7 +130,6 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
-      // Send; fetchUrls are computed automatically from opted-in URL pills
       doSend()
       return
     }
@@ -168,6 +178,7 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value)
+    setCaptureFeedback(null)
     // Auto-grow up to 6 lines (24px line-height × 6)
     const el = e.target
     el.style.height = 'auto'
@@ -178,28 +189,40 @@ const ChatInput = forwardRef<ChatInputHandle, Props>(({ onSend, onVoiceClick, di
     <div className="chat-input">
       {detectedUrls.length > 0 && (
         <div className="chat-input__url-pills" data-testid="url-pills">
+          <span className="chat-input__url-label">Detected URLs</span>
           {detectedUrls.map(url => {
-            const isOptedOut = activeOptedOut.has(url)
             let label = url
             try { label = new URL(url).hostname } catch { label = url.slice(0, 40) }
             return (
-              <button
+              <span
                 key={url}
-                className={`chat-input__url-pill${isOptedOut ? ' chat-input__url-pill--opted-out' : ''}`}
-                onClick={() => toggleOptOut(url)}
-                disabled={disabled}
-                title={isOptedOut ? `Skip fetch (click to re-enable): ${url}` : `Will fetch & summarize (click to skip): ${url}`}
-                data-testid={isOptedOut ? 'url-pill-opted-out' : 'url-pill-active'}
-                type="button"
+                className="chat-input__url-pill"
+                title={url}
+                data-testid="url-pill"
               >
                 🔗 {label}
-                <span className="chat-input__url-pill-x" aria-hidden="true">
-                  {isOptedOut ? '↩' : '×'}
-                </span>
-              </button>
+              </span>
             )
           })}
+          <button
+            className="chat-input__capture-btn"
+            onClick={() => { void handleCaptureUrls() }}
+            disabled={disabled || isCapturingUrls || !onCaptureUrls}
+            data-testid="capture-urls-btn"
+            type="button"
+          >
+            {isCapturingUrls ? 'Capturing…' : `Capture URLs${detectedUrls.length > 1 ? ` (${detectedUrls.length})` : ''}`}
+          </button>
         </div>
+      )}
+      {captureFeedback && (
+        <p
+          className={`chat-input__capture-feedback chat-input__capture-feedback--${captureFeedback.kind}`}
+          data-testid="url-capture-feedback"
+          role={captureFeedback.kind === 'error' ? 'alert' : 'status'}
+        >
+          {captureFeedback.message}
+        </p>
       )}
       <div className="chat-input__row">
         <textarea

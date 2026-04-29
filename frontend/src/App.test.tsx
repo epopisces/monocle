@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, waitFor, act, fireEvent } from '@testing-library/react'
 import App from './App'
-import { getReviewCount } from './api/review'
-import { countIngestNotifications, listIngestFailures } from './api/ingest'
+import { getCaptureWorkbench } from './api/captureWorkbench'
 import { getSettings } from './api/settings'
 import { getNote } from './api/notes'
 
 // react-force-graph pulls in aframe-extras which requires a global AFRAME.
 // Mock the whole module so App.test.tsx doesn't trigger that side effect.
 vi.mock('react-force-graph', () => ({
-  ForceGraph2D: () => null,
+  ForceGraph2D: ({ graphData }: { graphData?: { nodes?: unknown[] } }) => (
+    <div data-testid="force-graph">
+      <span data-testid="fg-node-count">{graphData?.nodes?.length ?? 0}</span>
+    </div>
+  ),
 }))
 
 vi.mock('./components/IngestReview/IngestReviewScreen', () => ({
@@ -28,11 +31,18 @@ vi.mock('./api/notes', () => ({
   }),
 }))
 
-// Review and ingest polled by App on mount every 30 s
-vi.mock('./api/review', () => ({ getReviewCount: vi.fn().mockResolvedValue({ count: 0 }) }))
-vi.mock('./api/ingest', () => ({
-  countIngestNotifications: vi.fn().mockResolvedValue({ count: 0 }),
-  listIngestFailures: vi.fn().mockResolvedValue([]),
+// Workbench summary polled by App on mount every 30 s
+vi.mock('./api/captureWorkbench', () => ({
+  getCaptureWorkbench: vi.fn().mockResolvedValue({
+    actionable_count: 0,
+    queue_threshold: 0.5,
+    counts: { prepared: 0, pending_review: 0, failures: 0 },
+    sections: [
+      { section: 'prepared', count: 0, items: [] },
+      { section: 'pending_review', count: 0, items: [] },
+      { section: 'failures', count: 0, items: [] },
+    ],
+  }),
 }))
 
 // Health polled by Topbar
@@ -121,9 +131,16 @@ describe('App — polling and server settings', () => {
 describe('App — polling lifecycle', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(countIngestNotifications).mockResolvedValue({ count: 0 })
-    vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
-    vi.mocked(listIngestFailures).mockResolvedValue([])
+    vi.mocked(getCaptureWorkbench).mockResolvedValue({
+      actionable_count: 0,
+      queue_threshold: 0.5,
+      counts: { prepared: 0, pending_review: 0, failures: 0 },
+      sections: [
+        { section: 'prepared', count: 0, items: [] },
+        { section: 'pending_review', count: 0, items: [] },
+        { section: 'failures', count: 0, items: [] },
+      ],
+    })
     vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
     vi.useFakeTimers({ shouldAdvanceTime: false })
   })
@@ -132,65 +149,47 @@ describe('App — polling lifecycle', () => {
     vi.clearAllMocks()
   })
 
-  it('calls getReviewCount once on mount', async () => {
+  it('calls getCaptureWorkbench once on mount', async () => {
     render(<App />)
     await act(async () => { await Promise.resolve() })
-    expect(vi.mocked(getReviewCount)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(getCaptureWorkbench)).toHaveBeenCalledTimes(1)
   })
 
-  it('calls listIngestFailures once on mount', async () => {
+  it('polls getCaptureWorkbench again after 30 seconds', async () => {
     render(<App />)
     await act(async () => { await Promise.resolve() })
-    expect(vi.mocked(listIngestFailures)).toHaveBeenCalledTimes(1)
-  })
-
-  it('calls countIngestNotifications once on mount', async () => {
-    render(<App />)
-    await act(async () => { await Promise.resolve() })
-    expect(vi.mocked(countIngestNotifications)).toHaveBeenCalledTimes(1)
-  })
-
-  it('polls getReviewCount again after 30 seconds', async () => {
-    render(<App />)
-    await act(async () => { await Promise.resolve() })
-    const callsBefore = vi.mocked(getReviewCount).mock.calls.length
+    const callsBefore = vi.mocked(getCaptureWorkbench).mock.calls.length
 
     await act(async () => { vi.advanceTimersByTime(30_000) })
-    const callsAfter = vi.mocked(getReviewCount).mock.calls.length
+    const callsAfter = vi.mocked(getCaptureWorkbench).mock.calls.length
     expect(callsAfter).toBeGreaterThan(callsBefore)
   })
 
-  it('polls listIngestFailures again after 30 seconds', async () => {
-    render(<App />)
-    await act(async () => { await Promise.resolve() })
-    const callsBefore = vi.mocked(listIngestFailures).mock.calls.length
-
-    await act(async () => { vi.advanceTimersByTime(30_000) })
-    const callsAfter = vi.mocked(listIngestFailures).mock.calls.length
-    expect(callsAfter).toBeGreaterThan(callsBefore)
-  })
-
-  it('polls countIngestNotifications again after 30 seconds', async () => {
-    render(<App />)
-    await act(async () => { await Promise.resolve() })
-    const callsBefore = vi.mocked(countIngestNotifications).mock.calls.length
-
-    await act(async () => { vi.advanceTimersByTime(30_000) })
-    const callsAfter = vi.mocked(countIngestNotifications).mock.calls.length
-    expect(callsAfter).toBeGreaterThan(callsBefore)
-  })
-
-  it('does not crash when getReviewCount rejects', async () => {
-    vi.mocked(getReviewCount).mockRejectedValue(new Error('Server error'))
+  it('does not crash when getCaptureWorkbench rejects', async () => {
+    vi.mocked(getCaptureWorkbench).mockRejectedValue(new Error('Server error'))
     // Should render without throwing
     expect(() => render(<App />)).not.toThrow()
     await act(async () => { await Promise.resolve() })
   })
 
-  it('does not crash when listIngestFailures rejects', async () => {
-    vi.mocked(listIngestFailures).mockRejectedValue(new Error('Server error'))
-    expect(() => render(<App />)).not.toThrow()
+  it('shows one workbench badge when actionable work exists', async () => {
+    vi.mocked(getCaptureWorkbench).mockResolvedValue({
+      actionable_count: 3,
+      queue_threshold: 0.5,
+      counts: { prepared: 1, pending_review: 1, failures: 1 },
+      sections: [
+        { section: 'prepared', count: 1, items: [] },
+        { section: 'pending_review', count: 1, items: [] },
+        { section: 'failures', count: 1, items: [] },
+      ],
+    })
+
+    render(<App />)
     await act(async () => { await Promise.resolve() })
+
+    expect(screen.getByTestId('capture-workbench-btn')).toBeInTheDocument()
+    expect(screen.queryByTestId('review-queue-btn')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('failed-captures-btn')).not.toBeInTheDocument()
   })
 })
 
@@ -199,8 +198,16 @@ describe('App — polling lifecycle', () => {
 describe('App — settings propagation', () => {
   beforeEach(() => {
     vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
-    vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
-    vi.mocked(listIngestFailures).mockResolvedValue([])
+    vi.mocked(getCaptureWorkbench).mockResolvedValue({
+      actionable_count: 0,
+      queue_threshold: 0.5,
+      counts: { prepared: 0, pending_review: 0, failures: 0 },
+      sections: [
+        { section: 'prepared', count: 0, items: [] },
+        { section: 'pending_review', count: 0, items: [] },
+        { section: 'failures', count: 0, items: [] },
+      ],
+    })
   })
   afterEach(() => vi.clearAllMocks())
 
@@ -225,8 +232,16 @@ describe('App — settings propagation', () => {
 describe('App — route navigation', () => {
   beforeEach(() => {
     vi.mocked(getSettings).mockResolvedValue({ ui: { voice_input_backend: 'whisper' } })
-    vi.mocked(getReviewCount).mockResolvedValue({ count: 0 })
-    vi.mocked(listIngestFailures).mockResolvedValue([])
+    vi.mocked(getCaptureWorkbench).mockResolvedValue({
+      actionable_count: 0,
+      queue_threshold: 0.5,
+      counts: { prepared: 0, pending_review: 0, failures: 0 },
+      sections: [
+        { section: 'prepared', count: 0, items: [] },
+        { section: 'pending_review', count: 0, items: [] },
+        { section: 'failures', count: 0, items: [] },
+      ],
+    })
     vi.mocked(getNote).mockResolvedValue({
       file_path: 'people/alice.md',
       title: 'Alice Smith',

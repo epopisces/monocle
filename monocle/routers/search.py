@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -138,93 +137,18 @@ async def omni_search(
     q: str = Query(..., min_length=3, description="Search query (min 3 chars)"),
     limit: int = Query(20, ge=1, le=100),
 ) -> list[OmniResult]:
-    """Fast full-text vault scan: filename first, then frontmatter, then body.
+    """Fast AI-free omnisearch over a cached text catalog.
 
-    Uses NoteRef fields (filename, title, type, domain, tags) for fast matching.
-    Only reads full note bodies for body content match.
-    Paginates through all notes regardless of vault size.
+    Omnisearch stays intentionally separate from semantic search: no embeddings,
+    no AI provider, and strict filename → frontmatter → body bucket ordering.
     """
-    vault = request.app.state.vault
-    q_lower = q.lower()
+    query = q.strip()
+    if len(query) < 3:
+        raise HTTPException(status_code=422, detail="q must contain at least 3 non-whitespace characters")
 
-    def _scan() -> list[OmniResult]:
-        filename_hits: list[OmniResult] = []
-        frontmatter_hits: list[OmniResult] = []
-        body_hits: list[OmniResult] = []
+    catalog = getattr(request.app.state, "omni_search_catalog", None)
+    if catalog is None:
+        raise HTTPException(status_code=503, detail="Omnisearch catalog not available")
 
-        # Paginate through all notes via repeated list_notes() calls
-        offset = 0
-        page_size = 1000
-        total_for_page = page_size
-
-        while total_for_page >= page_size:
-            page = vault.list_notes(limit=page_size, offset=offset)
-            total_for_page = len(page.items)
-            if total_for_page == 0:
-                break
-
-            for ref in page.items:
-                basename = os.path.basename(ref.file_path)
-                if basename.endswith(".md"):
-                    basename = basename[:-3]
-
-                # 1. Filename match (using just NoteRef, no IO needed)
-                if q_lower in basename.lower():
-                    filename_hits.append(
-                        OmniResult(
-                            file_path=ref.file_path,
-                            title=ref.title,
-                            excerpt=basename,
-                            match_location="filename",
-                        )
-                    )
-                    continue
-
-                # 2. Frontmatter match (using NoteRef fields only — no IO needed)
-                fm_parts = [
-                    ref.title or "",
-                    ref.type or "",
-                    ref.domain or "",
-                ]
-                for tag in ref.tags or []:
-                    fm_parts.append(str(tag))
-                fm_text = " ".join(fm_parts).lower()
-
-                if q_lower in fm_text:
-                    frontmatter_hits.append(
-                        OmniResult(
-                            file_path=ref.file_path,
-                            title=ref.title,
-                            excerpt=" | ".join(p for p in fm_parts if p)[:200],
-                            match_location="frontmatter",
-                        )
-                    )
-                    continue
-
-                # 3. Body match (requires reading the full note)
-                try:
-                    note = vault.read_note(ref.file_path)
-                except Exception:
-                    continue
-
-                body = note.body or ""
-                body_lower = body.lower()
-                if q_lower in body_lower:
-                    idx = body_lower.find(q_lower)
-                    start = max(0, idx - 60)
-                    excerpt = body[start : start + 200]
-                    body_hits.append(
-                        OmniResult(
-                            file_path=ref.file_path,
-                            title=ref.title,
-                            excerpt=excerpt,
-                            match_location="body",
-                        )
-                    )
-
-            offset += page_size
-
-        combined = filename_hits + frontmatter_hits + body_hits
-        return combined[:limit]
-
-    return await asyncio.to_thread(_scan)
+    results = await asyncio.to_thread(catalog.search, query, limit)
+    return [OmniResult.model_validate(result) for result in results]
