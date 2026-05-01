@@ -126,7 +126,7 @@ data/
 chroma_data/
 *.db
 
-# User vault (not version controlled; can be local or mounted)
+# User vault (not version controlled by this software; can be local or mounted)
 vault/
 !vault/.templates
 !vault/.gitkeep
