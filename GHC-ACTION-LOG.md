@@ -4,7 +4,19 @@ Record summarized actions taken by GitHub Copilot agents. Agents must append or 
 
 ---
 
+## 2026-05-05
+
+### Claude Sonnet 4.6
+- Designed and wrote M49 (Persistent User Memory) into `docs/build-plan.md` — two-tier vault-native memory (index note + 6 facet notes), always-on chat context injection, `remember_this` tool, setup wizard, weekly extraction via `MemoryUpdateAgent` piggybacking on `WeeklySummaryAgent`, Settings modal Memory tab, and `ai.memory_model` config override
+
+---
+
 ## 2026-04-29
+
+### GPT-5.4 mini
+- Loosened OpenAI startup handling so an active `provider=openai` no longer hard-fails when `OPENAI_API_KEY` is absent; the config validator now logs a warning instead of raising, and the provider factory passes an empty string to `OpenAIProvider` so the SDK can initialize in degraded mode
+- Updated the OpenAI settings regression to assert the missing-key path is allowed, while health/status endpoints now report unreachable instead of aborting startup
+- Validation: `uv run python -m pytest monocle/tests/test_ai.py -x --tb=short -q` → 84 passed, 6 deselected, EXIT 0; `uv run python -m pytest monocle/tests/test_api.py::TestHealth -x --tb=short -q` → 5 passed, EXIT 0
 
 ### Claude Haiku 4.5
 - **Omnisearch Early Exit:** Fixed `OmniSearchCatalog.search()` loop to break when `body_hits` is non-empty and hit limit is reached, eliminating unnecessary full-catalog walks for every omnisearch query

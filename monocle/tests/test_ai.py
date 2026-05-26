@@ -1605,13 +1605,13 @@ class TestGetTranscriptionProvider:
         result = get_transcription_provider(settings)
         assert result is None
 
-    def test_openai_provider_requires_api_key(self):
-        from pydantic import ValidationError
-
+    def test_openai_provider_without_api_key_is_allowed(self):
         with patch("dotenv.load_dotenv", return_value=False):
             with patch.dict("os.environ", {}, clear=True):
-                with pytest.raises(ValidationError, match="OPENAI_API_KEY"):
-                    _make_settings(ai=_OPENAI_AI_NATIVE)
+                settings = _make_settings(ai=_OPENAI_AI_NATIVE)
+
+        assert settings.ai.provider == "openai"
+        assert settings.openai_api_key is None
 
     def test_whisper_cpp_returns_correct_type(self):
         from monocle.ai.transcription import (

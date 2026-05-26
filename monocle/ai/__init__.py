@@ -98,7 +98,7 @@ def _build_single_provider(
         from monocle.ai.openai_provider import OpenAIProvider
 
         return OpenAIProvider(
-            api_key=settings.openai_api_key,  # type: ignore[arg-type]
+            api_key=settings.openai_api_key or "",
             embed_model=embed_entry.name,
             chat_model=chat_entry.name,
             transcribe_model=_effective_transcribe_model(settings, provider_name),
@@ -171,7 +171,7 @@ def _build_provider_for_entry(
         from monocle.ai.openai_provider import OpenAIProvider
 
         return OpenAIProvider(
-            api_key=settings.openai_api_key,  # type: ignore[arg-type]
+            api_key=settings.openai_api_key or "",
             embed_model=entry.name,
             chat_model=entry.name,
             transcribe_model=_effective_transcribe_model(settings, provider_name),

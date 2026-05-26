@@ -544,7 +544,8 @@ class Settings(BaseModel):
                     f"Active {', '.join(active_provider_roles)} use provider=azure and require env vars: {', '.join(m.upper() for m in missing)}"
                 )
         if "openai" in active_providers and not self.openai_api_key:
-            raise ValueError(
-                f"Active {', '.join(active_openai_roles)} use provider=openai and require env var: OPENAI_API_KEY"
+            logger.warning(
+                "Active %s use provider=openai without OPENAI_API_KEY; OpenAI-backed operations will report as unreachable until the key is set.",
+                ", ".join(active_openai_roles),
             )
         return self

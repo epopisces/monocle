@@ -2,8 +2,8 @@
 type: build-plan
 project: monocle
 maintained-by: github-copilot
-last-updated: 2026-04-29
-active-milestone: none
+last-updated: 2026-05-05
+active-milestone: M49
 ---
 
 # Monocle — Copilot Build Plan
@@ -26,7 +26,7 @@ This is the primary reference document for building Monocle. Read it at the star
 
 ## Current Status
 
-**Active Milestone:** None — simplification track complete
+**Active Milestone:** M49 — Persistent User Memory
 **Last Completed:** M48 — Cleanup & Contract Hardening (2026-04-29)
 **Note:** The near-term product direction is now documented and implemented only around trust-first capture, a unified capture workbench, lean chat, distinct omnisearch, and one supported unified runtime topology. M24, M26, and M33 remain deferred to a future phase, and M41 remains paused until it is reconciled against this simplified baseline.
 **Blocked By:** None
@@ -172,6 +172,137 @@ uv run python -m pytest monocle/tests/ -x --tb=short -q && cd frontend && npm ru
 | M46 | Lean Chat & Explicit URL Capture                               | COMPLETE    |
 | M47 | Omnisearch Hardening                                           | COMPLETE    |
 | M48 | Cleanup & Contract Hardening                                   | COMPLETE    |
+| M49 | Persistent User Memory                                         | IN PROGRESS |
+
+---
+
+## M49: Persistent User Memory
+
+**Goal:** Give the chat agent durable, vault-native knowledge of who the user is and what they are working on, without loading large documents into every conversation. Memory is stored as editable Obsidian-compatible notes, auto-updated weekly from vault activity summaries, seeded via a guided setup wizard, and patchable mid-conversation via an explicit `remember_this` tool.
+
+### Design
+
+**Two-tier structure**
+
+- **Tier 1 — Index note** (`vault/memory/index.md`, type `memory`, memory_section `index`): always prepended to the chat system prompt. Stays under ~250 tokens. Contains single-line facet summaries with wikilinks to tier-2 notes.
+- **Tier 2 — Facet notes** (on-demand, read by agent via `read_note` tool when depth is needed):
+  - `vault/memory/profile/identity.md` — name, role, org, timezone, bio
+  - `vault/memory/profile/expertise.md` — domains, tools, skill level
+  - `vault/memory/profile/interests.md` — hobbies, recurring topics
+  - `vault/memory/profile/preferences.md` — response style, UI preferences
+  - `vault/memory/context/projects.md` — active projects with status + wikilinks
+  - `vault/memory/context/threads.md` — open questions, decisions in flight
+
+All memory notes use `type: memory` frontmatter. `normalise_frontmatter()` treats `memory` notes as `review_status: approved` by default.
+
+**Chat context injection**
+
+`MemoryService.get_context_block()` reads `vault/memory/index.md` at agent startup and prepends a formatted block to the system prompt (after `prompts/chat.md`). If the index note does not exist, the block is empty — injection is a no-op. No embedding/retrieval involved; always synchronous.
+
+**`remember_this` tool**
+
+New `@tool` in `monocle/agents/tools.py`: `remember_this(content: str, section: str)`. `section` is one of `identity`, `expertise`, `interests`, `preferences`, `projects`, `threads`. Appends/patches the relevant tier-2 facet note and regenerates the index. The agent calls this when the user says "remember that…" or equivalent.
+
+**Setup wizard**
+
+- `POST /api/memory/setup` → opens a streaming chat session backed by `prompts/memory_setup.md`
+- The prompt guides the LLM through identity → expertise → interests → preferences → active projects as a friendly conversation
+- At conversation end the agent calls `write_memory_notes(data: dict)` (internal tool, not user-facing) which writes all facet notes and generates the index
+- Frontend: wizard is a modal (reuses the chat streaming pattern from `useChat`); launched from the Memory settings tab empty state
+
+**Weekly extraction (`MemoryUpdateAgent`)**
+
+- Piggybacks on `WeeklySummaryAgent` scheduler slot — runs *after* the weekly summary note is written
+- Reads: latest `vault/summaries/YYYY-Www.md` (already-compressed) + current memory facet notes (~5 notes)
+- Prompt (`prompts/memory_extract.md`): structured-output patch — which facets changed, what to add/remove/update
+- Token guard: if summary body > 4,000 tokens, pass only YAML frontmatter fields, not the full body
+- Applies patches directly via `VaultLayer.write_note`; regenerates the index if any facet changed
+- Configurable model: `ai.memory_model` (defaults to chat model; users can set e.g. `gpt-4o-mini` for cheaper batch extraction)
+
+**`GET /api/memory`**
+
+Returns: `{ index_exists: bool, index_content: str | null, facets: {name: str, path: str, exists: bool}[], last_extraction: str | null }`
+
+**Settings modal — Memory tab**
+
+- Status badge: `Active` / `Not set up`
+- Last extraction date + `Re-extract now` button (triggers `MemoryUpdateAgent` on demand)
+- Context injection toggle (maps to `memory.inject_context` config key; default `true`)
+- Read-only rendered index preview
+- `Edit in vault` link per facet note (opens vault-relative path)
+- `Run setup wizard` button (always available, not just empty state)
+- Extraction model field (text input; placeholder = current chat model name)
+
+### New files
+
+| File | Purpose |
+|---|---|
+| `monocle/services/memory.py` | `MemoryService`: `get_context_block()`, `write_memory_notes()`, `remember_this()`, `regenerate_index()` |
+| `monocle/agents/memory_update.py` | `MemoryUpdateAgent`: weekly extraction logic |
+| `monocle/routers/memory.py` | `GET /api/memory`, `POST /api/memory/setup`, `POST /api/memory/extract` |
+| `monocle/vault/templates/memory_index.yaml` | Machine-readable schema for index note |
+| `monocle/vault/templates/memory_facet.yaml` | Machine-readable schema for facet notes |
+| `prompts/memory_setup.md` | Setup wizard conversation guide |
+| `prompts/memory_extract.md` | Weekly extraction structured-output prompt |
+| `monocle/tests/test_memory.py` | Unit tests |
+| `frontend/src/components/Memory/MemoryWizard.tsx` | Wizard modal |
+| `frontend/src/MemorySettings.test.tsx` | Frontend tests |
+
+### Changed files
+
+| File | Change |
+|---|---|
+| `monocle/agents/tools.py` | Add `remember_this` tool |
+| `monocle/agents/__init__.py` | Inject `MemoryService.get_context_block()` into system prompt; register `remember_this` |
+| `monocle/agents/scheduler.py` | Schedule `MemoryUpdateAgent` after `WeeklySummaryAgent` |
+| `monocle/agents/weekly_summary.py` | After writing summary note, notify scheduler slot for memory update |
+| `monocle/main.py` | Init `MemoryService` in lifespan; mount memory router |
+| `monocle/config.py` | Add `memory.inject_context: bool = True`, `ai.memory_model: str | None = None` |
+| `monocle/models.py` | Add `MemoryStatusResponse` model; add `"memory"` to `NoteType` enum |
+| `frontend/src/components/SettingsModal/` | Add Memory tab |
+| `openapi.json` | Regenerate |
+
+### Deliverables
+
+- [ ] `monocle/services/memory.py` — `MemoryService` with `get_context_block()`, `write_memory_notes()`, `remember_this(content, section)`, `regenerate_index()`
+- [ ] `monocle/vault/templates/memory_index.yaml` and `memory_facet.yaml`
+- [ ] `prompts/memory_setup.md` — setup wizard conversation guide
+- [ ] `prompts/memory_extract.md` — weekly extraction structured-output prompt
+- [ ] `monocle/agents/memory_update.py` — `MemoryUpdateAgent` with token-guard logic
+- [ ] `monocle/routers/memory.py` — `GET /api/memory`, `POST /api/memory/setup`, `POST /api/memory/extract`
+- [ ] Wire `remember_this` tool into `monocle/agents/tools.py` and agent factory
+- [ ] Wire context injection into `create_chat_agent()` system prompt
+- [ ] Schedule `MemoryUpdateAgent` after `WeeklySummaryAgent` in `scheduler.py`
+- [ ] `monocle/config.py` — `memory.inject_context` + `ai.memory_model` config keys
+- [ ] `monocle/models.py` — `MemoryStatusResponse`, `"memory"` note type
+- [ ] `monocle/tests/test_memory.py` — unit tests covering: `get_context_block` (no index → empty string; index exists → formatted block), `remember_this` (patches correct facet note, regenerates index), `MemoryUpdateAgent` (happy path, token guard path, no summary yet → no-op)
+- [ ] `GET /api/memory` wired and tested in `test_api.py`
+- [ ] Frontend Memory tab in SettingsModal (status, last extraction, injection toggle, index preview, edit links, wizard button)
+- [ ] Frontend `MemoryWizard` modal (streaming wizard conversation, calls `POST /api/memory/setup`)
+- [ ] `frontend/src/MemorySettings.test.tsx` passing
+- [ ] Regenerate `openapi.json`
+
+### Acceptance Criteria
+
+- [ ] With an empty vault, `GET /api/memory` returns `{ index_exists: false, ... }` and chat works normally (no crash, no empty system-prompt block)
+- [ ] After setup wizard completes, `vault/memory/index.md` exists with ≤250 token content; all referenced facet notes exist
+- [ ] Chat system prompt contains the index block when `memory.inject_context: true`; omits it when `false`
+- [ ] Saying "remember that I prefer bullet points over tables" causes the agent to call `remember_this` and the preferences facet note is updated
+- [ ] `POST /api/memory/extract` (manual trigger) reads the most recent weekly summary note and updates at least one facet note when given meaningful summary content
+- [ ] Token guard: a summary body > 4,000 tokens is truncated to frontmatter-only before being passed to the extraction prompt
+- [ ] `uv run python -m pytest monocle/tests/test_memory.py -x --tb=short -q` passes
+- [ ] `uv run python -m pytest monocle/tests/ -x --tb=short -q` passes (no regressions)
+- [ ] `cd frontend && npm run test -- --run` passes
+- [ ] `cd frontend && npx tsc --noEmit` exits 0
+
+### Test commands
+
+```bash
+uv run python -m pytest monocle/tests/test_memory.py -x --tb=short -q
+uv run python -m pytest monocle/tests/ -x --tb=short -q
+cd frontend && npm run test -- --run
+cd frontend && npx tsc --noEmit
+```
 
 ---
 
