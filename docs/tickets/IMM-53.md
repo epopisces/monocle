@@ -41,7 +41,7 @@ Requires: 08 Create schema-valid notes via existing Curator skill.
 ## Offline execution record (local, not synchronized to Linear)
 
 - [x] Implementation completed
-- [x] Automated checks passed: `npm ci && npm run check` 255/255 (8 new proposal-store tests and 1 NotePlan→proposal test in core, 1 change-set route test in companion); `npm run smoke:obsidian` SMOKE_RESULT (fake CLI; no plugin changes)
+- [x] Automated checks passed: `npm ci && npm run check` 255/255 (8 new proposal-store tests and 1 NotePlan→proposal test in core, 1 change-set route test in companion); `npm run smoke:obsidian` 60/60 (fake CLI; no plugin changes)
 - [x] Acceptance criteria validated (temp data dirs and fixture vault only)
 - [x] Summary and artifacts committed or handed back for synchronization (branch `epopisces-imm-53-change-proposals`)
 
