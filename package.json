@@ -15,6 +15,9 @@
     "typecheck": "tsc -b",
     "test": "vitest run",
     "check": "npm run build && npm test",
+    "companion": "npm run build && node packages/companion/dist/cli.js",
+    "bundle:plugin": "node packages/obsidian-plugin/scripts/bundle.mjs",
+    "smoke:obsidian": "npm run build && node packages/obsidian-plugin/scripts/obsidian-smoke.mjs",
     "clean": "tsc -b --clean"
   },
   "devDependencies": {

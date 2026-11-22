@@ -61,7 +61,7 @@ Requires: 14 Incrementally index synchronized notes in SQLite FTS5.
 - **Relations:** body → `links_to`/`embeds`; frontmatter → sibling `relation` value (e.g. `links[].relation: owner`)
   else the top-level key (e.g. `project`). Plain frontmatter strings (e.g. `people: [Ada Example]`) are not promoted
   to edges (no inferred links).
-- **Automated checks:** `npm ci && npm run check` — build OK, all tests passed (9 new in
+- **Automated checks:** `npm ci && npm run check` — build OK, 46/46 passed (67/67 after merging IMM-46; 9 new in
   `packages/monocle-core/test/relationships.test.ts`).
 - **Acceptance:** rename keeps identity/backlinks (with Obsidian-style link rewrite) and breaks links when not rewritten;
   backlinks carry source note refs + locations; broken and ambiguous links reported; frontmatter aliases and display

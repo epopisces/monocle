@@ -40,10 +40,39 @@ Requires: 01 Inspect assets and bootstrap Monocle monorepo.
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed (record command and outcome)
+- [x] Acceptance criteria validated
+- [x] Summary and artifacts committed or handed back for synchronization
 
 **Implementation notes:**
+
+- Branch `epopisces-imm-46-obsidian-panel` (based on `refactor` @ 01861e4).
+- **Contract** (`@monocle/contracts`, `companion.ts`): `GET /v1/health` → `HealthResponse { service: "monocle-companion",
+  status, contractVersion, instanceId, startedAt }`, default endpoint `http://127.0.0.1:48765`, `isLoopbackHostname`,
+  `isHealthResponse`. `CONTRACT_VERSION` stays `0.1.0` (first published surface).
+- **Companion** (`@monocle/companion`): `startCompanion({host, port})` HTTP server on loopback only (non-loopback bind
+  refused; non-loopback `Host` header → 403 as DNS-rebinding guard). Standalone CLI `dist/cli.js`
+  (`npm run companion`, `--host/--port` or `MONOCLE_COMPANION_HOST/PORT`) prints one JSON `listening` line and exits on
+  SIGINT/SIGTERM.
+- **Plugin** (`@monocle/obsidian-plugin`): Obsidian-free `CompanionConnection` state machine
+  (`connecting → connected | disconnected | incompatible`, polling, timeout, contract-version check) and
+  `parseCompanionEndpoint` (http loopback origins only). `main.ts`: side panel view (status, endpoint, error, Reconnect),
+  status bar item, commands *Open panel* / *Reconnect to companion*, settings tab. Endpoint is stored per host via
+  `app.saveLocalStorage` (not synced through the vault), so `minAppVersion` is now 1.8.7. Health uses `requestUrl` to
+  avoid renderer CORS. Unloading the plugin only stops polling; it never launches/stops the companion. Errors are shown
+  in the panel/status bar only (no modals), so native editing is unaffected.
+- **Bundling**: esbuild → `main.js` (CJS, `obsidian` external) via `npm run bundle:plugin -- --vault <path>`.
+- **Automated checks**: `npm ci && npm run check` → 43/43 passed (58/58 after merging IMM-58 from `refactor`). New: companion HTTP seam (5), process restart smoke
+  test (1), plugin↔companion integration (6: connect, disconnect→reconnect, plugin stop leaves companion up,
+  incompatible version, foreign service, timeout), endpoint validation (8), bundle loads requiring only `obsidian` (1).
+- **Acceptance in real Obsidian** (1.8.9 on the implementing host): `npm run smoke:obsidian` → 8/8 passed — plugin
+  loads; panel and status bar show Connected; companion killed → Disconnected with error visible; a fixture note opens
+  in the native editor while disconnected; companion restarted → Connected; Obsidian closed → companion still healthy.
+  Runs against a temp fixture-vault copy with a temp `--user-data-dir`, so no real vault or user profile is touched.
+- **Manual verification** (other hosts): copy `fixtures/vault` to a temp dir; `npm run companion`;
+  `npm run bundle:plugin -- --vault <copy>`; open the copy in Obsidian, enable community plugins and *Monocle*; run
+  *Monocle: Open panel* → Connected; stop the companion (Ctrl+C) → Disconnected within ~5 s with the error shown, and
+  editing still works; restart → Connected; quit Obsidian → `curl http://127.0.0.1:48765/v1/health` still answers.
+- Non-goals respected: no agent execution, indexing or vault mutation.
 
