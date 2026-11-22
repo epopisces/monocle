@@ -1,4 +1,4 @@
-// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel). Uses a temp copy of the fixture
+// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-49 execution settings). Uses a temp copy of the fixture
 // vault and a temp Electron user-data dir, so the user's Obsidian configuration and vaults are never touched.
 // The companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
 // Copilot CLI; costs one premium request; skips the cancel checks).
@@ -113,6 +113,37 @@ try {
   check("streamed answer shown", live ? /monocle smoke ok/i.test(answer) : answer.includes("echo: hello from obsidian"), answer);
   const meta = await evaluate(`${q(".monocle-execution")}.textContent`);
   check("execution ID shown", /^Execution [0-9a-f-]{36} · completed$/.test(meta), meta);
+
+  // IMM-49: provider-discovered settings, applied to the adapter request; unsupported values rejected visibly.
+  const sel = (name) => q(`select[data-setting="${name}"]`);
+  const pick = (name, value) =>
+    evaluate(`(() => { const s = ${sel(name)}; if (![...s.options].some(o => o.value === ${JSON.stringify(value)})) s.add(new Option(${JSON.stringify(value)} + ' (unsupported)', ${JSON.stringify(value)})); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event('change')); })()`);
+  const optionsOf = (name) => evaluate(`[...(${sel(name)}?.options ?? [])].map(o => o.value).join(',')`);
+  await until(evaluate, `!!${sel("model")}`, true);
+  const models = await optionsOf("model");
+  check("model choices discovered from the CLI", live ? models.split(",").length > 2 : models === ",auto,fake-pro,fake-mini", models);
+  const efforts = await optionsOf("reasoningEffort");
+  check("thinking effort choices shown", efforts.split(",").includes("low"), efforts);
+  check("context window choices shown", (await optionsOf("contextWindow")).includes("long_context"));
+  const failedState = `${q(".monocle-output")}?.dataset.state`;
+  await pick("model", "no-such-model");
+  await submit("rejected");
+  await until(evaluate, failedState, "failed");
+  const rejection = await evaluate(`${q(".monocle-execution-error")}.textContent`);
+  check("unsupported setting reported, not ignored", /^invalid_request: model "no-such-model" is not supported/.test(rejection), rejection);
+  await pick("model", live ? "" : "fake-pro");
+  await pick("reasoningEffort", "low");
+  if (!live) {
+    await submit("show args [args]");
+    await until(evaluate, outputState, "completed");
+    const argsOut = await evaluate(`${q(".monocle-output")}.textContent`);
+    check("chosen settings reach the Copilot CLI", argsOut.includes('"--model","fake-pro"') && argsOut.includes('"--reasoning-effort","low"'), argsOut);
+  } else {
+    await submit("Reply with exactly: monocle settings ok");
+    check("live run with thinking effort low completes", (await until(evaluate, outputState, "completed", 120000)) === "completed");
+  }
+  await pick("model", "");
+  await pick("reasoningEffort", "");
 
   if (!live) {
     await submit("long task [hang]");

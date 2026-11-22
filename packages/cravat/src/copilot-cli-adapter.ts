@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { ExecutionRequest } from "@monocle/contracts";
+import type { ExecutionRequest, ExecutionSettings, ProviderSettingCapabilities } from "@monocle/contracts";
 import { ProviderError, type ProviderAdapter, type ProviderEvent } from "./execution-manager.js";
 
 export interface CopilotCliAdapterOptions {
@@ -30,6 +30,65 @@ const CLI_FLAGS = [
 ] as const;
 
 const STDERR_LIMIT = 4_096;
+const HELP_TIMEOUT_MS = 15_000;
+
+/** Runs the CLI with `args` (no prompt, no stdin) and resolves its stdout, or `undefined` if it fails. */
+function readCliOutput(command: string, args: readonly string[], env: NodeJS.ProcessEnv): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    let out = "";
+    const child = spawn(command, args, { env, stdio: ["ignore", "pipe", "ignore"], windowsHide: true });
+    const timer = setTimeout(() => killTree(child.pid), HELP_TIMEOUT_MS);
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => (out += chunk));
+    child.once("error", () => {
+      clearTimeout(timer);
+      resolve(undefined);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      resolve(code === 0 ? out : undefined);
+    });
+  });
+}
+
+/** Lines of one `--flag` entry in `copilot --help`, up to the next option. */
+function optionBlock(help: string, flag: string): string | undefined {
+  const lines = help.split(/\r?\n/);
+  const start = lines.findIndex((l) => new RegExp(`^\\s+${flag}\\b`).test(l));
+  if (start < 0) return undefined;
+  const end = lines.findIndex((l, i) => i > start && /^\s+-/.test(l));
+  return lines.slice(start, end < 0 ? undefined : end).join(" ");
+}
+
+function possibleValues(help: string, flag: string): string[] | undefined {
+  const match = /\[possible values: ([^\]]+)\]/.exec(optionBlock(help, flag) ?? "");
+  const values = match?.[1]?.split(",").map((v) => v.trim()).filter(Boolean);
+  return values && values.length > 0 ? values : undefined;
+}
+
+/** Model IDs listed under `` `model`: `` in `copilot help config`. */
+function configModels(config: string): string[] {
+  const lines = config.split(/\r?\n/);
+  const start = lines.findIndex((l) => /^\s+`model`:/.test(l));
+  if (start < 0) return [];
+  const models: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    const m = /^\s+- "([^"]+)"\s*$/.exec(line);
+    if (!m) break;
+    models.push(m[1]!);
+  }
+  return models;
+}
+
+/** Maps Monocle execution settings to Copilot CLI flags. */
+function settingFlags(settings: ExecutionSettings | undefined): string[] {
+  if (!settings) return [];
+  return [
+    ...(settings.model ? ["--model", settings.model] : []),
+    ...(settings.reasoningEffort ? ["--reasoning-effort", settings.reasoningEffort] : []),
+    ...(settings.contextWindow ? ["--context", settings.contextWindow] : []),
+  ];
+}
 
 function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
@@ -63,11 +122,35 @@ export class CopilotCliAdapter implements ProviderAdapter {
     this.env = options.env ?? {};
   }
 
+  /**
+   * Reads supported settings from the installed CLI's help (`--help` for reasoning effort and context tiers,
+   * `help config` for the model catalog), so Monocle never assumes provider feature parity. Costs no
+   * premium request. A setting whose values cannot be discovered is reported as unsupported.
+   */
+  async capabilities(): Promise<ProviderSettingCapabilities> {
+    const env = { ...process.env, ...this.env };
+    const [help, config] = await Promise.all([
+      readCliOutput(this.command, [...this.args, "--help"], env),
+      readCliOutput(this.command, [...this.args, "help", "config"], env),
+    ]);
+    const caps: { -readonly [K in keyof ProviderSettingCapabilities]: ProviderSettingCapabilities[K] } = {};
+    const models = config ? configModels(config) : [];
+    if (models.length > 0) {
+      const auto = help && /'auto'/.test(optionBlock(help, "--model") ?? "") ? ["auto"] : [];
+      caps.model = { options: [...auto, ...models] };
+    }
+    const efforts = help && possibleValues(help, "--reasoning-effort");
+    if (efforts) caps.reasoningEffort = { options: efforts };
+    const tiers = help && possibleValues(help, "--context");
+    if (tiers) caps.contextWindow = { options: tiers };
+    return caps;
+  }
+
   async *run(request: ExecutionRequest, signal: AbortSignal): AsyncIterable<ProviderEvent> {
     if (signal.aborted) return;
     // Empty scratch cwd: Copilot loads no repository instructions/config from wherever the companion runs.
     const cwd = mkdtempSync(join(tmpdir(), "cravat-copilot-"));
-    const child = spawn(this.command, [...this.args, ...CLI_FLAGS], {
+    const child = spawn(this.command, [...this.args, ...CLI_FLAGS, ...settingFlags(request.settings)], {
       cwd,
       env: { ...process.env, ...this.env },
       stdio: ["pipe", "pipe", "pipe"],

@@ -61,6 +61,20 @@
   word-break: break-all;
 }
 
+.monocle-panel .monocle-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.monocle-panel .monocle-setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
+}
+
 .monocle-panel .monocle-execution-error {
   color: var(--text-error);
   font-size: var(--font-ui-smaller);

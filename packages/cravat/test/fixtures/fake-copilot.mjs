@@ -1,14 +1,43 @@
 #!/usr/bin/env node
 // Stand-in for the Copilot CLI's `--output-format json --stream on` mode, so adapter tests need no credentials.
 // Behaviour is selected by FAKE_COPILOT_MODE: stream | args | fail | result-error | hang. Without it, a prompt
-// containing "[hang]" hangs and anything else streams (used by the Obsidian smoke test).
+// containing "[hang]" hangs, "[args]" echoes the CLI arguments and anything else streams (used by the Obsidian
+// smoke test). `--help` / `help config` print help excerpts used for capability discovery.
 import { stdin } from "node:process";
+
+// Help output used for capability discovery (excerpts in the real CLI 1.0.104 format).
+const argv = process.argv.slice(2);
+if (argv.includes("--help")) {
+  process.stdout.write(`Usage: copilot [OPTIONS] [COMMAND]
+
+      --model <model>
+          Set the AI model to use (use 'auto' to let Copilot pick
+          automatically)
+      --reasoning-effort <level>
+          Set the reasoning effort level [possible values: low, medium, high]
+      --context <tier>
+          Set the context window tier (overrides persisted setting) [possible values: default, long_context]
+`);
+  process.exit(0);
+}
+if (argv[0] === "help" && argv[1] === "config") {
+  process.stdout.write(`Configuration Settings:
+
+  \`model\`: AI model to use for Copilot CLI; can be changed with /model command or --model flag option.
+    - "fake-pro"
+    - "fake-mini"
+
+  \`contextTier\`: context window tier for tiered-pricing models (e.g., "default" or "long_context").
+    - "not-a-model"
+`);
+  process.exit(0);
+}
 
 let prompt = "";
 stdin.setEncoding("utf8");
 for await (const chunk of stdin) prompt += chunk;
 
-const mode = process.env.FAKE_COPILOT_MODE ?? (prompt.includes("[hang]") ? "hang" : "stream");
+const mode = process.env.FAKE_COPILOT_MODE ?? (prompt.includes("[hang]") ? "hang" : prompt.includes("[args]") ? "args" : "stream");
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 const delta = (messageId, deltaContent) =>
   emit({ type: "assistant.message_delta", data: { messageId, deltaContent }, ephemeral: true });
