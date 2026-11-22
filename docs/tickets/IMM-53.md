@@ -40,10 +40,16 @@ Requires: 08 Create schema-valid notes via existing Curator skill.
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed: `npm ci && npm run check` 255/255 (8 new proposal-store tests and 1 NotePlan→proposal test in core, 1 change-set route test in companion); `npm run smoke:obsidian` SMOKE_RESULT (fake CLI; no plugin changes)
+- [x] Acceptance criteria validated (temp data dirs and fixture vault only)
+- [x] Summary and artifacts committed or handed back for synchronization (branch `epopisces-imm-53-change-proposals`)
 
 **Implementation notes:**
 
+- **Session = one Cravat execution.** Per the spec ("Approve All Pending for the current agent *execution* session") a change set holds the proposals of exactly one `executionId`; `conversationId` is recorded alongside so a conversation can list its executions' sets. A second execution in the same conversation gets its own set, and operations on one set never touch another.
+- **Portable schema** (`@monocle/contracts` `proposals.ts`): `{format: "monocle.change-set", version: 1, changeSet}`. `ChangeSet {id, executionId, conversationId?, createdAt, updatedAt, changes[]}`; `ChangeProposal {id, changeSetId, executionId, operation: create|modify|delete, path (vault-relative `.md`), noteId?, base, patch, risk: low|high, status, summary?, predecessorId?, createdAt, updatedAt}`. `base` is `{hash: null}` (note must not exist) or `{hash: "sha256:<hex of UTF-8 content>", content}` — the base text is kept so review can diff and a stale proposal can be rebased (IMM-57) after the note changed. `patch` is `{format: "replace", content}` (full proposed content) or `{format: "delete"}`. Statuses `pending | applied | rejected | conflicted | failed | superseded`; only `pending` can change.
+- **Storage** (`@monocle/core` `ProposalStore`): `<dataDir>/proposals/<changeSetId>.json` beside conversations (`--data-dir` / `MONOCLE_DATA_DIR`), never in the vault and never ingested into the note index. Atomic temp-file + rename writes, serialized per set; files that fail `parseChangeSet` (bad JSON, unknown version, base hash not matching base content, mismatched IDs, unsafe path) are skipped with a log line. No `dataDir` → in memory only.
+- **APIs.** Core: `ProposalStore.open/propose/setStatus/get/getChange/changeSetForExecution/list({executionId?, conversationId?})/flush/close`, `serializeChangeSet`/`parseChangeSet`, `contentHash`, `noteCreationProposal(plan, {executionId, conversationId?, risk?})`. Companion: `RunningCompanion.proposals` (in-process), `GET /v1/change-sets[?executionId=&conversationId=]` → `{changeSets: ChangeSetSummary[]}` (status counts, newest first), `GET /v1/change-sets/{id}` → `ChangeSet` or 404. No write routes yet; `CONTRACT_VERSION` unchanged (additive).
+- **`/new-note` stays direct apply** (decision). D06 makes approval risk-based and lets low-risk authorized operations run without review; `/new-note` is user-initiated, opt-in (`--note-template`), and only ever adds a file with an exclusive create. `planNote`'s `NotePlan` maps onto a `create` proposal via `noteCreationProposal` (default risk `low`) for agent-initiated creates once an agent write path exists (IMM-54).
+- **TDD note.** The first two store slices were strict red→green; persistence/parse validation landed with the restart slice, so the isolation, immutability, invalid-shape and round-trip tests passed on first run.

@@ -21,6 +21,7 @@ export * from "./vault-tools/vault-reader.js";
 export * from "./vault-tools/tools.js";
 export * from "./vault-tools/mcp-server.js";
 export * from "./conversations/conversation-store.js";
+export * from "./proposals/proposal-store.js";
 export * from "./index-service.js";
 export * from "./operations/validate-note.js";
 export * from "./operations/create-note.js";

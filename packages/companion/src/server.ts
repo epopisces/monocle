@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import {
   ALLOWED_CLIENT_ORIGINS,
   CAPABILITIES_PATH,
+  CHANGE_SETS_PATH,
   COMMANDS_PATH,
   COMPANION_SERVICE_ID,
   CONVERSATIONS_PATH,
@@ -19,13 +20,14 @@ import {
   isLoopbackHostname,
   isTerminalExecutionEvent,
   parseExecutionRequest,
+  type ChangeSetListResponse,
   type Conversation,
   type ConversationListResponse,
   type ExecutionError,
   type HealthResponse,
   type ProviderSessionInfo,
 } from "@monocle/contracts";
-import { ConversationStore, conversationTitle, type IndexService } from "@monocle/core";
+import { ConversationStore, ProposalStore, conversationTitle, type IndexService } from "@monocle/core";
 import { handleIndexRoute, INDEX_ROUTE_PREFIX } from "./index-routes.js";
 import { handleCommandRoute, planAgenticCommand, type CompanionNotesOptions } from "./command-routes.js";
 import { CopilotCliAdapter, ExecutionManager, type ProviderAdapter } from "@monocle/cravat";
@@ -45,7 +47,7 @@ export interface CompanionOptions {
   /** Enables `/new-note` in the vault of `index` (IMM-52). Omitted: the companion never creates notes. */
   readonly notes?: CompanionNotesOptions;
   /**
-   * Machine-local directory for companion state such as conversations (never the vault). Omitted: state is kept
+   * Machine-local directory for companion state such as conversations and change proposals (never the vault). Omitted: state is kept
    * in memory and lost when the companion stops.
    */
   readonly dataDir?: string;
@@ -55,6 +57,8 @@ export interface RunningCompanion {
   /** Base URL clients should use, e.g. `http://127.0.0.1:48765`. */
   readonly url: string;
   readonly health: HealthResponse;
+  /** Session-scoped change proposals (IMM-53), persisted under `dataDir`. In-process API for guarded mutation. */
+  readonly proposals: ProposalStore;
   close(): Promise<void>;
 }
 
@@ -62,6 +66,7 @@ export interface RunningCompanion {
 const MAX_BODY_BYTES = (MAX_PROMPT_LENGTH + MAX_CONTEXT_LENGTH) * 4 + 64_000;
 const CANCEL_PATH = new RegExp(`^${EXECUTIONS_PATH}/([^/]+)/cancel$`);
 const CONVERSATION_PATH = new RegExp(`^${CONVERSATIONS_PATH}/([^/]+)$`);
+const CHANGE_SET_PATH = new RegExp(`^${CHANGE_SETS_PATH}/([^/]+)$`);
 
 function hostnameOf(hostHeader: string | undefined): string | undefined {
   if (!hostHeader) return undefined;
@@ -149,6 +154,7 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     instanceId: health.instanceId,
     ...(options.dataDir !== undefined && { dir: options.dataDir }),
   });
+  const proposals = await ProposalStore.open({ ...(options.dataDir !== undefined && { dir: options.dataDir }) });
 
   async function startExecution(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Requiring JSON forces a CORS preflight for browser callers, so a web page cannot fire a "simple" POST.
@@ -255,7 +261,8 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
       return res.end();
     }
 
-    const path = new URL(req.url ?? "/", "http://localhost").pathname;
+    const url = new URL(req.url ?? "/", "http://localhost");
+    const path = url.pathname;
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
     if (path.startsWith(INDEX_ROUTE_PREFIX)) return void handleIndexRoute(options.index, req, res, path, sendJson);
     if (path === COMMANDS_PATH) {
@@ -279,6 +286,20 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     if (conversationMatch) {
       const conversation = conversations.get(decodeURIComponent(conversationMatch[1]!));
       return conversation ? sendJson(res, 200, conversation) : sendJson(res, 404, { error: "no conversation with that ID" });
+    }
+    if (req.method === "GET" && path === CHANGE_SETS_PATH) {
+      const executionId = url.searchParams.get("executionId") ?? undefined;
+      const conversationId = url.searchParams.get("conversationId") ?? undefined;
+      const changeSets = proposals.list({
+        ...(executionId !== undefined && { executionId }),
+        ...(conversationId !== undefined && { conversationId }),
+      });
+      return sendJson(res, 200, { changeSets } satisfies ChangeSetListResponse);
+    }
+    const changeSetMatch = req.method === "GET" ? CHANGE_SET_PATH.exec(path) : null;
+    if (changeSetMatch) {
+      const set = proposals.get(decodeURIComponent(changeSetMatch[1]!));
+      return set ? sendJson(res, 200, set) : sendJson(res, 404, { error: "no change set with that ID" });
     }
     if (req.method === "POST" && path === EXECUTIONS_PATH) {
       startExecution(req, res).catch((err: unknown) => {
@@ -311,11 +332,12 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
   return {
     url: `http://${urlHost}:${address.port}`,
     health,
+    proposals,
     close: () =>
       new Promise<void>((resolve, reject) => {
         cravat.cancelAll();
         server.close((err) => (err ? reject(err) : resolve()));
         server.closeAllConnections();
-      }).then(() => conversations.close()),
+      }).then(() => Promise.all([conversations.close(), proposals.close()]).then(() => undefined)),
   };
 }

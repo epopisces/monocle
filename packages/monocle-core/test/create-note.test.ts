@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { commandNoteRenderer, createNote, openNoteIndex, planNote, type NoteIndex } from "@monocle/core";
+import { ProposalStore, commandNoteRenderer, createNote, noteCreationProposal, openNoteIndex, planNote, type NoteIndex } from "@monocle/core";
 
 const fixtureVault = fileURLToPath(new URL("../../../fixtures/vault/", import.meta.url));
 const now = new Date(2026, 10, 22, 9, 5, 0);
@@ -159,6 +159,23 @@ describe("external note renderer (Curator create-obsidian-note boundary)", () =>
     const attempt = () => createNote(index, { title: "Harbor Survey", template: "capture" }, { now, renderer });
 
     expect(attempt).toThrow(expect.objectContaining({ code, message: expect.stringContaining(message) }));
+    expect(existsSync(join(vault, "inbox/Harbor Survey.md"))).toBe(false);
+  });
+
+  it("can hold a planned note as a pending create proposal without touching the vault", async () => {
+    const plan = planNote(index, { title: "Harbor Survey", template: "Fixture Template", fields: { type: "capture" } }, { now });
+    const store = await ProposalStore.open();
+
+    const change = store.propose(noteCreationProposal(plan, { executionId: "exec-1", conversationId: "conv-1" }));
+
+    expect(change).toMatchObject({
+      operation: "create",
+      path: "inbox/Harbor Survey.md",
+      noteId: "fx-0004",
+      base: { hash: null },
+      patch: { format: "replace", content: plan.content },
+      status: "pending",
+    });
     expect(existsSync(join(vault, "inbox/Harbor Survey.md"))).toBe(false);
   });
 });
