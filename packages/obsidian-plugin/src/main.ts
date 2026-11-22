@@ -8,7 +8,13 @@ import {
   type App,
   type WorkspaceLeaf,
 } from "obsidian";
-import { DEFAULT_COMPANION_ENDPOINT } from "@monocle/contracts";
+import {
+  DEFAULT_COMPANION_ENDPOINT,
+  EXECUTION_SETTING_NAMES,
+  type ExecutionCapabilities,
+  type ExecutionSettingName,
+  type ExecutionSettings,
+} from "@monocle/contracts";
 import { CompanionConnection, type ConnectionState, type HealthProbe } from "./connection.js";
 import { parseCompanionEndpoint } from "./endpoint.js";
 import { IndexHealthMonitor } from "./index-health.js";
@@ -24,6 +30,39 @@ const rendererFetch: FetchLike = (input, init) => window.fetch(input, init);
 const VIEW_TYPE = "monocle-panel";
 /** Host-local (per vault, per machine) key; the endpoint must not sync through the vault (D01). */
 const ENDPOINT_STORAGE_KEY = "monocle:companion-endpoint";
+const SETTINGS_STORAGE_KEY = "monocle:execution-settings";
+
+const SETTING_LABELS: Record<ExecutionSettingName, string> = {
+  model: "Model",
+  reasoningEffort: "Thinking effort",
+  contextWindow: "Context window",
+};
+
+/**
+ * Renders one select per setting the provider supports. A saved value the provider no longer offers stays
+ * selected and marked unsupported, so the companion rejects it visibly instead of it being dropped silently.
+ */
+function renderSettings(container: HTMLElement, caps: ExecutionCapabilities | undefined, plugin: MonoclePlugin): void {
+  container.empty();
+  const saved = plugin.executionSettings();
+  const names = EXECUTION_SETTING_NAMES.filter((n) => caps?.settings[n]);
+  if (names.length === 0) {
+    container.createDiv({ cls: "monocle-settings-none", text: "Provider exposes no execution settings." });
+    return;
+  }
+  for (const name of names) {
+    const options = caps!.settings[name]!.options;
+    const field = container.createEl("label", { cls: "monocle-setting" });
+    field.createSpan({ text: SETTING_LABELS[name] });
+    const select = field.createEl("select", { cls: "dropdown", attr: { "data-setting": name } });
+    select.createEl("option", { value: "", text: "Provider default" });
+    for (const option of options) select.createEl("option", { value: option, text: option });
+    const current = saved[name];
+    if (current && !options.includes(current)) select.createEl("option", { value: current, text: `${current} (unsupported)` });
+    select.value = current ?? "";
+    select.addEventListener("change", () => plugin.setExecutionSetting(name, select.value || undefined));
+  }
+}
 
 const requestUrlProbe: HealthProbe = async (url) => {
   const res = await requestUrl({ url, method: "GET", throw: false });
@@ -85,6 +124,30 @@ export default class MonoclePlugin extends Plugin {
     this.stateListeners.add(listener);
     listener(this.connection.state);
     return () => this.stateListeners.delete(listener);
+  }
+
+  /** Execution settings chosen in the panel. Host-local: model availability differs per machine/account. */
+  executionSettings(): ExecutionSettings {
+    const saved: unknown = this.app.loadLocalStorage(SETTINGS_STORAGE_KEY);
+    if (typeof saved !== "string") return {};
+    try {
+      const parsed = JSON.parse(saved) as Record<string, unknown>;
+      const out: Partial<Record<ExecutionSettingName, string>> = {};
+      for (const name of EXECUTION_SETTING_NAMES) {
+        const v = parsed[name];
+        if (typeof v === "string" && v) out[name] = v;
+      }
+      return out;
+    } catch {
+      return {};
+    }
+  }
+
+  setExecutionSetting(name: ExecutionSettingName, value: string | undefined): void {
+    const next: Partial<Record<ExecutionSettingName, string>> = { ...this.executionSettings() };
+    if (value) next[name] = value;
+    else delete next[name];
+    this.app.saveLocalStorage(SETTINGS_STORAGE_KEY, Object.keys(next).length > 0 ? JSON.stringify(next) : null);
   }
 
   private connect(endpoint: string): void {
@@ -151,6 +214,7 @@ class MonoclePanelView extends ItemView {
     const actions = chat.createDiv({ cls: "monocle-actions" });
     const send = actions.createEl("button", { cls: "mod-cta monocle-send", text: "Send" });
     const cancel = actions.createEl("button", { cls: "monocle-cancel", text: "Cancel" });
+    const settingsRow = chat.createDiv({ cls: "monocle-settings" });
     const meta = chat.createDiv({ cls: "monocle-execution" });
     const execError = chat.createDiv({ cls: "monocle-execution-error" });
     const output = chat.createDiv({ cls: "monocle-output" });
@@ -159,6 +223,13 @@ class MonoclePanelView extends ItemView {
 
     let connected = false;
     let active: ExecutionHandle | undefined;
+    let capabilitiesFor: string | undefined;
+    const loadSettings = async (instanceId: string) => {
+      if (capabilitiesFor === instanceId) return;
+      capabilitiesFor = instanceId;
+      const caps = await new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).capabilities();
+      if (capabilitiesFor === instanceId) renderSettings(settingsRow, caps, this.plugin);
+    };
     const sync = () => {
       send.disabled = !connected || active !== undefined;
       cancel.disabled = active === undefined;
@@ -166,7 +237,10 @@ class MonoclePanelView extends ItemView {
     const submit = async () => {
       const text = prompt.value.trim();
       if (!text || active || !connected) return;
-      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(text);
+      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(
+        text,
+        this.plugin.executionSettings(),
+      );
       active = handle;
       sync();
       output.empty();
@@ -176,8 +250,10 @@ class MonoclePanelView extends ItemView {
       let streamed = "";
       for await (const event of handle.events) {
         meta.dataset.executionId = event.executionId;
-        if (event.type === "started") meta.setText(`Execution ${event.executionId} · ${event.provider} · running`);
-        else if (event.type === "delta") output.setText((streamed += event.text));
+        if (event.type === "started") {
+          const applied = Object.entries(event.settings ?? {}).map(([k, v]) => `${k}=${v}`);
+          meta.setText(`Execution ${event.executionId} · ${[event.provider, ...applied].join(" · ")} · running`);
+        } else if (event.type === "delta") output.setText((streamed += event.text));
         else {
           meta.setText(`Execution ${event.executionId || "(not started)"} · ${event.type}`);
           output.dataset.state = event.type;
@@ -205,6 +281,7 @@ class MonoclePanelView extends ItemView {
 
     this.unsubscribe = this.plugin.onState((s) => {
       connected = s.kind === "connected";
+      if (s.kind === "connected") void loadSettings(s.health.instanceId);
       sync();
       dot.dataset.state = s.kind;
       label.setText(LABELS[s.kind]);

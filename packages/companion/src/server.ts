@@ -3,6 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import {
   ALLOWED_CLIENT_ORIGINS,
+  CAPABILITIES_PATH,
   COMPANION_SERVICE_ID,
   CONTRACT_VERSION,
   DEFAULT_COMPANION_HOST,
@@ -103,6 +104,8 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     }
     const parsed = parseExecutionRequest(body);
     if (!parsed.ok) return sendError(res, 400, { code: "invalid_request", message: parsed.error });
+    const unsupported = await cravat.validate(parsed.request);
+    if (unsupported) return sendError(res, 400, { code: "invalid_request", message: unsupported });
 
     const execution = cravat.start(parsed.request);
     let terminal = false;
@@ -148,6 +151,13 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
     if (path.startsWith(INDEX_ROUTE_PREFIX)) return void handleIndexRoute(options.index, req, res, path, sendJson);
+    if (req.method === "GET" && path === CAPABILITIES_PATH) {
+      cravat.capabilities().then(
+        (caps) => sendJson(res, 200, caps),
+        (err: unknown) => sendError(res, 500, { code: "provider_error", message: `capability discovery failed: ${String(err)}` }),
+      );
+      return;
+    }
     if (req.method === "POST" && path === EXECUTIONS_PATH) {
       startExecution(req, res).catch((err: unknown) => {
         if (!res.headersSent) sendError(res, 500, { code: "provider_error", message: String(err) });

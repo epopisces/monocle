@@ -1,9 +1,12 @@
 import {
+  CAPABILITIES_PATH,
   EXECUTIONS_PATH,
   cancelExecutionPath,
   isTerminalExecutionEvent,
+  type ExecutionCapabilities,
   type ExecutionError,
   type ExecutionEvent,
+  type ExecutionSettings,
 } from "@monocle/contracts";
 
 /** Minimal `fetch` the client needs; Obsidian's renderer `fetch` and Node's global `fetch` both satisfy it. */
@@ -50,7 +53,27 @@ export class ExecutionClient {
     this.fetch = options.fetch;
   }
 
-  execute(prompt: string): ExecutionHandle {
+  /**
+   * Settings the companion's provider supports, or `undefined` when it cannot say (unreachable, or a
+   * companion older than the capabilities route). Callers should then offer no settings.
+   */
+  async capabilities(): Promise<ExecutionCapabilities | undefined> {
+    try {
+      const res = await this.fetch(new URL(CAPABILITIES_PATH, this.endpoint).href, { method: "GET" });
+      if (res.status !== 200) {
+        await res.body?.cancel();
+        return undefined;
+      }
+      const body = (await res.json()) as Partial<ExecutionCapabilities>;
+      return typeof body.provider === "string" && typeof body.settings === "object" && body.settings
+        ? { provider: body.provider, settings: body.settings }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  execute(prompt: string, settings?: ExecutionSettings): ExecutionHandle {
     const controller = new AbortController();
     const client = this;
     let executionId: string | undefined;
@@ -66,7 +89,7 @@ export class ExecutionClient {
         res = await client.fetch(new URL(EXECUTIONS_PATH, client.endpoint).href, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify(settings && Object.keys(settings).length > 0 ? { prompt, settings } : { prompt }),
           signal: controller.signal,
         });
       } catch (err) {
