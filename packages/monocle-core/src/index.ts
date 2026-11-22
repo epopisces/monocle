@@ -6,3 +6,6 @@ export const packageDescriptor: PackageDescriptor = {
   role: "knowledge-services",
   contractVersion: CONTRACT_VERSION,
 };
+
+export * from "./note-index/note-index.js";
+export * from "./note-index/watch.js";

@@ -63,7 +63,7 @@ Requires: 01 Inspect assets and bootstrap Monocle monorepo.
   avoid renderer CORS. Unloading the plugin only stops polling; it never launches/stops the companion. Errors are shown
   in the panel/status bar only (no modals), so native editing is unaffected.
 - **Bundling**: esbuild → `main.js` (CJS, `obsidian` external) via `npm run bundle:plugin -- --vault <path>`.
-- **Automated checks**: `npm ci && npm run check` → 43/43 passed. New: companion HTTP seam (5), process restart smoke
+- **Automated checks**: `npm ci && npm run check` → 43/43 passed (58/58 after merging IMM-58 from `refactor`). New: companion HTTP seam (5), process restart smoke
   test (1), plugin↔companion integration (6: connect, disconnect→reconnect, plugin stop leaves companion up,
   incompatible version, foreign service, timeout), endpoint validation (8), bundle loads requiring only `obsidian` (1).
 - **Acceptance in real Obsidian** (1.8.9 on the implementing host): `npm run smoke:obsidian` → 8/8 passed — plugin

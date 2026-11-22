@@ -16,6 +16,7 @@
     "dist"
   ],
   "dependencies": {
-    "@monocle/contracts": "0.0.0"
+    "@monocle/contracts": "0.0.0",
+    "yaml": "^2.9.1"
   }
 }
