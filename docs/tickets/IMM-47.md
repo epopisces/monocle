@@ -47,7 +47,7 @@ Requires: 02 Connect Obsidian panel to independent companion.
 
 **Commands and outcomes:**
 
-- `npm ci && npm run check` (lint/typecheck/build/test): 87/87 tests passed after merging `origin/refactor` (IMM-59/60).
+- `npm ci && npm run check` (lint/typecheck/build/test): 87/87 tests passed pre-merge, 119/119 after merging `origin/refactor` (IMM-59/60).
   IMM-47 adds 29 tests: Cravat `ExecutionManager` (8), `CopilotCliAdapter` against a fake CLI incl. failed launch,
   provider error and kill-on-cancel (6), companion execution routes incl. Origin/CORS/415/413/404 (8),
   plugin `ExecutionClient` ↔ real companion integration incl. cancel and connection loss (7). No live credentials needed.
