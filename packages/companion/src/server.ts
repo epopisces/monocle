@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { AddressInfo } from "node:net";
 import {
   ALLOWED_CLIENT_ORIGINS,
+  CAPABILITIES_PATH,
   COMPANION_SERVICE_ID,
   CONTRACT_VERSION,
   DEFAULT_COMPANION_HOST,
@@ -19,6 +20,8 @@ import {
   type ExecutionError,
   type HealthResponse,
 } from "@monocle/contracts";
+import type { IndexService } from "@monocle/core";
+import { handleIndexRoute, INDEX_ROUTE_PREFIX } from "./index-routes.js";
 import { CopilotCliAdapter, ExecutionManager, type ProviderAdapter } from "@monocle/cravat";
 import { ContextError, prepareExecution, type CompanionVaultOptions, type PreparedExecution } from "./context.js";
 
@@ -27,6 +30,8 @@ export interface CompanionOptions {
   readonly host?: string;
   /** TCP port; `0` picks a free port. */
   readonly port?: number;
+  /** Derived indexes for the configured vault; index routes answer 404 without one. Owned by the caller. */
+  readonly index?: IndexService;
   /** Cravat provider adapter; defaults to the installed Copilot CLI. */
   readonly adapter?: ProviderAdapter;
   /** Vault the agent may read (context assembly and read-only tools). Without it the agent gets no tools. */
@@ -107,6 +112,8 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     }
     const parsed = parseExecutionRequest(body);
     if (!parsed.ok) return sendError(res, 400, { code: "invalid_request", message: parsed.error });
+    const unsupported = await cravat.validate(parsed.request);
+    if (unsupported) return sendError(res, 400, { code: "invalid_request", message: unsupported });
     let prepared: PreparedExecution;
     try {
       prepared = prepareExecution(parsed.request, options.vault);
@@ -158,6 +165,14 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
 
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
+    if (path.startsWith(INDEX_ROUTE_PREFIX)) return void handleIndexRoute(options.index, req, res, path, sendJson);
+    if (req.method === "GET" && path === CAPABILITIES_PATH) {
+      cravat.capabilities().then(
+        (caps) => sendJson(res, 200, caps),
+        (err: unknown) => sendError(res, 500, { code: "provider_error", message: `capability discovery failed: ${String(err)}` }),
+      );
+      return;
+    }
     if (req.method === "POST" && path === EXECUTIONS_PATH) {
       startExecution(req, res).catch((err: unknown) => {
         if (!res.headersSent) sendError(res, 500, { code: "provider_error", message: String(err) });

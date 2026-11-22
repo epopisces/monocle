@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 /**
  * Standalone companion launcher. Runs independently of Obsidian; stop it with Ctrl+C / SIGTERM.
- * Options: --host <loopback> --port <n>, or MONOCLE_COMPANION_HOST / MONOCLE_COMPANION_PORT;
- * --vault <folder> (or MONOCLE_VAULT) lets the agent read that vault through read-only tools;
- * --exclude <vault-relative note or folder> (repeatable) keeps notes out of every execution.
+ * Options: --host <loopback> --port <n> (or MONOCLE_COMPANION_HOST / MONOCLE_COMPANION_PORT);
+ * --vault <dir> (or MONOCLE_VAULT) enables the derived indexes and lets the agent read that vault through
+ * read-only tools, with --state-dir <dir> (host-local, default ~/.monocle/state/<vault hash>), repeatable
+ * --exclude <vault-relative folder or note> (not indexed, never sent to or readable by the agent), and
+ * --semantic-config <json file>.
  */
-import { resolve } from "node:path";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { createSemanticIndexFromConfig, openIndexService, type IndexService, type SemanticConfig } from "@monocle/core";
 import { startCompanion } from "./server.js";
 
 const { values } = parseArgs({
@@ -14,14 +20,14 @@ const { values } = parseArgs({
     host: { type: "string" },
     port: { type: "string" },
     vault: { type: "string" },
+    "state-dir": { type: "string" },
     exclude: { type: "string", multiple: true },
+    "semantic-config": { type: "string" },
   },
   strict: true,
 });
 
 const host = values.host ?? process.env.MONOCLE_COMPANION_HOST;
-const vaultRoot = values.vault ?? process.env.MONOCLE_VAULT;
-const vault = vaultRoot ? { root: resolve(vaultRoot), exclude: values.exclude ?? [] } : undefined;
 const portText = values.port ?? process.env.MONOCLE_COMPANION_PORT;
 const port = portText === undefined ? undefined : Number(portText);
 if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
@@ -29,14 +35,43 @@ if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535))
   process.exit(2);
 }
 
+function openIndex(vaultArg: string): IndexService {
+  const vaultRoot = resolve(vaultArg);
+  const stateDir =
+    values["state-dir"] ??
+    join(homedir(), ".monocle", "state", createHash("sha256").update(vaultRoot).digest("hex").slice(0, 16));
+  const semanticConfig = values["semantic-config"]
+    ? (JSON.parse(readFileSync(values["semantic-config"], "utf8")) as SemanticConfig)
+    : undefined;
+  return openIndexService({
+    vaultRoot,
+    stateDir,
+    ...(values.exclude && { excludeFolders: values.exclude }),
+    semantic: (deps) => createSemanticIndexFromConfig(semanticConfig, deps),
+  });
+}
+
+let index: IndexService | undefined;
 try {
-  const companion = await startCompanion({ ...(host && { host }), ...(port !== undefined && { port }), ...(vault && { vault }) });
+  const vault = values.vault ?? process.env.MONOCLE_VAULT;
+  index = vault ? openIndex(vault) : undefined;
+  const companion = await startCompanion({
+    ...(host && { host }),
+    ...(port !== undefined && { port }),
+    ...(index && { index }),
+    ...(vault && { vault: { root: resolve(vault), exclude: values.exclude ?? [] } }),
+  });
   // One JSON line on stdout so supervisors and tests can discover the bound URL.
   console.log(JSON.stringify({ event: "listening", url: companion.url, instanceId: companion.health.instanceId }));
-  const shutdown = () => void companion.close().then(() => process.exit(0));
+  const shutdown = () =>
+    void companion.close().then(() => {
+      index?.close();
+      process.exit(0);
+    });
   process.once("SIGINT", shutdown);
   process.once("SIGTERM", shutdown);
 } catch (err) {
+  index?.close();
   console.error(`Monocle companion failed to start: ${(err as Error).message}`);
   process.exit(1);
 }

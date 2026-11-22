@@ -8,6 +8,13 @@ export {
   type HealthProbe,
 } from "./connection.js";
 export { parseCompanionEndpoint, type EndpointResult } from "./endpoint.js";
+export {
+  IndexHealthMonitor,
+  type ActionResult,
+  type CompanionRequest,
+  type IndexHealthMonitorOptions,
+  type IndexView,
+} from "./index-health.js";
 export { ExecutionClient, type ExecutionClientOptions, type ExecutionHandle, type FetchLike } from "./execution-client.js";
 export { buildExecutionContext, type ActiveNoteSnapshot, type ContextChoices } from "./context.js";
 

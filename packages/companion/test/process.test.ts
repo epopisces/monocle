@@ -1,9 +1,11 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
-import { HEALTH_PATH, isHealthResponse, type HealthResponse } from "@monocle/contracts";
+import { HEALTH_PATH, INDEX_HEALTH_PATH, isHealthResponse, type HealthResponse } from "@monocle/contracts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
@@ -21,8 +23,8 @@ afterEach(() => {
   for (const c of children.splice(0)) c.kill();
 });
 
-function launch(port: number): Promise<{ child: ChildProcess; url: string }> {
-  const child = spawn(process.execPath, [cli, "--port", String(port)], { stdio: ["ignore", "pipe", "inherit"] });
+function launch(port: number, args: string[] = []): Promise<{ child: ChildProcess; url: string }> {
+  const child = spawn(process.execPath, [cli, "--port", String(port), ...args], { stdio: ["ignore", "pipe", "inherit"] });
   children.push(child);
   return new Promise((resolve, reject) => {
     child.once("exit", (code) => reject(new Error(`companion exited early with ${code}`)));
@@ -62,5 +64,22 @@ describe("companion process (restart smoke test)", () => {
     const after = await health(second.url);
     expect(after?.status).toBe("ok");
     expect(after?.instanceId).not.toBe(before?.instanceId);
+  }, 30_000);
+});
+
+describe("companion process with a vault", () => {
+  it("indexes the vault given on the command line and serves its health", async () => {
+    const work = mkdtempSync(join(tmpdir(), "monocle-companion-vault-"));
+    try {
+      const vault = join(work, "vault");
+      cpSync(join(repoRoot, "fixtures", "vault"), vault, { recursive: true });
+      const { child, url } = await launch(0, ["--vault", vault, "--state-dir", join(work, "state"), "--exclude", "templates"]);
+      const body = (await (await fetch(new URL(INDEX_HEALTH_PATH, url))).json()) as { level: string; lexical: { notes: number } };
+      expect(body).toMatchObject({ level: "healthy", lexical: { notes: 7 } });
+      child.kill();
+      await exited(child);
+    } finally {
+      rmSync(work, { recursive: true, force: true });
+    }
   }, 30_000);
 });

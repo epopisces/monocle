@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import type { ExecutionError, ExecutionErrorCode, ExecutionEvent, ExecutionRequest } from "@monocle/contracts";
+import {
+  validateExecutionSettings,
+  type ExecutionCapabilities,
+  type ExecutionError,
+  type ExecutionErrorCode,
+  type ExecutionEvent,
+  type ExecutionRequest,
+  type ProviderSettingCapabilities,
+} from "@monocle/contracts";
 
 /** Output a provider adapter produces while running. */
 export type ProviderEvent = { readonly type: "delta"; readonly text: string };
@@ -10,6 +18,11 @@ export type ProviderEvent = { readonly type: "delta"; readonly text: string };
  */
 export interface ProviderAdapter {
   readonly id: string;
+  /**
+   * Settings this provider can apply. Omitted (or resolving to `{}`) means no settings are supported, so
+   * requests that set any are rejected instead of silently ignored.
+   */
+  capabilities?(): Promise<ProviderSettingCapabilities>;
   /** `tools` is the only capability the agent gets; without it the agent runs with no tools at all. */
   run(request: ExecutionRequest, signal: AbortSignal, tools?: ExecutionToolset): AsyncIterable<ProviderEvent>;
 }
@@ -128,6 +141,7 @@ export class ExecutionManager {
   private readonly instanceId: string;
   private readonly cancelGraceMs: number;
   private readonly running = new Map<string, RunningExecution>();
+  private capabilitiesPromise: Promise<ExecutionCapabilities> | undefined;
 
   constructor(options: ExecutionManagerOptions) {
     this.adapter = options.adapter;
@@ -139,6 +153,22 @@ export class ExecutionManager {
     return this.adapter.id;
   }
 
+  /** The provider's supported settings, discovered once per manager. */
+  capabilities(): Promise<ExecutionCapabilities> {
+    this.capabilitiesPromise ??= (async () => ({
+      provider: this.adapter.id,
+      settings: (await this.adapter.capabilities?.()) ?? {},
+    }))();
+    this.capabilitiesPromise.catch(() => (this.capabilitiesPromise = undefined));
+    return this.capabilitiesPromise;
+  }
+
+  /** Returns an actionable error if the request asks for settings the provider cannot apply. */
+  async validate(request: ExecutionRequest): Promise<string | undefined> {
+    if (!request.settings) return undefined;
+    return validateExecutionSettings(request.settings, await this.capabilities());
+  }
+
   start(request: ExecutionRequest, options: StartOptions = {}): Execution {
     const queue = new EventQueue();
     const execution = new RunningExecution(randomUUID(), queue, () => this.running.delete(execution.id));
@@ -148,6 +178,7 @@ export class ExecutionManager {
       provider: this.adapter.id,
       instanceId: this.instanceId,
       startedAt: new Date().toISOString(),
+      ...(request.settings && { settings: request.settings }),
     });
     void this.drive(execution, request, options.tools);
     return { id: execution.id, events: queue.drain() };

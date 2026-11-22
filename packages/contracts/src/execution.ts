@@ -55,7 +55,53 @@ export interface ExecutionContext {
 
 export interface ExecutionRequest {
   readonly prompt: string;
+  /** Monocle vault context for this execution (since 0.2.x). */
   readonly context?: ExecutionContext;
+  /** Provider execution options (since 0.2.x). Omitted settings use the provider's defaults. */
+  readonly settings?: ExecutionSettings;
+}
+
+/** Execution options Monocle can request. Which ones apply, and their values, depend on the provider. */
+export const EXECUTION_SETTING_NAMES = ["model", "reasoningEffort", "contextWindow"] as const;
+export type ExecutionSettingName = (typeof EXECUTION_SETTING_NAMES)[number];
+
+export type ExecutionSettings = { readonly [K in ExecutionSettingName]?: string };
+
+/** One supported setting: the values the provider accepts. */
+export interface SettingCapability {
+  readonly options: readonly string[];
+}
+
+/** Settings a provider supports; a missing key means the setting is unsupported and will be rejected. */
+export type ProviderSettingCapabilities = { readonly [K in ExecutionSettingName]?: SettingCapability };
+
+export const CAPABILITIES_PATH = "/v1/capabilities";
+
+/** Body of `GET {@link CAPABILITIES_PATH}`. */
+export interface ExecutionCapabilities {
+  /** Provider adapter id, as in `started.provider`. */
+  readonly provider: string;
+  readonly settings: ProviderSettingCapabilities;
+}
+
+/**
+ * Checks requested settings against a provider's capabilities. Returns an actionable error message for the
+ * first unsupported setting or value, or `undefined` when every setting can be applied.
+ */
+export function validateExecutionSettings(
+  settings: ExecutionSettings | undefined,
+  capabilities: ExecutionCapabilities,
+): string | undefined {
+  for (const name of EXECUTION_SETTING_NAMES) {
+    const value = settings?.[name];
+    if (value === undefined) continue;
+    const capability = capabilities.settings[name];
+    if (!capability) return `setting ${name} is not supported by ${capabilities.provider}`;
+    if (!capability.options.includes(value)) {
+      return `${name} "${value}" is not supported by ${capabilities.provider}; supported: ${capability.options.join(", ")}`;
+    }
+  }
+  return undefined;
 }
 
 export type ExecutionErrorCode =
@@ -87,6 +133,8 @@ export type ExecutionEvent =
       /** Companion `instanceId` (see health); a different value after restart means this execution is lost. */
       readonly instanceId: string;
       readonly startedAt: string;
+      /** Settings applied to this execution, when any were requested. */
+      readonly settings?: ExecutionSettings;
     })
   | (EventBase & { readonly type: "delta"; readonly text: string })
   | (EventBase & { readonly type: "completed"; readonly text: string })
@@ -101,6 +149,26 @@ export function isTerminalExecutionEvent(event: ExecutionEvent): event is Termin
 
 export type ExecutionRequestResult = { ok: true; request: ExecutionRequest } | { ok: false; error: string };
 
+const REQUEST_FIELDS = new Set(["prompt", "settings", "context"]);
+
+function parseSettings(value: unknown): { ok: true; settings: ExecutionSettings } | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "settings must be a JSON object" };
+  }
+  const names: readonly string[] = EXECUTION_SETTING_NAMES;
+  const unknownKeys = Object.keys(value).filter((k) => !names.includes(k));
+  if (unknownKeys.length > 0) {
+    return { ok: false, error: `unsupported settings: ${unknownKeys.join(", ")} (known: ${names.join(", ")})` };
+  }
+  const settings: Record<string, string> = {};
+  for (const [name, v] of Object.entries(value)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "string" || v.trim() === "") return { ok: false, error: `setting ${name} must be a non-empty string` };
+    settings[name] = v;
+  }
+  return { ok: true, settings };
+}
+
 /**
  * Validates an execution request body. Unknown fields are rejected rather than ignored, so a client never
  * believes a setting was applied when it was not.
@@ -109,14 +177,23 @@ export function parseExecutionRequest(value: unknown): ExecutionRequestResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { ok: false, error: "request body must be a JSON object" };
   }
-  const unknownKeys = unknownFields(value, ["prompt", "context"]);
-  if (unknownKeys) return { ok: false, error: `unsupported request fields: ${unknownKeys}` };
-  const { prompt, context } = value as { prompt?: unknown; context?: unknown };
+  const unknownKeys = Object.keys(value).filter((k) => !REQUEST_FIELDS.has(k));
+  if (unknownKeys.length > 0) return { ok: false, error: `unsupported request fields: ${unknownKeys.join(", ")}` };
+  const { prompt, settings, context } = value as { prompt?: unknown; settings?: unknown; context?: unknown };
   if (typeof prompt !== "string" || prompt.trim() === "") return { ok: false, error: "prompt must be a non-empty string" };
   if (prompt.length > MAX_PROMPT_LENGTH) return { ok: false, error: `prompt exceeds ${MAX_PROMPT_LENGTH} characters` };
-  if (context === undefined) return { ok: true, request: { prompt } };
-  const parsed = parseContext(context);
-  return typeof parsed === "string" ? { ok: false, error: parsed } : { ok: true, request: { prompt, context: parsed } };
+  let request: { prompt: string; settings?: ExecutionSettings; context?: ExecutionContext } = { prompt };
+  if (settings !== undefined) {
+    const parsed = parseSettings(settings);
+    if (!parsed.ok) return parsed;
+    if (Object.keys(parsed.settings).length > 0) request = { ...request, settings: parsed.settings };
+  }
+  if (context !== undefined) {
+    const parsed = parseContext(context);
+    if (typeof parsed === "string") return { ok: false, error: parsed };
+    request = { ...request, context: parsed };
+  }
+  return { ok: true, request };
 }
 
 const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);

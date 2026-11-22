@@ -38,6 +38,36 @@ describe("Copilot CLI adapter", () => {
     expect(existsSync(out.cwd)).toBe(false); // scratch dir removed after the run
   });
 
+  it("passes requested settings to the CLI as --model, --reasoning-effort and --context flags", async () => {
+    const adapter = fakeAdapter("args");
+    let text = "";
+    const settings = { model: "fake-pro", reasoningEffort: "high", contextWindow: "long_context" };
+    for await (const e of adapter.run({ prompt: "x", settings }, new AbortController().signal)) text += e.text;
+    const { args } = JSON.parse(text) as { args: string[] };
+    expect(args.join(" ")).toContain("--model fake-pro");
+    expect(args.join(" ")).toContain("--reasoning-effort high");
+    expect(args.join(" ")).toContain("--context long_context");
+  });
+
+  it("omits setting flags when no settings are requested", async () => {
+    const { args } = JSON.parse(await run(fakeAdapter("args"), "x")) as { args: string[] };
+    expect(args).not.toContain("--model");
+    expect(args).not.toContain("--reasoning-effort");
+    expect(args).not.toContain("--context");
+  });
+
+  it("discovers supported models, reasoning efforts and context tiers from the installed CLI", async () => {
+    expect(await fakeAdapter("stream").capabilities()).toEqual({
+      model: { options: ["auto", "fake-pro", "fake-mini"] },
+      reasoningEffort: { options: ["low", "medium", "high"] },
+      contextWindow: { options: ["default", "long_context"] },
+    });
+  });
+
+  it("declares no settings when the CLI's help cannot be read", async () => {
+    expect(await new CopilotCliAdapter({ command: "definitely-not-copilot-xyz" }).capabilities()).toEqual({});
+  });
+
   it("reports a failed launch when the Copilot executable cannot be started", async () => {
     const adapter = new CopilotCliAdapter({ command: "definitely-not-copilot-xyz" });
     const err = await run(adapter, "x").catch((e: unknown) => e);

@@ -1,9 +1,9 @@
-import { cpSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { DuplicateNoteIdError, openNoteIndex, type NoteIndex } from "@monocle/core";
+import { DuplicateNoteIdError, InvalidNotePathError, openNoteIndex, type NoteIndex } from "@monocle/core";
 
 const fixtureVault = fileURLToPath(new URL("../../../fixtures/vault/", import.meta.url));
 
@@ -174,5 +174,26 @@ describe("note index", () => {
     byUid.reconcile();
     expect(byUid.getNote("work/Uid Note.md")?.id).toBe("u-42");
     expect(byUid.getNote("people/Ada Example.md")?.id).toBeNull();
+  });
+
+  it("reindexes a single note on demand even when its mtime and size are unchanged", () => {
+    const path = "projects/Project Lantern.md";
+    const file = join(vault, path);
+    utimesSync(file, 1_700_000_000, 1_700_000_000);
+    const index = open();
+    index.reconcile();
+    writeFileSync(file, "x".repeat(statSync(file).size));
+    utimesSync(file, 1_700_000_000, 1_700_000_000);
+    expect(index.reconcile().updated).toEqual([]);
+
+    expect(index.reindexNote(path)).toMatchObject({ updated: [path], added: [], deleted: [] });
+    expect(index.search("lanternfish-7731")).toEqual([]);
+
+    unlinkSync(file);
+    expect(index.reindexNote(path)).toMatchObject({ deleted: [path] });
+    expect(index.getNote(path)).toBeUndefined();
+    expect(() => index.reindexNote(".obsidian/app.json")).toThrow(InvalidNotePathError);
+    expect(() => index.reindexNote("projects\\Project Lantern.md")).toThrow(InvalidNotePathError);
+    expect(() => index.reindexNote("/etc/notes.md")).toThrow(InvalidNotePathError);
   });
 });
