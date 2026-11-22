@@ -10,7 +10,27 @@ export type ProviderEvent = { readonly type: "delta"; readonly text: string };
  */
 export interface ProviderAdapter {
   readonly id: string;
-  run(request: ExecutionRequest, signal: AbortSignal): AsyncIterable<ProviderEvent>;
+  /** `tools` is the only capability the agent gets; without it the agent runs with no tools at all. */
+  run(request: ExecutionRequest, signal: AbortSignal, tools?: ExecutionToolset): AsyncIterable<ProviderEvent>;
+}
+
+/** A local stdio MCP server whose listed tools (bare names, not prefixed) are exposed to the agent. */
+export interface McpToolServer {
+  /** Server name; letters, digits and underscores only (providers prefix tool names with it). */
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env?: Readonly<Record<string, string>>;
+  readonly tools: readonly string[];
+}
+
+/** Tools an execution may use, supplied by the Cravat caller (never by the request body). */
+export interface ExecutionToolset {
+  readonly mcpServers: readonly McpToolServer[];
+}
+
+export interface StartOptions {
+  readonly tools?: ExecutionToolset | undefined;
 }
 
 export class ProviderError extends Error {
@@ -119,7 +139,7 @@ export class ExecutionManager {
     return this.adapter.id;
   }
 
-  start(request: ExecutionRequest): Execution {
+  start(request: ExecutionRequest, options: StartOptions = {}): Execution {
     const queue = new EventQueue();
     const execution = new RunningExecution(randomUUID(), queue, () => this.running.delete(execution.id));
     this.running.set(execution.id, execution);
@@ -129,7 +149,7 @@ export class ExecutionManager {
       instanceId: this.instanceId,
       startedAt: new Date().toISOString(),
     });
-    void this.drive(execution, request);
+    void this.drive(execution, request, options.tools);
     return { id: execution.id, events: queue.drain() };
   }
 
@@ -148,11 +168,11 @@ export class ExecutionManager {
     for (const id of [...this.running.keys()]) this.cancel(id);
   }
 
-  private async drive(execution: RunningExecution, request: ExecutionRequest): Promise<void> {
+  private async drive(execution: RunningExecution, request: ExecutionRequest, tools?: ExecutionToolset): Promise<void> {
     const { signal } = execution.controller;
     let text = "";
     try {
-      for await (const event of this.adapter.run(request, signal)) {
+      for await (const event of this.adapter.run(request, signal, tools)) {
         if (signal.aborted || execution.done) break;
         text += event.text;
         execution.emit({ type: "delta", text: event.text });

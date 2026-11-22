@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ExecutionRequest } from "@monocle/contracts";
-import { ProviderError, type ProviderAdapter, type ProviderEvent } from "./execution-manager.js";
+import { ProviderError, type ExecutionToolset, type ProviderAdapter, type ProviderEvent } from "./execution-manager.js";
 
 export interface CopilotCliAdapterOptions {
   /** Copilot executable. Defaults to `MONOCLE_COPILOT_PATH`, else `copilot` on PATH. Must be a real executable, not a `.cmd` shim. */
@@ -16,18 +16,36 @@ export interface CopilotCliAdapterOptions {
 }
 
 /**
- * Flags for a non-interactive, read-only run: JSONL streaming output, no tools at all (the model cannot
- * touch files or run commands) and no built-in MCP servers. Read-only Monocle tools arrive in IMM-48.
+ * Flags for a non-interactive, read-only run: JSONL streaming output and no built-in MCP servers. Tool
+ * availability is added by {@link toolFlags}: none at all by default, otherwise only the toolset's MCP tools.
  */
-const CLI_FLAGS = [
-  "--output-format",
-  "json",
-  "--stream",
-  "on",
-  "--available-tools",
-  "none",
-  "--disable-builtin-mcps",
-] as const;
+const CLI_FLAGS = ["--output-format", "json", "--stream", "on", "--disable-builtin-mcps"] as const;
+
+/** Built-in tool kinds denied outright as defense in depth, even though `--available-tools` already hides them. */
+const DENIED_TOOL_KINDS = ["write", "shell"] as const;
+
+const SERVER_NAME = /^[A-Za-z0-9_]+$/;
+
+/** Copilot CLI flags exposing exactly the toolset's tools (named `<server>-<tool>`), pre-approved per server. */
+function toolFlags(tools: ExecutionToolset | undefined, configPath: string): string[] {
+  const servers = tools?.mcpServers.filter((s) => s.tools.length > 0) ?? [];
+  if (servers.length === 0) return ["--available-tools", "none"];
+  const flags = ["--additional-mcp-config", `@${configPath}`];
+  for (const s of servers) for (const t of s.tools) flags.push("--available-tools", `${s.name}-${t}`);
+  for (const s of servers) flags.push("--allow-tool", s.name);
+  for (const k of DENIED_TOOL_KINDS) flags.push("--deny-tool", k);
+  return flags;
+}
+
+function mcpConfig(tools: ExecutionToolset): string {
+  const mcpServers: Record<string, unknown> = {};
+  for (const s of tools.mcpServers) {
+    if (!SERVER_NAME.test(s.name)) throw new ProviderError("launch_failed", `invalid MCP server name "${s.name}"`);
+    if (s.tools.length === 0) continue;
+    mcpServers[s.name] = { type: "local", command: s.command, args: [...s.args], env: { ...s.env }, tools: [...s.tools] };
+  }
+  return JSON.stringify({ mcpServers });
+}
 
 const STDERR_LIMIT = 4_096;
 
@@ -63,11 +81,14 @@ export class CopilotCliAdapter implements ProviderAdapter {
     this.env = options.env ?? {};
   }
 
-  async *run(request: ExecutionRequest, signal: AbortSignal): AsyncIterable<ProviderEvent> {
+  async *run(request: ExecutionRequest, signal: AbortSignal, tools?: ExecutionToolset): AsyncIterable<ProviderEvent> {
     if (signal.aborted) return;
+    const config = tools ? mcpConfig(tools) : undefined;
     // Empty scratch cwd: Copilot loads no repository instructions/config from wherever the companion runs.
     const cwd = mkdtempSync(join(tmpdir(), "cravat-copilot-"));
-    const child = spawn(this.command, [...this.args, ...CLI_FLAGS], {
+    const configPath = join(cwd, "mcp-config.json");
+    if (config) writeFileSync(configPath, config);
+    const child = spawn(this.command, [...this.args, ...CLI_FLAGS, ...toolFlags(tools, configPath)], {
       cwd,
       env: { ...process.env, ...this.env },
       stdio: ["pipe", "pipe", "pipe"],

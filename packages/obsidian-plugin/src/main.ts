@@ -1,6 +1,7 @@
 import {
   ItemView,
   MarkdownRenderer,
+  MarkdownView,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -10,6 +11,7 @@ import {
 } from "obsidian";
 import { DEFAULT_COMPANION_ENDPOINT } from "@monocle/contracts";
 import { CompanionConnection, type ConnectionState, type HealthProbe } from "./connection.js";
+import { buildExecutionContext, type ActiveNoteSnapshot } from "./context.js";
 import { parseCompanionEndpoint } from "./endpoint.js";
 import { ExecutionClient, type ExecutionHandle, type FetchLike } from "./execution-client.js";
 
@@ -45,11 +47,20 @@ export default class MonoclePlugin extends Plugin {
   connection!: CompanionConnection;
   private readonly stateListeners = new Set<(s: ConnectionState) => void>();
   private unsubscribe: (() => void) | undefined;
+  /** Focusing the Monocle panel clears the active view, so remember the last Markdown note the user was in. */
+  private lastMarkdownView: MarkdownView | undefined;
 
   override async onload(): Promise<void> {
     const status = this.addStatusBarItem();
     this.stateListeners.add((s) => status.setText(`Monocle: ${LABELS[s.kind]}`));
     this.connect(this.storedEndpoint());
+
+    this.lastMarkdownView = this.app.workspace.getActiveViewOfType(MarkdownView) ?? undefined;
+    this.registerEvent(
+      this.app.workspace.on("active-leaf-change", (leaf) => {
+        if (leaf?.view instanceof MarkdownView) this.lastMarkdownView = leaf.view;
+      }),
+    );
 
     this.registerView(VIEW_TYPE, (leaf) => new MonoclePanelView(leaf, this));
     this.addRibbonIcon("glasses", "Open Monocle panel", () => void this.activatePanel());
@@ -62,6 +73,14 @@ export default class MonoclePlugin extends Plugin {
     // Only stop observing: the companion keeps running when Obsidian closes.
     this.connection.stop();
     this.unsubscribe?.();
+  }
+
+  /** The last focused Markdown note (path, editor text and selection), if it is still open. */
+  activeNoteSnapshot(): ActiveNoteSnapshot | undefined {
+    const view = this.lastMarkdownView;
+    if (!view?.file || !this.app.workspace.getLeavesOfType("markdown").some((l) => l.view === view)) return undefined;
+    const selection = view.editor.getSelection();
+    return { path: view.file.path, content: view.editor.getValue(), ...(selection && { selection }) };
   }
 
   storedEndpoint(): string {
@@ -145,6 +164,29 @@ class MonoclePanelView extends ItemView {
     const actions = chat.createDiv({ cls: "monocle-actions" });
     const send = actions.createEl("button", { cls: "mod-cta monocle-send", text: "Send" });
     const cancel = actions.createEl("button", { cls: "monocle-cancel", text: "Cancel" });
+
+    const contextEl = chat.createEl("details", { cls: "monocle-context" });
+    const contextSummary = contextEl.createEl("summary", { text: "Context" });
+    const checkbox = (cls: string, text: string) => {
+      const row = contextEl.createEl("label", { cls: "monocle-context-option" });
+      const input = row.createEl("input", { cls, attr: { type: "checkbox", checked: "" } });
+      row.appendText(` ${text}`);
+      return input;
+    };
+    const useNote = checkbox("monocle-context-note", "Active note");
+    const useSelection = checkbox("monocle-context-selection", "Selection");
+    const pathList = (cls: string, placeholder: string) =>
+      contextEl.createEl("textarea", { cls, attr: { rows: "2", placeholder } });
+    const includeEl = pathList("monocle-context-include", "Also include notes (vault paths, one per line)");
+    const excludeEl = pathList("monocle-context-exclude", "Exclude notes or folders (one per line; never sent or readable)");
+    const describeContext = () => {
+      const note = this.plugin.activeNoteSnapshot();
+      contextSummary.setText(note ? `Context · ${note.path}` : "Context · no active note");
+    };
+    describeContext();
+    this.registerEvent(this.app.workspace.on("active-leaf-change", describeContext));
+    contextEl.addEventListener("toggle", describeContext);
+
     const meta = chat.createDiv({ cls: "monocle-execution" });
     const execError = chat.createDiv({ cls: "monocle-execution-error" });
     const output = chat.createDiv({ cls: "monocle-output" });
@@ -160,7 +202,14 @@ class MonoclePanelView extends ItemView {
     const submit = async () => {
       const text = prompt.value.trim();
       if (!text || active || !connected) return;
-      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(text);
+      const context = buildExecutionContext({
+        activeNote: this.plugin.activeNoteSnapshot(),
+        includeActiveNote: useNote.checked,
+        includeSelection: useSelection.checked,
+        include: includeEl.value,
+        exclude: excludeEl.value,
+      });
+      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(text, context);
       active = handle;
       sync();
       output.empty();

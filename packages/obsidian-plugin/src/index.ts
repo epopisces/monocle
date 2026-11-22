@@ -9,6 +9,7 @@ export {
 } from "./connection.js";
 export { parseCompanionEndpoint, type EndpointResult } from "./endpoint.js";
 export { ExecutionClient, type ExecutionClientOptions, type ExecutionHandle, type FetchLike } from "./execution-client.js";
+export { buildExecutionContext, type ActiveNoteSnapshot, type ContextChoices } from "./context.js";
 
 export const packageDescriptor: PackageDescriptor = {
   name: "@monocle/obsidian-plugin",

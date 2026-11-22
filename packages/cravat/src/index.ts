@@ -6,6 +6,9 @@ export {
   ProviderError,
   type Execution,
   type ExecutionManagerOptions,
+  type ExecutionToolset,
+  type McpToolServer,
+  type StartOptions,
   type ProviderAdapter,
   type ProviderEvent,
 } from "./execution-manager.js";

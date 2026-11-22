@@ -2,29 +2,64 @@
 // Stand-in for the Copilot CLI's `--output-format json --stream on` mode, so adapter tests need no credentials.
 // Behaviour is selected by FAKE_COPILOT_MODE: stream | args | fail | result-error | hang. Without it, a prompt
 // containing "[hang]" hangs and anything else streams (used by the Obsidian smoke test).
+// In stream mode, each `[tool:<server>-<tool> {json args}]` in the prompt is "called" like the real CLI would:
+// only if listed by --available-tools, via the stdio MCP server configured with --additional-mcp-config.
+import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { stdin } from "node:process";
+import { createInterface } from "node:readline";
 
 let prompt = "";
 stdin.setEncoding("utf8");
 for await (const chunk of stdin) prompt += chunk;
+
+const argv = process.argv.slice(2);
+const flagValues = (flag) => argv.flatMap((a, i) => (a === flag ? [argv[i + 1]] : []));
+const available = new Set(flagValues("--available-tools").filter((t) => t !== "none"));
+const mcpServers = Object.assign(
+  {},
+  ...flagValues("--additional-mcp-config").map((v) => JSON.parse(v.startsWith("@") ? readFileSync(v.slice(1), "utf8") : v).mcpServers),
+);
 
 const mode = process.env.FAKE_COPILOT_MODE ?? (prompt.includes("[hang]") ? "hang" : "stream");
 const emit = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 const delta = (messageId, deltaContent) =>
   emit({ type: "assistant.message_delta", data: { messageId, deltaContent }, ephemeral: true });
 
+async function callTool(fullName, args) {
+  if (!available.has(fullName)) return "unavailable";
+  const serverName = Object.keys(mcpServers).find((s) => fullName.startsWith(`${s}-`));
+  const server = mcpServers[serverName];
+  const child = spawn(server.command, server.args ?? [], { env: { ...process.env, ...server.env }, stdio: ["pipe", "pipe", "inherit"] });
+  const lines = createInterface({ input: child.stdout })[Symbol.asyncIterator]();
+  const rpc = async (id, method, params) => {
+    child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", id, method, params })}\n`);
+    return JSON.parse((await lines.next()).value);
+  };
+  await rpc(1, "initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "fake-copilot", version: "0" } });
+  const res = await rpc(2, "tools/call", { name: fullName.slice(serverName.length + 1), arguments: args });
+  child.kill();
+  return res.result ? res.result.content.map((c) => c.text).join("\n") : `error: ${res.error?.message}`;
+}
+
 emit({ type: "session.tools_updated", data: { model: "fake-model" }, ephemeral: true });
 process.stdout.write("not json noise\n");
 
 switch (mode) {
-  case "stream":
+  case "stream": {
     delta("m1", "echo: ");
     delta("m1", prompt);
-    emit({ type: "assistant.message", data: { messageId: "m1", content: `echo: ${prompt}` } });
+    let toolText = "";
+    for (const [, name, args] of prompt.matchAll(/\[tool:([\w-]+) (\{[^\]]*\})\]/g)) {
+      toolText += `\n[${name}] ${await callTool(name, JSON.parse(args))}`;
+    }
+    if (toolText) delta("m1", toolText);
+    emit({ type: "assistant.message", data: { messageId: "m1", content: `echo: ${prompt}${toolText}` } });
     emit({ type: "result", exitCode: 0, sessionId: "fake-session" });
     break;
+  }
   case "args":
-    delta("m1", JSON.stringify({ args: process.argv.slice(2), cwd: process.cwd() }));
+    delta("m1", JSON.stringify({ args: argv, cwd: process.cwd(), mcpConfig: Object.keys(mcpServers).length ? { mcpServers } : undefined }));
     emit({ type: "result", exitCode: 0 });
     break;
   case "fail":

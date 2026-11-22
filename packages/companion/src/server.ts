@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { statSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import {
@@ -10,6 +11,7 @@ import {
   EXECUTION_STREAM_CONTENT_TYPE,
   EXECUTIONS_PATH,
   HEALTH_PATH,
+  MAX_CONTEXT_LENGTH,
   MAX_PROMPT_LENGTH,
   isLoopbackHostname,
   isTerminalExecutionEvent,
@@ -18,6 +20,7 @@ import {
   type HealthResponse,
 } from "@monocle/contracts";
 import { CopilotCliAdapter, ExecutionManager, type ProviderAdapter } from "@monocle/cravat";
+import { ContextError, prepareExecution, type CompanionVaultOptions, type PreparedExecution } from "./context.js";
 
 export interface CompanionOptions {
   /** Loopback address to bind. Non-loopback hosts are refused; remote exposure is out of MVP scope (D01). */
@@ -26,6 +29,8 @@ export interface CompanionOptions {
   readonly port?: number;
   /** Cravat provider adapter; defaults to the installed Copilot CLI. */
   readonly adapter?: ProviderAdapter;
+  /** Vault the agent may read (context assembly and read-only tools). Without it the agent gets no tools. */
+  readonly vault?: CompanionVaultOptions;
 }
 
 export interface RunningCompanion {
@@ -35,8 +40,8 @@ export interface RunningCompanion {
   close(): Promise<void>;
 }
 
-/** UTF-16 prompt limit times the worst-case UTF-8 expansion, plus JSON overhead. */
-const MAX_BODY_BYTES = MAX_PROMPT_LENGTH * 4 + 4_096;
+/** UTF-16 prompt and context limits times the worst-case UTF-8 expansion, plus JSON overhead. */
+const MAX_BODY_BYTES = (MAX_PROMPT_LENGTH + MAX_CONTEXT_LENGTH) * 4 + 64_000;
 const CANCEL_PATH = new RegExp(`^${EXECUTIONS_PATH}/([^/]+)/cancel$`);
 
 function hostnameOf(hostHeader: string | undefined): string | undefined {
@@ -75,6 +80,9 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
   if (!isLoopbackHostname(host)) {
     throw new Error(`Companion host must be a loopback address, got "${host}"`);
   }
+  if (options.vault && !statSync(options.vault.root, { throwIfNoEntry: false })?.isDirectory()) {
+    throw new Error(`Vault folder not found: ${options.vault.root}`);
+  }
 
   const health: HealthResponse = {
     service: COMPANION_SERVICE_ID,
@@ -99,8 +107,15 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     }
     const parsed = parseExecutionRequest(body);
     if (!parsed.ok) return sendError(res, 400, { code: "invalid_request", message: parsed.error });
+    let prepared: PreparedExecution;
+    try {
+      prepared = prepareExecution(parsed.request, options.vault);
+    } catch (err) {
+      if (err instanceof ContextError) return sendError(res, 400, { code: "invalid_request", message: err.message });
+      throw err;
+    }
 
-    const execution = cravat.start(parsed.request);
+    const execution = cravat.start(prepared.request, { tools: prepared.tools });
     let terminal = false;
     // Closing the stream early (panel closed, client aborted) cancels the work instead of orphaning it.
     res.once("close", () => {

@@ -26,8 +26,36 @@ export const ALLOWED_CLIENT_ORIGINS: readonly string[] = [OBSIDIAN_ORIGIN];
 /** Upper bound on prompt length accepted by the companion. */
 export const MAX_PROMPT_LENGTH = 100_000;
 
+/** Upper bound on inline context text (active note content + selection) in one request. */
+export const MAX_CONTEXT_LENGTH = 200_000;
+/** Upper bound on entries in each of `context.include` / `context.exclude`. */
+export const MAX_CONTEXT_PATHS = 100;
+
+/** The note focused in the editor when the request was made, as the client sees it (may be unsaved). */
+export interface ExecutionActiveNote {
+  /** Vault-relative path with `/` separators. */
+  readonly path: string;
+  /** Full editor text; omit to not send the note body. */
+  readonly content?: string;
+  /** Selected text; omit when nothing is selected or the selection is not shared. */
+  readonly selection?: string;
+}
+
+/**
+ * Context supplied with an execution (optional; companions predating it reject it as an unsupported field). Exclusions win over everything:
+ * an excluded note is neither sent to the provider (even as the active note) nor readable by vault tools.
+ */
+export interface ExecutionContext {
+  readonly activeNote?: ExecutionActiveNote;
+  /** Vault-relative note paths whose current content is added to the context. */
+  readonly include?: readonly string[];
+  /** Vault-relative note paths or folders that must not be disclosed in this execution. */
+  readonly exclude?: readonly string[];
+}
+
 export interface ExecutionRequest {
   readonly prompt: string;
+  readonly context?: ExecutionContext;
 }
 
 export type ExecutionErrorCode =
@@ -81,10 +109,55 @@ export function parseExecutionRequest(value: unknown): ExecutionRequestResult {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return { ok: false, error: "request body must be a JSON object" };
   }
-  const unknownKeys = Object.keys(value).filter((k) => k !== "prompt");
-  if (unknownKeys.length > 0) return { ok: false, error: `unsupported request fields: ${unknownKeys.join(", ")}` };
-  const { prompt } = value as { prompt?: unknown };
+  const unknownKeys = unknownFields(value, ["prompt", "context"]);
+  if (unknownKeys) return { ok: false, error: `unsupported request fields: ${unknownKeys}` };
+  const { prompt, context } = value as { prompt?: unknown; context?: unknown };
   if (typeof prompt !== "string" || prompt.trim() === "") return { ok: false, error: "prompt must be a non-empty string" };
   if (prompt.length > MAX_PROMPT_LENGTH) return { ok: false, error: `prompt exceeds ${MAX_PROMPT_LENGTH} characters` };
-  return { ok: true, request: { prompt } };
+  if (context === undefined) return { ok: true, request: { prompt } };
+  const parsed = parseContext(context);
+  return typeof parsed === "string" ? { ok: false, error: parsed } : { ok: true, request: { prompt, context: parsed } };
+}
+
+const isPlainObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+
+function unknownFields(value: object, allowed: readonly string[]): string | undefined {
+  const extra = Object.keys(value).filter((k) => !allowed.includes(k));
+  return extra.length > 0 ? extra.join(", ") : undefined;
+}
+
+function parsePaths(value: unknown, field: string): readonly string[] | string | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || !value.every((p) => typeof p === "string" && p.trim() !== "" && p.length <= 1_024)) {
+    return `context.${field} must be an array of non-empty strings`;
+  }
+  if (value.length > MAX_CONTEXT_PATHS) return `context.${field} exceeds ${MAX_CONTEXT_PATHS} entries`;
+  return value as string[];
+}
+
+/** Returns the validated context or an error message. */
+function parseContext(value: unknown): ExecutionContext | string {
+  if (!isPlainObject(value)) return "context must be an object";
+  const extra = unknownFields(value, ["activeNote", "include", "exclude"]);
+  if (extra) return `unsupported context fields: ${extra}`;
+  const context: { activeNote?: ExecutionActiveNote; include?: readonly string[]; exclude?: readonly string[] } = {};
+  if (value.activeNote !== undefined) {
+    const note = value.activeNote;
+    if (!isPlainObject(note)) return "context.activeNote must be an object";
+    const extraNote = unknownFields(note, ["path", "content", "selection"]);
+    if (extraNote) return `unsupported activeNote fields: ${extraNote}`;
+    if (typeof note.path !== "string" || note.path.trim() === "") return "context.activeNote.path must be a non-empty string";
+    for (const key of ["content", "selection"] as const) {
+      if (note[key] !== undefined && typeof note[key] !== "string") return `context.activeNote.${key} must be a string`;
+    }
+    const size = ((note.content as string | undefined)?.length ?? 0) + ((note.selection as string | undefined)?.length ?? 0);
+    if (size > MAX_CONTEXT_LENGTH) return `context exceeds ${MAX_CONTEXT_LENGTH} characters`;
+    context.activeNote = note as unknown as ExecutionActiveNote;
+  }
+  for (const field of ["include", "exclude"] as const) {
+    const paths = parsePaths(value[field], field);
+    if (typeof paths === "string") return paths;
+    if (paths) context[field] = paths;
+  }
+  return context;
 }

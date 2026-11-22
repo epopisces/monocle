@@ -1,8 +1,11 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ExecutionEvent } from "@monocle/contracts";
 import { startCompanion, type RunningCompanion } from "@monocle/companion";
 import { ProviderError, type ProviderAdapter } from "@monocle/cravat";
-import { ExecutionClient } from "@monocle/obsidian-plugin";
+import { ExecutionClient, buildExecutionContext } from "@monocle/obsidian-plugin";
 
 let companion: RunningCompanion | undefined;
 afterEach(async () => {
@@ -108,5 +111,37 @@ describe("Obsidian plugin → companion → Cravat execution", () => {
     }
     companion = undefined;
     expect(types.at(-1)).toBe("failed");
+  });
+
+  it("sends the panel's active-note context, without anything the user excluded", async () => {
+    let seen = "";
+    const capture: ProviderAdapter = {
+      id: "fake",
+      async *run(req) {
+        seen = req.prompt;
+        yield { type: "delta", text: "ok" };
+      },
+    };
+    const vault = mkdtempSync(join(tmpdir(), "monocle-plugin-context-"));
+    try {
+      writeFileSync(join(vault, "Other.md"), "other-note-body");
+      writeFileSync(join(vault, "Private.md"), "private-note-body");
+      companion = await startCompanion({ port: 0, adapter: capture, vault: { root: vault } });
+      const context = buildExecutionContext({
+        activeNote: { path: "Current.md", content: "current-note-body", selection: "picked-text" },
+        includeActiveNote: true,
+        includeSelection: false,
+        include: "Other.md\nPrivate.md\n",
+        exclude: " Private.md ",
+      });
+      const events = await collect(client().execute("Summarise", context).events);
+      expect(events.at(-1)?.type).toBe("completed");
+      expect(seen).toContain("current-note-body");
+      expect(seen).toContain("other-note-body");
+      expect(seen).not.toContain("picked-text");
+      expect(seen).not.toContain("private-note-body");
+    } finally {
+      rmSync(vault, { recursive: true, force: true });
+    }
   });
 });

@@ -1,10 +1,12 @@
-// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel). Uses a temp copy of the fixture
+// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-48 note context and read-only
+// vault tools). Uses a temp copy of the fixture
 // vault and a temp Electron user-data dir, so the user's Obsidian configuration and vaults are never touched.
 // The companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
 // Copilot CLI; costs one premium request; skips the cancel checks).
 // Usage (from repo root, after `npm run build`): node <this file>
 import { spawn, execFileSync } from "node:child_process";
-import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { cpSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
@@ -29,12 +31,12 @@ const fakeLauncher = `
   import { startCompanion } from ${JSON.stringify(new URL("packages/companion/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)};
   import { CopilotCliAdapter } from ${JSON.stringify(new URL("packages/cravat/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)};
   const adapter = new CopilotCliAdapter({ command: process.execPath, args: [${JSON.stringify(join(repo, "packages/cravat/test/fixtures/fake-copilot.mjs"))}] });
-  const c = await startCompanion({ adapter });
+  const c = await startCompanion({ adapter, vault: { root: ${JSON.stringify(vault)} } });
   console.log(JSON.stringify({ event: "listening", url: c.url, instanceId: c.health.instanceId }));
 `;
 
 function startCompanion() {
-  const args = live ? [join(repo, "packages/companion/dist/cli.js")] : ["--input-type=module", "-e", fakeLauncher];
+  const args = live ? [join(repo, "packages/companion/dist/cli.js"), "--vault", vault] : ["--input-type=module", "-e", fakeLauncher];
   const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "inherit"] });
   return new Promise((resolve, reject) => {
     child.once("exit", (c) => reject(new Error(`companion exited ${c}`)));
@@ -86,6 +88,13 @@ async function until(evaluate, expr, expected, timeoutMs = 20000) {
 }
 
 const results = [];
+/** Hashes of every note (Obsidian itself writes under .obsidian, so that is skipped). */
+const noteHashes = () =>
+  Object.fromEntries(
+    readdirSync(vault, { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile() && !join(e.parentPath, e.name).includes(".obsidian"))
+      .map((e) => [join(e.parentPath, e.name), createHash("sha256").update(readFileSync(join(e.parentPath, e.name))).digest("hex")]),
+  );
 const check = (name, ok, detail = "") => { results.push({ name, ok }); log(ok ? "PASS" : "FAIL", name, detail); };
 let companion, obsidian;
 try {
@@ -137,6 +146,28 @@ try {
 
   companion = await startCompanion();
   check("panel reconnects after companion restart", (await until(evaluate, label, "Connected")) === "Connected");
+
+  // IMM-48: the active note (Ada Example, opened above) is sent as context, the agent reads another note via the
+  // read-only vault tools, excluded notes stay out, and the vault is unchanged.
+  const notesBefore = noteHashes();
+  await evaluate(`(() => { ${q(".monocle-context-exclude")}.value = "work"; ${q(".monocle-context-include")}.value = "work/Duplicate Id Note.md"; })()`);
+  await submit(
+    live
+      ? "Use your read_note tool to read projects/Project Lantern.md. Reply with the title of my active note and the unique search token from Project Lantern, nothing else."
+      : '[tool:monocle_vault-read_note {"path":"projects/Project Lantern.md"}] [tool:monocle_vault-read_note {"path":"../outside.md"}] [tool:monocle_vault-read_note {"path":"work/Duplicate Id Note.md"}]',
+  );
+  check("context prompt completes", (await until(evaluate, outputState, "completed", live ? 180000 : 20000)) === "completed");
+  const ctxAnswer = await evaluate(`${q(".monocle-output")}.textContent`);
+  check("agent read another note through the vault tools", ctxAnswer.includes("lanternfish-7731"), ctxAnswer.slice(-300));
+  if (live) {
+    check("active note context used", /Ada Example/.test(ctxAnswer), ctxAnswer);
+  } else {
+    check("active note content sent", ctxAnswer.includes("Active note: people/Ada Example.md") && ctxAnswer.includes("Synthetic person"));
+    check("excluded note not sent", !ctxAnswer.includes("Included note: work/Duplicate Id Note.md"));
+    check("path traversal refused", /may not contain/.test(ctxAnswer));
+    check("excluded note not readable by tools", /excluded from this request/.test(ctxAnswer));
+  }
+  check("vault notes unchanged", JSON.stringify(noteHashes()) === JSON.stringify(notesBefore));
 
   ws.close();
   obsidian.kill();
