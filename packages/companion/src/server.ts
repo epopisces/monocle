@@ -10,12 +10,16 @@ import {
   isLoopbackHostname,
   type HealthResponse,
 } from "@monocle/contracts";
+import type { IndexService } from "@monocle/core";
+import { handleIndexRoute, INDEX_ROUTE_PREFIX } from "./index-routes.js";
 
 export interface CompanionOptions {
   /** Loopback address to bind. Non-loopback hosts are refused; remote exposure is out of MVP scope (D01). */
   readonly host?: string;
   /** TCP port; `0` picks a free port. */
   readonly port?: number;
+  /** Derived indexes for the configured vault; index routes answer 404 without one. Owned by the caller. */
+  readonly index?: IndexService;
 }
 
 export interface RunningCompanion {
@@ -61,6 +65,7 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     if (!reqHost || !isLoopbackHostname(reqHost)) return sendJson(res, 403, { error: "forbidden host" });
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
+    if (path.startsWith(INDEX_ROUTE_PREFIX)) return void handleIndexRoute(options.index, req, res, path, sendJson);
     return sendJson(res, 404, { error: "not found" });
   });
 

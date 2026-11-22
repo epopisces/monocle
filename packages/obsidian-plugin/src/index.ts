@@ -8,6 +8,13 @@ export {
   type HealthProbe,
 } from "./connection.js";
 export { parseCompanionEndpoint, type EndpointResult } from "./endpoint.js";
+export {
+  IndexHealthMonitor,
+  type ActionResult,
+  type CompanionRequest,
+  type IndexHealthMonitorOptions,
+  type IndexView,
+} from "./index-health.js";
 
 export const packageDescriptor: PackageDescriptor = {
   name: "@monocle/obsidian-plugin",

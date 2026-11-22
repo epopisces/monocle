@@ -20,7 +20,7 @@ describe("plugin bundle", () => {
     const stub = class {};
     const fakeRequire = (id: string) => {
       required.push(id);
-      return { Plugin: stub, ItemView: stub, PluginSettingTab: stub, Setting: stub, requestUrl: () => undefined };
+      return { Plugin: stub, ItemView: stub, PluginSettingTab: stub, Setting: stub, Modal: stub, Notice: stub, requestUrl: () => undefined };
     };
     const module = { exports: {} as { default?: { prototype: { onload?: unknown } } } };
     new Function("module", "exports", "require", readFileSync(join(out, "main.js"), "utf8"))(

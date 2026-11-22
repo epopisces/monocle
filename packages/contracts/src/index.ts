@@ -5,6 +5,7 @@
 export const CONTRACT_VERSION = "0.1.0";
 
 export * from "./companion.js";
+export * from "./index-health.js";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 

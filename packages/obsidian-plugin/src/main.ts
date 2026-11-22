@@ -2,6 +2,8 @@ import { ItemView, Plugin, PluginSettingTab, Setting, requestUrl, type App, type
 import { DEFAULT_COMPANION_ENDPOINT } from "@monocle/contracts";
 import { CompanionConnection, type ConnectionState, type HealthProbe } from "./connection.js";
 import { parseCompanionEndpoint } from "./endpoint.js";
+import { IndexHealthMonitor } from "./index-health.js";
+import { installIndexHealthUi, requestUrlCompanion } from "./index-ui.js";
 
 const VIEW_TYPE = "monocle-panel";
 /** Host-local (per vault, per machine) key; the endpoint must not sync through the vault (D01). */
@@ -33,6 +35,10 @@ export default class MonoclePlugin extends Plugin {
   override async onload(): Promise<void> {
     const status = this.addStatusBarItem();
     this.stateListeners.add((s) => status.setText(`Monocle: ${LABELS[s.kind]}`));
+    const indexMonitor = new IndexHealthMonitor({ request: requestUrlCompanion });
+    this.register(() => indexMonitor.stop());
+    this.stateListeners.add((s) => void indexMonitor.setConnection(s));
+    installIndexHealthUi(this, indexMonitor);
     this.connect(this.storedEndpoint());
 
     this.registerView(VIEW_TYPE, (leaf) => new MonoclePanelView(leaf, this));
