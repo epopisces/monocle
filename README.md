@@ -45,3 +45,16 @@ enable **Monocle**, run **Monocle: Open panel**, and set **Settings → Monocle 
 not on the default. The endpoint is stored in this machine's local storage, not in the synced vault. `smoke:obsidian`
 uses a temporary vault copy and a temporary Obsidian profile (`--user-data-dir`), so it never touches your vaults.
 Override the executable path with `OBSIDIAN_EXE` if needed.
+
+### Agent executions (Cravat)
+
+The panel's prompt box sends free-form requests to Cravat, which runs them through the installed **GitHub Copilot
+CLI** (`copilot`, signed in via `copilot login`). Point the companion at a specific executable with
+`MONOCLE_COPILOT_PATH` (must be a real executable, not an npm `.cmd` shim). Executions run with **no tools** in an empty
+scratch directory, so the agent cannot read or change files yet. The answer streams into the panel with its execution
+ID; **Cancel** (or closing the panel) stops the Copilot process. `npm run smoke:obsidian` uses a fake Copilot CLI;
+`MONOCLE_SMOKE_LIVE=1 npm run smoke:obsidian` exercises the real one (one premium request).
+
+Contract (0.2.0): `POST /v1/executions` `{"prompt": "…"}` → NDJSON stream of `started`, `delta`… and exactly one of
+`completed` / `failed` / `cancelled`; `POST /v1/executions/{id}/cancel`. Browser callers must send
+`content-type: application/json` and may only come from Obsidian's `app://obsidian.md` origin.

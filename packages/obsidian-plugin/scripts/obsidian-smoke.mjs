@@ -1,5 +1,7 @@
-// Isolated Obsidian smoke test for IMM-46. Uses a temp copy of the fixture vault and a temp Electron
-// user-data dir, so the user's Obsidian configuration and vaults are never touched.
+// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel). Uses a temp copy of the fixture
+// vault and a temp Electron user-data dir, so the user's Obsidian configuration and vaults are never touched.
+// The companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
+// Copilot CLI; costs one premium request; skips the cancel checks).
 // Usage (from repo root, after `npm run build`): node <this file>
 import { spawn, execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -21,8 +23,19 @@ execFileSync(process.execPath, [join(repo, "packages/obsidian-plugin/scripts/bun
 mkdirSync(userData, { recursive: true });
 writeFileSync(join(userData, "obsidian.json"), JSON.stringify({ vaults: { a1b2c3d4e5f60718: { path: vault, ts: Date.now(), open: true } } }));
 
+const live = process.env.MONOCLE_SMOKE_LIVE === "1";
+// Without MONOCLE_SMOKE_LIVE=1 the companion runs Cravat's Copilot adapter against a fake CLI (no credentials, no cost).
+const fakeLauncher = `
+  import { startCompanion } from ${JSON.stringify(new URL("packages/companion/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)};
+  import { CopilotCliAdapter } from ${JSON.stringify(new URL("packages/cravat/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)};
+  const adapter = new CopilotCliAdapter({ command: process.execPath, args: [${JSON.stringify(join(repo, "packages/cravat/test/fixtures/fake-copilot.mjs"))}] });
+  const c = await startCompanion({ adapter });
+  console.log(JSON.stringify({ event: "listening", url: c.url, instanceId: c.health.instanceId }));
+`;
+
 function startCompanion() {
-  const child = spawn(process.execPath, [join(repo, "packages/companion/dist/cli.js")], { stdio: ["ignore", "pipe", "inherit"] });
+  const args = live ? [join(repo, "packages/companion/dist/cli.js")] : ["--input-type=module", "-e", fakeLauncher];
+  const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "inherit"] });
   return new Promise((resolve, reject) => {
     child.once("exit", (c) => reject(new Error(`companion exited ${c}`)));
     createInterface({ input: child.stdout }).on("line", (l) => {
@@ -88,6 +101,31 @@ try {
   check("panel shows Connected", (await until(evaluate, label, "Connected")) === "Connected");
   const status = await evaluate("[...document.querySelectorAll('.status-bar-item')].map(e=>e.textContent).find(t=>t.startsWith('Monocle'))");
   check("status bar shows connected", status === "Monocle: Connected", status);
+
+  // IMM-47: submit a prompt, observe the stream and execution identity, then cancel a long-running one.
+  const q = (sel) => `document.querySelector('.monocle-panel ${sel}')`;
+  const submit = (text) =>
+    evaluate(`(() => { const p = ${q(".monocle-prompt")}; p.value = ${JSON.stringify(text)}; ${q(".monocle-send")}.click(); })()`);
+  const outputState = `${q(".monocle-output")}?.dataset.state`;
+  await submit(live ? "Reply with exactly: monocle smoke ok" : "hello from obsidian");
+  check("prompt completes", (await until(evaluate, outputState, "completed", live ? 120000 : 20000)) === "completed");
+  const answer = await evaluate(`${q(".monocle-output")}.textContent`);
+  check("streamed answer shown", live ? /monocle smoke ok/i.test(answer) : answer.includes("echo: hello from obsidian"), answer);
+  const meta = await evaluate(`${q(".monocle-execution")}.textContent`);
+  check("execution ID shown", /^Execution [0-9a-f-]{36} · completed$/.test(meta), meta);
+
+  if (!live) {
+    await submit("long task [hang]");
+    await until(evaluate, `${q(".monocle-output")}.textContent.startsWith('pid:')`, true);
+    check("cancel enabled while running", (await evaluate(`${q(".monocle-cancel")}.disabled`)) === false);
+    await evaluate(`${q(".monocle-cancel")}.click()`);
+    check("cancel completes terminally", (await until(evaluate, outputState, "cancelled")) === "cancelled");
+    const pid = Number((await evaluate(`${q(".monocle-output")}.textContent`)).replace("pid:", ""));
+    await sleep(1000);
+    let alive = true;
+    try { process.kill(pid, 0); } catch { alive = false; }
+    check("cancel stopped the provider process", !alive, `pid ${pid}`);
+  }
 
   companion.child.kill();
   check("panel shows Disconnected after companion stops", (await until(evaluate, label, "Disconnected")) === "Disconnected");

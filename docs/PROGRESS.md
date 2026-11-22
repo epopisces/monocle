@@ -4,7 +4,7 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 
 - [x] [IMM-45](tickets/IMM-45.md) — M0: Inspect assets and bootstrap Monocle monorepo
 - [x] [IMM-46](tickets/IMM-46.md) — M1: Connect Obsidian panel to independent companion
-- [ ] [IMM-47](tickets/IMM-47.md) — M1: Stream and cancel a Cravat execution through Copilot adapter
+- [x] [IMM-47](tickets/IMM-47.md) — M1: Stream and cancel a Cravat execution through Copilot adapter
 - [ ] [IMM-48](tickets/IMM-48.md) — M1: Supply active-note context and restricted read-only vault tools
 - [ ] [IMM-49](tickets/IMM-49.md) — M2: Configure model, context window and thinking effort in Monocle
 - [ ] [IMM-50](tickets/IMM-50.md) — M2: Persist and resume local Monocle conversations
@@ -28,3 +28,4 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 | 2026-11-22 | IMM-45 | Bootstrap TS monorepo, contracts/boundary tests, fixture vault, asset inventory, real-vault discovery plan (branch `epopisces-imm-45-bootstrap-monorepo`) | `npm ci && npm run check`: 22/22 passed | No |
 | 2026-11-22 | IMM-58 | SQLite FTS5 note index (`node:sqlite`) with reconcile/rebuild/search, ID/path/move tracking, duplicate-ID diagnosis, debounced watcher (branch `epopisces-imm-58-sqlite-fts5-index`) | `npm ci && npm run check`: 37/37 passed | No |
 | 2026-11-22 | IMM-46 | Loopback companion (`/v1/health`, CLI), plugin panel/status/settings with connection state machine, esbuild bundle, isolated Obsidian smoke script (branch `epopisces-imm-46-obsidian-panel`) | `npm ci && npm run check`: 43/43 passed pre-merge, 58/58 after merging IMM-58; `npm run smoke:obsidian` (Obsidian 1.8.9): 8/8 passed | No |
+| 2026-11-22 | IMM-47 | Execution contract 0.2.0, Cravat ExecutionManager + Copilot CLI adapter, streamed NDJSON/cancel routes with Origin guard, panel prompt/stream/cancel UI (branch `epopisces-imm-47-cravat-stream-and-cancel`) | `npm ci && npm run check`: 87/87 passed; `npm run smoke:obsidian`: 14/14 (fake CLI), 11/11 live Copilot | No |

@@ -1,7 +1,23 @@
-import { ItemView, Plugin, PluginSettingTab, Setting, requestUrl, type App, type WorkspaceLeaf } from "obsidian";
+import {
+  ItemView,
+  MarkdownRenderer,
+  Plugin,
+  PluginSettingTab,
+  Setting,
+  requestUrl,
+  type App,
+  type WorkspaceLeaf,
+} from "obsidian";
 import { DEFAULT_COMPANION_ENDPOINT } from "@monocle/contracts";
 import { CompanionConnection, type ConnectionState, type HealthProbe } from "./connection.js";
 import { parseCompanionEndpoint } from "./endpoint.js";
+import { ExecutionClient, type ExecutionHandle, type FetchLike } from "./execution-client.js";
+
+/**
+ * Executions stream over the renderer's `fetch` (`requestUrl` buffers whole responses). The companion
+ * allows Obsidian's `app://obsidian.md` origin via CORS and rejects every other browser origin.
+ */
+const rendererFetch: FetchLike = (input, init) => window.fetch(input, init);
 
 const VIEW_TYPE = "monocle-panel";
 /** Host-local (per vault, per machine) key; the endpoint must not sync through the vault (D01). */
@@ -88,6 +104,7 @@ export default class MonoclePlugin extends Plugin {
 
 class MonoclePanelView extends ItemView {
   private unsubscribe: (() => void) | undefined;
+  private cancelActive: (() => void) | undefined;
 
   constructor(
     leaf: WorkspaceLeaf,
@@ -120,7 +137,69 @@ class MonoclePanelView extends ItemView {
     const detail = root.createDiv({ cls: "monocle-status-detail" });
     const error = root.createDiv({ cls: "monocle-status-error" });
 
+    const chat = root.createDiv({ cls: "monocle-chat" });
+    const prompt = chat.createEl("textarea", {
+      cls: "monocle-prompt",
+      attr: { placeholder: "Ask Cravat… (Ctrl/Cmd+Enter to send)", rows: "3" },
+    });
+    const actions = chat.createDiv({ cls: "monocle-actions" });
+    const send = actions.createEl("button", { cls: "mod-cta monocle-send", text: "Send" });
+    const cancel = actions.createEl("button", { cls: "monocle-cancel", text: "Cancel" });
+    const meta = chat.createDiv({ cls: "monocle-execution" });
+    const execError = chat.createDiv({ cls: "monocle-execution-error" });
+    const output = chat.createDiv({ cls: "monocle-output" });
+    cancel.disabled = true;
+    execError.hide();
+
+    let connected = false;
+    let active: ExecutionHandle | undefined;
+    const sync = () => {
+      send.disabled = !connected || active !== undefined;
+      cancel.disabled = active === undefined;
+    };
+    const submit = async () => {
+      const text = prompt.value.trim();
+      if (!text || active || !connected) return;
+      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(text);
+      active = handle;
+      sync();
+      output.empty();
+      output.dataset.state = "running";
+      execError.hide();
+      meta.setText("Starting…");
+      let streamed = "";
+      for await (const event of handle.events) {
+        meta.dataset.executionId = event.executionId;
+        if (event.type === "started") meta.setText(`Execution ${event.executionId} · ${event.provider} · running`);
+        else if (event.type === "delta") output.setText((streamed += event.text));
+        else {
+          meta.setText(`Execution ${event.executionId || "(not started)"} · ${event.type}`);
+          output.dataset.state = event.type;
+          if (event.type === "completed") {
+            output.empty();
+            await MarkdownRenderer.render(this.app, event.text, output, "", this);
+          } else if (event.type === "failed") {
+            execError.setText(`${event.error.code}: ${event.error.message}`);
+            execError.show();
+          }
+        }
+      }
+      active = undefined;
+      sync();
+    };
+    send.addEventListener("click", () => void submit());
+    cancel.addEventListener("click", () => void active?.cancel());
+    this.cancelActive = () => void active?.cancel();
+    prompt.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        void submit();
+      }
+    });
+
     this.unsubscribe = this.plugin.onState((s) => {
+      connected = s.kind === "connected";
+      sync();
       dot.dataset.state = s.kind;
       label.setText(LABELS[s.kind]);
       detail.setText(
@@ -134,6 +213,7 @@ class MonoclePanelView extends ItemView {
   }
 
   override async onClose(): Promise<void> {
+    this.cancelActive?.();
     this.unsubscribe?.();
   }
 }
