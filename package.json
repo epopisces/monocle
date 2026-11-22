@@ -1,0 +1,25 @@
+{
+  "name": "monocle-workspace",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Monocle KMS monorepo: Obsidian plugin, local companion, Monocle knowledge services, Cravat execution and shared contracts.",
+  "engines": {
+    "node": ">=22"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run",
+    "check": "npm run build && npm test",
+    "clean": "tsc -b --clean"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

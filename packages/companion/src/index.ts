@@ -1,0 +1,8 @@
+/** Local companion process hosting Monocle knowledge services and Cravat; lifecycle independent of Obsidian. */
+import { CONTRACT_VERSION, type PackageDescriptor } from "@monocle/contracts";
+
+export const packageDescriptor: PackageDescriptor = {
+  name: "@monocle/companion",
+  role: "companion",
+  contractVersion: CONTRACT_VERSION,
+};

@@ -1,0 +1,23 @@
+{
+  "name": "@monocle/companion",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Local companion process hosting Monocle knowledge services and Cravat; runs without Obsidian.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@monocle/contracts": "0.0.0",
+    "@monocle/core": "0.0.0",
+    "@monocle/cravat": "0.0.0"
+  }
+}

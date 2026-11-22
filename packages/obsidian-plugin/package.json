@@ -1,0 +1,24 @@
+{
+  "name": "@monocle/obsidian-plugin",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monocle for Obsidian: thin client that talks to the companion over its contract.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@monocle/contracts": "0.0.0"
+  },
+  "devDependencies": {
+    "obsidian": "^1.7.2"
+  }
+}

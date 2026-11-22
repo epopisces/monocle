@@ -1,0 +1,21 @@
+{
+  "name": "@monocle/cravat",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cravat agent execution: sessions, provider adapters and execution settings. Independent of Monocle knowledge services.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@monocle/contracts": "0.0.0"
+  }
+}

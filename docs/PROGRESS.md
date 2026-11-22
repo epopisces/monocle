@@ -2,7 +2,7 @@
 
 This is a local checklist; it does **not** reflect live Linear status. Export statuses were all `Backlog`.
 
-- [ ] [IMM-45](tickets/IMM-45.md) — M0: Inspect assets and bootstrap Monocle monorepo
+- [x] [IMM-45](tickets/IMM-45.md) — M0: Inspect assets and bootstrap Monocle monorepo
 - [ ] [IMM-46](tickets/IMM-46.md) — M1: Connect Obsidian panel to independent companion
 - [ ] [IMM-47](tickets/IMM-47.md) — M1: Stream and cancel a Cravat execution through Copilot adapter
 - [ ] [IMM-48](tickets/IMM-48.md) — M1: Supply active-note context and restricted read-only vault tools
@@ -25,4 +25,4 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 
 | Date | Issue | Change/commit | Tests | Linear synchronized? |
 |---|---|---|---|---|
-| | | | | |
+| 2026-11-22 | IMM-45 | Bootstrap TS monorepo, contracts/boundary tests, fixture vault, asset inventory, real-vault discovery plan (branch `epopisces-imm-45-bootstrap-monorepo`) | `npm ci && npm run check`: 22/22 passed | No |

@@ -1,0 +1,49 @@
+# === Dependencies & build output ===
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.vitest/
+
+# Obsidian plugin bundle output (built per host, not committed)
+packages/obsidian-plugin/main.js
+
+# === Environment, secrets & host-local configuration ===
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.local.json
+config.local.*
+
+# === Derived local state (rebuildable from Markdown; never synchronized) ===
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+chroma_data/
+.monocle/
+
+# === Logs ===
+*.log
+npm-debug.log*
+
+# === Editors & OS ===
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# === Python (skills may ship Python scripts) ===
+__pycache__/
+*.py[cod]
+.venv/
+
+# The fixture vault is committed; never commit real vault content or Obsidian workspace state.
+fixtures/vault/.obsidian/workspace*.json

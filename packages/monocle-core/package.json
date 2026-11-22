@@ -1,0 +1,21 @@
+{
+  "name": "@monocle/core",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Monocle knowledge services: read/search/index/validation/change operations over an authoritative Markdown vault.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@monocle/contracts": "0.0.0"
+  }
+}

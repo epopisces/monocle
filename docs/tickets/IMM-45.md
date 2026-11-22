@@ -40,10 +40,27 @@ Entry point; no implementation predecessors.
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed — `npm ci && npm run check` (tsc -b + vitest): 2 files, 22 tests passed (2026-11-22)
+- [x] Acceptance criteria validated
+- [x] Summary and artifacts committed (branch `epopisces-imm-45-bootstrap-monorepo`)
 
 **Implementation notes:**
+
+- **Workspace:** npm workspaces + TypeScript project references + vitest (Node ≥ 22). Packages: `@monocle/contracts`,
+  `@monocle/core`, `@monocle/cravat`, `@monocle/companion` and `@monocle/obsidian-plugin` (minimal `Plugin` subclass and
+  `manifest.json`). There is a root `.gitignore` and `README.md`.
+- **Contract tests:** `packages/contracts/test/contract-version.test.ts` covers semver contract compatibility.
+  `test/workspace-boundaries.test.ts` checks that every package exports a matching `packageDescriptor` with a compatible
+  contract version, and enforces the allowed dependency/import graph: Cravat must never depend on `@monocle/core`, and
+  the plugin depends on contracts only. A mutation check confirmed that an illegal import fails the test.
+- **Inventory (keep/replace/defer):** [docs/bootstrap/ASSET-INVENTORY.md](../bootstrap/ASSET-INVENTORY.md).
+- **Fixture vault:** [fixtures/vault](../../fixtures/vault) is synthetic and described in
+  [fixtures/README.md](../../fixtures/README.md).
+- **Read-only real-vault discovery plan:** [docs/bootstrap/REAL-VAULT-DISCOVERY.md](../bootstrap/REAL-VAULT-DISCOVERY.md).
+- **Unverifiable on this host:** Obsidian Curator, `create-obsidian-note` and the real vault were not found. The vault's
+  ID field name/format and schema are therefore placeholders (`id: fx-NNNN` in fixtures only). Legacy Monocle has no
+  persistent note ID; it identifies notes by path.
+- **Manual verification not done:** the plugin has not been loaded into Obsidian. Bundling and installation belong to
+  IMM-46.
 
