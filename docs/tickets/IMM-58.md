@@ -40,10 +40,30 @@ Requires: 01 Inspect assets and bootstrap Monocle monorepo.
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed (record command and outcome)
+- [x] Acceptance criteria validated
+- [x] Summary and artifacts committed or handed back for synchronization
 
 **Implementation notes:**
+
+- **Code:** `packages/monocle-core/src/note-index/` — `openNoteIndex()` (SQLite FTS5 index: scanner, reconcile,
+  rebuild, exact search, note ID/path tracking, duplicate-ID diagnosis, `assertNoteIdAvailable` for managed
+  mutations) and `watchVault()` (recursive `fs.watch`, debounce, startup reconciliation, periodic safety-net rescan).
+  Exported from `@monocle/core`.
+- **SQLite driver: `node:sqlite`** (built into Node ≥ 22.5; verified FTS5 on Node 22.20.0 / SQLite 3.50.4 without a
+  flag). Chosen over `better-sqlite3` to avoid a native build on each host (Windows/second host) and keep the
+  companion dependency-free; trade-off is that it is still experimental in Node 22 (prints an `ExperimentalWarning`).
+  It is isolated in `note-index.ts`, so swapping drivers is local. Frontmatter is parsed with `yaml` (new dependency).
+- **Design:** the watcher never applies events incrementally; every debounced burst runs a full `reconcile()`
+  (mtime/size fast path, then SHA-256), so missed or out-of-order events cannot corrupt the index. Moves are paired by
+  persistent ID first, then by content hash. A schema/config fingerprint (schema version, ID field, excluded folders)
+  forces a rebuild from Markdown on change.
+- **Note ID field** is configurable (`idField`, default `id` — provisional until real-vault discovery).
+- **Automated checks:** `npm ci && npm run check` — build OK, 37/37 tests passed (15 new in
+  `packages/monocle-core/test/note-index.test.ts` and `vault-watcher.test.ts`).
+- **Acceptance:** create/edit/move/delete after reconciliation, folder renames via the watcher, changes made while
+  stopped recovered on startup reconciliation, exact token search (`lanternfish-7731`), and full rebuild equal to the
+  incremental index on the fixture vault are all covered by tests. Manual Obsidian verification is not applicable (no
+  Obsidian/agent runtime in this ticket). Not verified on Linux/macOS (`fs.watch` recursive is supported on Node 22).
 
