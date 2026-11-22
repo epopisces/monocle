@@ -40,10 +40,29 @@ Requires: 14 Incrementally index synchronized notes in SQLite FTS5.
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed (record command and outcome)
+- [x] Acceptance criteria validated
+- [x] Summary and artifacts committed or handed back for synchronization
 
 **Implementation notes:**
 
+- **Code:** `packages/monocle-core/src/note-index/` — `links.ts` (pure extraction of body wikilinks/embeds and
+  wikilink-valued frontmatter, with 1-based line/column; code spans/fences ignored), `relationships.ts` (self-contained
+  `links` table keyed by `notes.rowid` + vault-wide resolution) and `metadata.ts` (`NoteFilter`). New `NoteIndex`
+  methods: `links(path)`, `backlinks(path)`, `brokenLinks()`, `findNotes(filter)`. `SCHEMA_VERSION` bumped to 2.
+- **Identity:** links store the target's `notes.rowid`, which survives moves (paired by persistent ID, then hash), and
+  results return `NoteRef { path, id, title }` read at query time — a rename changes `path`, not `id`/edges. All links
+  are re-resolved after any reconcile that changed notes, so renames/deletes/new notes update every edge.
+- **Resolution (Obsidian-like):** vault path (exact or suffix) for targets with `/`, else case-insensitive file name,
+  else frontmatter `aliases`/`alias`; `[[#Heading]]` resolves to the same note. Outcomes: `resolved`, `ambiguous`
+  (with `candidates`), `unresolved`, `attachment` (non-`.md` target with no matching note; not reported as broken).
+  Heading/block subpaths are recorded but not validated. Display text (`|alias`) is never used for resolution.
+- **Relations:** body → `links_to`/`embeds`; frontmatter → sibling `relation` value (e.g. `links[].relation: owner`)
+  else the top-level key (e.g. `project`). Plain frontmatter strings (e.g. `people: [Ada Example]`) are not promoted
+  to edges (no inferred links).
+- **Automated checks:** `npm ci && npm run check` — build OK, all tests passed (9 new in
+  `packages/monocle-core/test/relationships.test.ts`).
+- **Acceptance:** rename keeps identity/backlinks (with Obsidian-style link rewrite) and breaks links when not rewritten;
+  backlinks carry source note refs + locations; broken and ambiguous links reported; frontmatter aliases and display
+  aliases covered; incremental = restart = rebuild. Manual Obsidian verification not applicable (no runtime here).

@@ -16,7 +16,7 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 - [ ] [IMM-56](tickets/IMM-56.md) — M3: Approve all pending eligible changes in current execution session
 - [ ] [IMM-57](tickets/IMM-57.md) — M3: Rebase stale changes into new pending proposals
 - [x] [IMM-58](tickets/IMM-58.md) — M4: Incrementally index synchronized notes in SQLite FTS5
-- [ ] [IMM-59](tickets/IMM-59.md) — M4: Query metadata, persistent identities and explicit note relationships
+- [x] [IMM-59](tickets/IMM-59.md) — M4: Query metadata, persistent identities and explicit note relationships
 - [ ] [IMM-60](tickets/IMM-60.md) — M4: Add configurable optional ChromaDB semantic retrieval
 - [ ] [IMM-61](tickets/IMM-61.md) — M4: Show compact index health and expandable maintenance controls
 - [ ] [IMM-62](tickets/IMM-62.md) — M5: Verify Monocle MVP end to end and on second host
@@ -27,3 +27,4 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 |---|---|---|---|---|
 | 2026-11-22 | IMM-45 | Bootstrap TS monorepo, contracts/boundary tests, fixture vault, asset inventory, real-vault discovery plan (branch `epopisces-imm-45-bootstrap-monorepo`) | `npm ci && npm run check`: 22/22 passed | No |
 | 2026-11-22 | IMM-58 | SQLite FTS5 note index (`node:sqlite`) with reconcile/rebuild/search, ID/path/move tracking, duplicate-ID diagnosis, debounced watcher (branch `epopisces-imm-58-sqlite-fts5-index`) | `npm ci && npm run check`: 37/37 passed | No |
+| 2026-11-22 | IMM-59 | Explicit relationship index (wikilinks, embeds, frontmatter links; path/name/alias resolution to rowid-backed identities), backlinks, broken/ambiguous diagnosis, metadata filter; SCHEMA_VERSION 2 (branch `epopisces-imm-59-metadata-relationships`) | `npm ci && npm run check`: 46/46 passed | No |

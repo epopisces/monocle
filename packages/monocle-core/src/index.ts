@@ -9,3 +9,6 @@ export const packageDescriptor: PackageDescriptor = {
 
 export * from "./note-index/note-index.js";
 export * from "./note-index/watch.js";
+export type { ExtractedLink, LinkKind, SourceLocation } from "./note-index/links.js";
+export type { LinkMatch, LinkStatus, NoteLink, NoteRef } from "./note-index/relationships.js";
+export type { NoteFilter } from "./note-index/metadata.js";
