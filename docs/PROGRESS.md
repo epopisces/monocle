@@ -1,0 +1,28 @@
+# Offline progress tracking
+
+This is a local checklist; it does **not** reflect live Linear status. Export statuses were all `Backlog`.
+
+- [ ] [IMM-45](tickets/IMM-45.md) — M0: Inspect assets and bootstrap Monocle monorepo
+- [ ] [IMM-46](tickets/IMM-46.md) — M1: Connect Obsidian panel to independent companion
+- [ ] [IMM-47](tickets/IMM-47.md) — M1: Stream and cancel a Cravat execution through Copilot adapter
+- [ ] [IMM-48](tickets/IMM-48.md) — M1: Supply active-note context and restricted read-only vault tools
+- [ ] [IMM-49](tickets/IMM-49.md) — M2: Configure model, context window and thinking effort in Monocle
+- [ ] [IMM-50](tickets/IMM-50.md) — M2: Persist and resume local Monocle conversations
+- [ ] [IMM-51](tickets/IMM-51.md) — M2: Route registered deterministic commands and agentic requests
+- [ ] [IMM-52](tickets/IMM-52.md) — M2: Create schema-valid notes via existing Curator skill
+- [ ] [IMM-53](tickets/IMM-53.md) — M3: Persist session-scoped portable change proposals
+- [ ] [IMM-54](tickets/IMM-54.md) — M3: Validate and apply managed changes with risk policy
+- [ ] [IMM-55](tickets/IMM-55.md) — M3: Review session changes in native Obsidian diff view
+- [ ] [IMM-56](tickets/IMM-56.md) — M3: Approve all pending eligible changes in current execution session
+- [ ] [IMM-57](tickets/IMM-57.md) — M3: Rebase stale changes into new pending proposals
+- [ ] [IMM-58](tickets/IMM-58.md) — M4: Incrementally index synchronized notes in SQLite FTS5
+- [ ] [IMM-59](tickets/IMM-59.md) — M4: Query metadata, persistent identities and explicit note relationships
+- [ ] [IMM-60](tickets/IMM-60.md) — M4: Add configurable optional ChromaDB semantic retrieval
+- [ ] [IMM-61](tickets/IMM-61.md) — M4: Show compact index health and expandable maintenance controls
+- [ ] [IMM-62](tickets/IMM-62.md) — M5: Verify Monocle MVP end to end and on second host
+
+## Sync-back log
+
+| Date | Issue | Change/commit | Tests | Linear synchronized? |
+|---|---|---|---|---|
+| | | | | |

@@ -1,0 +1,220 @@
+{
+  "snapshot_date": "2026-11-21",
+  "source": "Linear Immoil / Personal Engineering / IMM-6",
+  "epic": "IMM-6",
+  "tickets": [
+    {
+      "id": "IMM-45",
+      "milestone": "M0",
+      "title": "Inspect assets and bootstrap Monocle monorepo",
+      "blocked_by": [],
+      "priority": 2,
+      "file": "tickets/IMM-45.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-46",
+      "milestone": "M1",
+      "title": "Connect Obsidian panel to independent companion",
+      "blocked_by": [
+        "IMM-45"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-46.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-47",
+      "milestone": "M1",
+      "title": "Stream and cancel a Cravat execution through Copilot adapter",
+      "blocked_by": [
+        "IMM-46"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-47.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-48",
+      "milestone": "M1",
+      "title": "Supply active-note context and restricted read-only vault tools",
+      "blocked_by": [
+        "IMM-47"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-48.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-49",
+      "milestone": "M2",
+      "title": "Configure model, context window and thinking effort in Monocle",
+      "blocked_by": [
+        "IMM-47"
+      ],
+      "priority": 3,
+      "file": "tickets/IMM-49.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-50",
+      "milestone": "M2",
+      "title": "Persist and resume local Monocle conversations",
+      "blocked_by": [
+        "IMM-47"
+      ],
+      "priority": 3,
+      "file": "tickets/IMM-50.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-51",
+      "milestone": "M2",
+      "title": "Route registered deterministic commands and agentic requests",
+      "blocked_by": [
+        "IMM-48"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-51.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-52",
+      "milestone": "M2",
+      "title": "Create schema-valid notes via existing Curator skill",
+      "blocked_by": [
+        "IMM-48",
+        "IMM-51"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-52.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-53",
+      "milestone": "M3",
+      "title": "Persist session-scoped portable change proposals",
+      "blocked_by": [
+        "IMM-52"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-53.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-54",
+      "milestone": "M3",
+      "title": "Validate and apply managed changes with risk policy",
+      "blocked_by": [
+        "IMM-53"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-54.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-55",
+      "milestone": "M3",
+      "title": "Review session changes in native Obsidian diff view",
+      "blocked_by": [
+        "IMM-53",
+        "IMM-54"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-55.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-56",
+      "milestone": "M3",
+      "title": "Approve all pending eligible changes in current execution session",
+      "blocked_by": [
+        "IMM-55"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-56.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-57",
+      "milestone": "M3",
+      "title": "Rebase stale changes into new pending proposals",
+      "blocked_by": [
+        "IMM-54",
+        "IMM-55"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-57.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-58",
+      "milestone": "M4",
+      "title": "Incrementally index synchronized notes in SQLite FTS5",
+      "blocked_by": [
+        "IMM-45"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-58.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-59",
+      "milestone": "M4",
+      "title": "Query metadata, persistent identities and explicit note relationships",
+      "blocked_by": [
+        "IMM-58"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-59.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-60",
+      "milestone": "M4",
+      "title": "Add configurable optional ChromaDB semantic retrieval",
+      "blocked_by": [
+        "IMM-58"
+      ],
+      "priority": 3,
+      "file": "tickets/IMM-60.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-61",
+      "milestone": "M4",
+      "title": "Show compact index health and expandable maintenance controls",
+      "blocked_by": [
+        "IMM-58",
+        "IMM-60"
+      ],
+      "priority": 3,
+      "file": "tickets/IMM-61.md",
+      "status_at_export": "Backlog"
+    },
+    {
+      "id": "IMM-62",
+      "milestone": "M5",
+      "title": "Verify Monocle MVP end to end and on second host",
+      "blocked_by": [
+        "IMM-48",
+        "IMM-49",
+        "IMM-50",
+        "IMM-51",
+        "IMM-52",
+        "IMM-53",
+        "IMM-54",
+        "IMM-55",
+        "IMM-56",
+        "IMM-57",
+        "IMM-58",
+        "IMM-59",
+        "IMM-60",
+        "IMM-61"
+      ],
+      "priority": 2,
+      "file": "tickets/IMM-62.md",
+      "status_at_export": "Backlog"
+    }
+  ]
+}
