@@ -1,0 +1,38 @@
+.monocle-panel .monocle-status {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+}
+
+.monocle-panel .monocle-status-label {
+  flex: 1;
+  font-weight: var(--font-semibold);
+}
+
+.monocle-panel .monocle-status-dot {
+  width: 0.6em;
+  height: 0.6em;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+.monocle-panel .monocle-status-dot[data-state="connected"] {
+  background: var(--color-green);
+}
+
+.monocle-panel .monocle-status-dot[data-state="disconnected"],
+.monocle-panel .monocle-status-dot[data-state="incompatible"] {
+  background: var(--color-red);
+}
+
+.monocle-panel .monocle-status-detail {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-4-1);
+}
+
+.monocle-panel .monocle-status-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+  margin-top: var(--size-4-1);
+}

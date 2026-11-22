@@ -7,6 +7,7 @@ coverage/
 
 # Obsidian plugin bundle output (built per host, not committed)
 packages/obsidian-plugin/main.js
+packages/obsidian-plugin/build/
 
 # === Environment, secrets & host-local configuration ===
 .env
@@ -47,3 +48,4 @@ __pycache__/
 
 # The fixture vault is committed; never commit real vault content or Obsidian workspace state.
 fixtures/vault/.obsidian/workspace*.json
+fixtures/vault/.obsidian/plugins/

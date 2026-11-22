@@ -2,7 +2,7 @@
   "id": "monocle",
   "name": "Monocle",
   "version": "0.0.0",
-  "minAppVersion": "1.7.0",
+  "minAppVersion": "1.8.7",
   "description": "Agent-assisted knowledge operations through the local Monocle companion.",
   "author": "epopisces",
   "isDesktopOnly": true
