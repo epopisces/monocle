@@ -23,6 +23,8 @@ export interface ExecuteOptions {
   readonly context?: ExecutionContext | undefined;
   /** Continue this companion conversation; omitted starts a new one (see `started.conversationId`). */
   readonly conversationId?: string;
+  /** Registry command with route `cravat` (IMM-51); `prompt` is then its argument. */
+  readonly command?: string;
 }
 
 export interface ExecutionHandle {
@@ -101,6 +103,7 @@ export class ExecutionClient {
           body: JSON.stringify({
             prompt,
             ...(options.conversationId !== undefined && { conversationId: options.conversationId }),
+            ...(options.command !== undefined && { command: options.command }),
             ...(settings && Object.keys(settings).length > 0 && { settings }),
             ...(context && { context }),
           }),

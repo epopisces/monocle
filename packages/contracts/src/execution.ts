@@ -66,6 +66,11 @@ export interface ExecutionRequest {
   readonly conversationId?: string;
   /** Provider execution options (since 0.2.x). Omitted settings use the provider's defaults. */
   readonly settings?: ExecutionSettings;
+  /**
+   * Registry command (see `commands.ts`) with route `cravat` this request runs, e.g. `lookup` (since 0.2.x).
+   * `prompt` then carries the command's argument; the companion supplies the command's instructions.
+   */
+  readonly command?: string;
 }
 
 /** Execution options Monocle can request. Which ones apply, and their values, depend on the provider. */
@@ -119,7 +124,9 @@ export type ExecutionErrorCode =
   /** The provider started but reported an error or exited abnormally. */
   | "provider_error"
   /** Client-side: the companion was unreachable or the stream ended without a terminal event (e.g. restart). */
-  | "connection_lost";
+  | "connection_lost"
+  /** A registry command lacks context it requires (active note, argument, vault); the message names what (since 0.2.x). */
+  | "missing_context";
 
 export interface ExecutionError {
   readonly code: ExecutionErrorCode;
@@ -170,7 +177,7 @@ export function isConversationId(value: string): boolean {
 
 export type ExecutionRequestResult = { ok: true; request: ExecutionRequest } | { ok: false; error: string };
 
-const REQUEST_FIELDS = new Set(["prompt", "conversationId", "settings", "context"]);
+const REQUEST_FIELDS = new Set(["prompt", "conversationId", "settings", "context", "command"]);
 
 function parseSettings(value: unknown): { ok: true; settings: ExecutionSettings } | { ok: false; error: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -212,6 +219,11 @@ export function parseExecutionRequest(value: unknown): ExecutionRequestResult {
     return { ok: false, error: "conversationId must be a conversation ID returned by the companion" };
   }
   let request: ExecutionRequest = { prompt, ...(conversationId !== undefined && { conversationId }) };
+  const { command } = value as { command?: unknown };
+  if (command !== undefined) {
+    if (typeof command !== "string" || !/^[a-z][\w-]*$/.test(command)) return { ok: false, error: "command must be a command ID such as \"lookup\"" };
+    request = { ...request, command };
+  }
   if (settings !== undefined) {
     const parsed = parseSettings(settings);
     if (!parsed.ok) return parsed;

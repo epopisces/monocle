@@ -24,6 +24,7 @@ export {
   type FetchLike,
 } from "./execution-client.js";
 export { buildExecutionContext, type ActiveNoteSnapshot, type ContextChoices } from "./context.js";
+export { CommandRunner, type CommandInvocation, type CommandOutcome, type CommandRunnerOptions } from "./command-runner.js";
 
 export const packageDescriptor: PackageDescriptor = {
   name: "@monocle/obsidian-plugin",

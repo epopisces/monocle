@@ -2,6 +2,7 @@ import {
   ItemView,
   MarkdownRenderer,
   MarkdownView,
+  Notice,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -10,8 +11,11 @@ import {
   type WorkspaceLeaf,
 } from "obsidian";
 import {
+  COMMANDS,
   DEFAULT_COMPANION_ENDPOINT,
   EXECUTION_SETTING_NAMES,
+  parseChatInput,
+  type CommandDefinition,
   type Conversation,
   type ConversationExecution,
   type ExecutionCapabilities,
@@ -26,6 +30,10 @@ import { ConversationClient } from "./conversation-client.js";
 import { IndexHealthMonitor } from "./index-health.js";
 import { installIndexHealthUi, requestUrlCompanion } from "./index-ui.js";
 import { ExecutionClient, type ExecutionHandle, type FetchLike } from "./execution-client.js";
+import { CommandRunner } from "./command-runner.js";
+
+/** Runs a registry command in the open panel; `note` is the note the command targets, if any. */
+type PanelCommand = (command: CommandDefinition, argument: string, note: ActiveNoteSnapshot | undefined) => Promise<void>;
 
 /**
  * Executions stream over the renderer's `fetch` (`requestUrl` buffers whole responses). The companion
@@ -128,7 +136,66 @@ export default class MonoclePlugin extends Plugin {
     this.addRibbonIcon("glasses", "Open Monocle panel", () => void this.activatePanel());
     this.addCommand({ id: "open-panel", name: "Open panel", callback: () => void this.activatePanel() });
     this.addCommand({ id: "reconnect", name: "Reconnect to companion", callback: () => void this.connection.check() });
+    this.registerRegistryCommands();
     this.addSettingTab(new MonocleSettingTab(this.app, this));
+  }
+
+  /**
+   * Surfaces every registry command (IMM-51) in the palette and context menus. All entry points run through
+   * {@link runCommand}, so missing context is reported the same way everywhere.
+   */
+  private registerRegistryCommands(): void {
+    for (const command of COMMANDS.filter((c) => c.surfaces.includes("palette"))) {
+      // Plain callback (not checkCallback) so a missing note is explained instead of the command vanishing.
+      this.addCommand({ id: command.id, name: command.name, callback: () => void this.runCommand(command) });
+    }
+    const menuTitle = (c: CommandDefinition) => `Monocle: ${c.name}`;
+    this.registerEvent(
+      this.app.workspace.on("editor-menu", (menu, editor, info) => {
+        const file = info.file;
+        if (!file) return;
+        const selection = editor.getSelection();
+        const note = { path: file.path, content: editor.getValue(), ...(selection && { selection }) };
+        for (const command of COMMANDS.filter((c) => c.surfaces.includes("editor-menu"))) {
+          menu.addItem((item) =>
+            item
+              .setTitle(menuTitle(command))
+              .setIcon("glasses")
+              .onClick(() => void this.runCommand(command, "", note)),
+          );
+        }
+      }),
+    );
+    this.registerEvent(
+      this.app.workspace.on("file-menu", (menu, file) => {
+        if (!("extension" in file) || file.extension !== "md") return;
+        for (const command of COMMANDS.filter((c) => c.surfaces.includes("file-menu"))) {
+          menu.addItem((item) =>
+            item
+              .setTitle(menuTitle(command))
+              .setIcon("glasses")
+              .onClick(() => void this.runCommand(command, "", { path: file.path, content: "" })),
+          );
+        }
+      }),
+    );
+  }
+
+  /** Set by the open panel; commands render their result or error there. */
+  panelCommand: PanelCommand | undefined;
+
+  /**
+   * Runs a registry command from any surface. `note` defaults to the last focused Markdown note; pass `null`
+   * for "no note".
+   */
+  async runCommand(command: CommandDefinition, argument = "", note?: ActiveNoteSnapshot | null): Promise<void> {
+    const target = note === undefined ? this.activeNoteSnapshot() : (note ?? undefined);
+    await this.activatePanel();
+    if (!this.panelCommand) {
+      new Notice("Monocle: open the Monocle panel to run commands");
+      return;
+    }
+    await this.panelCommand(command, argument, target);
   }
 
   override onunload(): void {
@@ -259,7 +326,7 @@ class MonoclePanelView extends ItemView {
     const chat = root.createDiv({ cls: "monocle-chat" });
     const prompt = chat.createEl("textarea", {
       cls: "monocle-prompt",
-      attr: { placeholder: "Ask Cravat… (Ctrl/Cmd+Enter to send)", rows: "3" },
+      attr: { placeholder: "Ask Cravat, or /validate, /backlinks, /search <query>, /lookup <question>… (Ctrl/Cmd+Enter to send)", rows: "3" },
     });
     const actions = chat.createDiv({ cls: "monocle-actions" });
     const send = actions.createEl("button", { cls: "mod-cta monocle-send", text: "Send" });
@@ -376,31 +443,35 @@ class MonoclePanelView extends ItemView {
       clearLive();
       void refresh();
     });
-    const submit = async () => {
-      const text = prompt.value.trim();
-      if (!text || active || !connected) return;
-      const context = buildExecutionContext({
-        activeNote: this.plugin.activeNoteSnapshot(),
+    const contextFor = (note: ActiveNoteSnapshot | undefined) =>
+      buildExecutionContext({
+        activeNote: note,
         includeActiveNote: useNote.checked,
         includeSelection: useSelection.checked,
         include: includeEl.value,
         exclude: excludeEl.value,
       });
-      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(
-        text,
-        this.plugin.executionSettings(),
-        { ...(conversationId !== undefined && { conversationId }), context },
-      );
-      active = handle;
-      sync();
+    const beginLive = (title: string) => {
       // The previous live execution now belongs in the transcript.
       liveExecutionId = undefined;
       void refresh();
       output.empty();
       output.dataset.state = "running";
+      delete meta.dataset.executionId;
       execError.hide();
       execSession.setText("");
-      meta.setText("Starting…");
+      meta.setText(title);
+    };
+    const showFailure = (title: string, code: string, message: string) => {
+      output.empty();
+      output.dataset.state = "failed";
+      meta.setText(title);
+      execError.setText(`${code}: ${message}`);
+      execError.show();
+    };
+    const stream = async (handle: ExecutionHandle) => {
+      active = handle;
+      sync();
       let streamed = "";
       for await (const event of handle.events) {
         meta.dataset.executionId = event.executionId;
@@ -426,6 +497,63 @@ class MonoclePanelView extends ItemView {
       active = undefined;
       sync();
       void refresh();
+    };
+    let commandRunning = false;
+    /** Registry commands (IMM-51): deterministic ones render here without Cravat; agentic ones stream. */
+    const runCommand: PanelCommand = async (command, argument, note) => {
+      if (active || commandRunning) {
+        new Notice("Monocle: wait for the running request to finish");
+        return;
+      }
+      const title = `Monocle /${command.id}`;
+      commandRunning = true;
+      beginLive(`${title} · running`);
+      try {
+        const runner = new CommandRunner({
+          endpoint: this.plugin.connection.endpoint,
+          fetch: rendererFetch,
+          executions: new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }),
+        });
+        const outcome = await runner.run({
+          command,
+          argument,
+          activeNote: note,
+          context: contextFor(note),
+          settings: this.plugin.executionSettings(),
+          ...(conversationId !== undefined && { conversationId }),
+        });
+        if (outcome.kind === "execution") await stream(outcome.handle);
+        else if (outcome.kind === "error") showFailure(`${title} · failed`, outcome.error.code, outcome.error.message);
+        else {
+          meta.setText(`${title} · completed`);
+          output.dataset.state = "completed";
+          output.empty();
+          await MarkdownRenderer.render(this.app, outcome.result.markdown, output, note?.path ?? "", this);
+        }
+      } finally {
+        commandRunning = false;
+      }
+    };
+    this.plugin.panelCommand = runCommand;
+    this.register(() => {
+      if (this.plugin.panelCommand === runCommand) this.plugin.panelCommand = undefined;
+    });
+    const submit = async () => {
+      const text = prompt.value.trim();
+      if (!text || active || commandRunning || !connected) return;
+      const parsed = parseChatInput(text);
+      if (parsed.kind === "unknown") {
+        beginLive("");
+        return showFailure("Monocle · failed", "unknown_command", parsed.message);
+      }
+      if (parsed.kind === "command") return runCommand(parsed.command, parsed.argument, this.plugin.activeNoteSnapshot());
+      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(
+        parsed.prompt,
+        this.plugin.executionSettings(),
+        { ...(conversationId !== undefined && { conversationId }), context: contextFor(this.plugin.activeNoteSnapshot()) },
+      );
+      beginLive("Starting…");
+      await stream(handle);
     };
     send.addEventListener("click", () => void submit());
     cancel.addEventListener("click", () => void active?.cancel());

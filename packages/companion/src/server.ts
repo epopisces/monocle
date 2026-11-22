@@ -5,6 +5,7 @@ import type { AddressInfo } from "node:net";
 import {
   ALLOWED_CLIENT_ORIGINS,
   CAPABILITIES_PATH,
+  COMMANDS_PATH,
   COMPANION_SERVICE_ID,
   CONVERSATIONS_PATH,
   CONTRACT_VERSION,
@@ -26,6 +27,7 @@ import {
 } from "@monocle/contracts";
 import { ConversationStore, conversationTitle, type IndexService } from "@monocle/core";
 import { handleIndexRoute, INDEX_ROUTE_PREFIX } from "./index-routes.js";
+import { handleCommandRoute, planAgenticCommand } from "./command-routes.js";
 import { CopilotCliAdapter, ExecutionManager, type ProviderAdapter } from "@monocle/cravat";
 import { ContextError, prepareExecution, type CompanionVaultOptions, type PreparedExecution } from "./context.js";
 
@@ -160,17 +162,20 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     }
     const parsed = parseExecutionRequest(body);
     if (!parsed.ok) return sendError(res, 400, { code: "invalid_request", message: parsed.error });
-    const unsupported = await cravat.validate(parsed.request);
+    const planned = planAgenticCommand(parsed.request, options.vault !== undefined);
+    if (!planned.ok) return sendError(res, 400, planned.error);
+    const unsupported = await cravat.validate(planned.request);
     if (unsupported) return sendError(res, 400, { code: "invalid_request", message: unsupported });
     let prepared: PreparedExecution;
     try {
-      prepared = prepareExecution(parsed.request, options.vault);
+      prepared = prepareExecution(planned.request, options.vault);
     } catch (err) {
       if (err instanceof ContextError) return sendError(res, 400, { code: "invalid_request", message: err.message });
       throw err;
     }
 
-    const { prompt, conversationId } = parsed.request;
+    const { conversationId } = parsed.request;
+    const prompt = planned.recordedPrompt;
     let conversation;
     if (conversationId === undefined) {
       conversation = conversations.create(conversationTitle(prompt));
@@ -251,6 +256,13 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
     if (path.startsWith(INDEX_ROUTE_PREFIX)) return void handleIndexRoute(options.index, req, res, path, sendJson);
+    if (path === COMMANDS_PATH) {
+      handleCommandRoute(options.index, req, res, sendJson).catch((err: unknown) => {
+        if (!res.headersSent) sendError(res, 500, { code: "provider_error", message: String(err) });
+        else res.destroy();
+      });
+      return;
+    }
     if (req.method === "GET" && path === CAPABILITIES_PATH) {
       cravat.capabilities().then(
         (caps) => sendJson(res, 200, caps),

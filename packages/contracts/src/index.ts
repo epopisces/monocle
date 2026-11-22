@@ -8,6 +8,7 @@ export * from "./companion.js";
 export * from "./index-health.js";
 export * from "./execution.js";
 export * from "./conversation.js";
+export * from "./commands.js";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 

@@ -1,5 +1,5 @@
 // Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-48 note context
-// and read-only vault tools, IMM-49 execution settings, IMM-50 conversations, IMM-61 index health). Uses a temp copy of the fixture vault, a temp Electron user-data dir and a
+// and read-only vault tools, IMM-49 execution settings, IMM-50 conversations, IMM-51 command routing, IMM-61 index health). Uses a temp copy of the fixture vault, a temp Electron user-data dir and a
 // temp companion data dir, so the user's Obsidian configuration, vaults and conversations are never touched. The
 // companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
 // Copilot CLI; costs three premium requests; skips the cancel checks).
@@ -250,6 +250,62 @@ try {
     check("excluded note not readable by tools", /excluded from this request/.test(ctxAnswer));
   }
   check("vault notes unchanged", JSON.stringify(noteHashes()) === JSON.stringify(notesBefore));
+
+  // IMM-51: one command registry across palette, context menus and chat. Deterministic commands run in Monocle
+  // (no execution, no conversation entry); /lookup goes to Cravat; missing context is named.
+  await evaluate(`(() => { ${q(".monocle-context-exclude")}.value = ""; ${q(".monocle-context-include")}.value = ""; })()`);
+  const commandNotesBefore = noteHashes();
+  const conversationCount = async () => {
+    const { conversations } = await (await fetch(new URL("/v1/conversations", companion.url))).json();
+    return conversations.reduce((n, c) => n + c.executionCount, 0) + ":" + conversations.length;
+  };
+  const executionsBefore = await conversationCount();
+  const metaText = `${q(".monocle-execution")}?.textContent`;
+  const outputText = `${q(".monocle-output")}.textContent`;
+  await evaluate("app.workspace.openLinkText('Project Lantern', '', false)");
+  await until(evaluate, "app.workspace.getActiveFile()?.basename === 'Project Lantern'", true);
+  await evaluate("app.commands.executeCommandById('monocle:validate')");
+  check("palette /validate runs in Monocle", (await until(evaluate, metaText, "Monocle /validate · completed")) === "Monocle /validate · completed");
+  const validation = await evaluate(outputText);
+  check("validation names the duplicate ID and broken link", validation.includes("work/Duplicate Id Note.md") && validation.includes("Missing Note"), validation);
+  await submit("/search lanternfish-7731");
+  await until(evaluate, metaText, "Monocle /search · completed");
+  check("chat /search finds the note", (await evaluate(outputText)).includes("Project Lantern"));
+  await submit("/backlinks");
+  await until(evaluate, metaText, "Monocle /backlinks · completed");
+  check("chat /backlinks lists linking notes", (await evaluate(outputText)).includes("Ada Example"));
+  await submit("/valdiate");
+  await until(evaluate, outputState, "failed");
+  const unknown = await evaluate(`${q(".monocle-execution-error")}.textContent`);
+  check("unknown chat command rejected locally", /^unknown_command: Unknown command \/valdiate\. Available commands: .*\/validate/.test(unknown), unknown);
+  // A chainable stand-in for Obsidian's Menu collects the items every plugin adds for the file.
+  const fileMenuValidate = `(() => {
+    const items = [];
+    const chain = (target) => new Proxy(target, { get: (t, p) => (p in t ? t[p] : (...a) => { if (p === "setTitle") t.title = a[0]; if (p === "onClick") t.click = a[0]; return chain(t); }) });
+    const menu = chain({ addItem(cb) { const item = {}; items.push(item); cb(chain(item)); return menu; } });
+    app.workspace.trigger("file-menu", menu, app.vault.getAbstractFileByPath("work/Duplicate Id Note.md"), "file-explorer-context-menu");
+    const item = items.find((i) => i.title === "Monocle: Validate note");
+    if (!item) return items.map((i) => i.title).join("|");
+    item.click();
+    return "clicked";
+  })()`;
+  const menuResult = await evaluate(fileMenuValidate);
+  check("file menu offers Monocle commands", menuResult === "clicked", menuResult);
+  await until(evaluate, metaText, "Monocle /validate · completed");
+  check("file menu /validate targets that file", (await evaluate(outputText)).includes("projects/Project Lantern.md"));
+  check("deterministic commands started no Cravat execution", (await conversationCount()) === executionsBefore);
+  await evaluate("app.workspace.getLeavesOfType('markdown').forEach((l) => l.detach())");
+  await evaluate("app.commands.executeCommandById('monocle:validate')");
+  await until(evaluate, outputState, "failed");
+  const missing = await evaluate(`${q(".monocle-execution-error")}.textContent`);
+  check("missing active note named", /^missing_context: \/validate needs an active note/.test(missing), missing);
+  await submit(live ? "/lookup Who owns Project Lantern? Reply in one sentence." : "/lookup Who owns Project Lantern?");
+  check("chat /lookup completes in Cravat", (await until(evaluate, outputState, "completed", live ? 180000 : 20000)) === "completed");
+  const lookup = await evaluate(outputText);
+  if (live) check("lookup answers from the vault", /Ada Example/.test(lookup), lookup);
+  else check("lookup sends grounding instructions", lookup.startsWith("echo: ") && lookup.includes("monocle_vault") && lookup.includes("Question: Who owns Project Lantern?"), lookup.slice(0, 300));
+  check("lookup ran as an execution", /^Execution [0-9a-f-]{36} · completed$/.test(await evaluate(metaText)));
+  check("vault notes unchanged by commands", JSON.stringify(noteHashes()) === JSON.stringify(commandNotesBefore));
 
   ws.close();
   obsidian.kill();
