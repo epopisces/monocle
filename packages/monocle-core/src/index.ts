@@ -9,3 +9,11 @@ export const packageDescriptor: PackageDescriptor = {
 
 export * from "./note-index/note-index.js";
 export * from "./note-index/watch.js";
+export * from "./semantic/chunk.js";
+export * from "./semantic/types.js";
+export * from "./semantic/memory-store.js";
+export * from "./semantic/semantic-index.js";
+export * from "./semantic/embedding-providers.js";
+export * from "./semantic/chroma-store.js";
+export * from "./semantic/config.js";
+export * from "./semantic/retriever.js";
