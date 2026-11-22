@@ -27,6 +27,7 @@ const fetchLike = globalThis.fetch.bind(globalThis);
 async function run(prompt: string, conversationId?: string): Promise<ExecutionEvent[]> {
   const handle = new ExecutionClient({ endpoint: companion!.url, fetch: fetchLike }).execute(
     prompt,
+    undefined,
     conversationId === undefined ? {} : { conversationId },
   );
   const out: ExecutionEvent[] = [];

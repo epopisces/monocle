@@ -1,3 +1,5 @@
+import type { ProviderSessionInfo } from "./conversation.js";
+
 /**
  * Monocle → Cravat execution contract (since contract 0.2.0).
  *
@@ -33,6 +35,51 @@ export interface ExecutionRequest {
    * conversation and reports its ID on the `started` event.
    */
   readonly conversationId?: string;
+  /** Provider execution options (since 0.2.x). Omitted settings use the provider's defaults. */
+  readonly settings?: ExecutionSettings;
+}
+
+/** Execution options Monocle can request. Which ones apply, and their values, depend on the provider. */
+export const EXECUTION_SETTING_NAMES = ["model", "reasoningEffort", "contextWindow"] as const;
+export type ExecutionSettingName = (typeof EXECUTION_SETTING_NAMES)[number];
+
+export type ExecutionSettings = { readonly [K in ExecutionSettingName]?: string };
+
+/** One supported setting: the values the provider accepts. */
+export interface SettingCapability {
+  readonly options: readonly string[];
+}
+
+/** Settings a provider supports; a missing key means the setting is unsupported and will be rejected. */
+export type ProviderSettingCapabilities = { readonly [K in ExecutionSettingName]?: SettingCapability };
+
+export const CAPABILITIES_PATH = "/v1/capabilities";
+
+/** Body of `GET {@link CAPABILITIES_PATH}`. */
+export interface ExecutionCapabilities {
+  /** Provider adapter id, as in `started.provider`. */
+  readonly provider: string;
+  readonly settings: ProviderSettingCapabilities;
+}
+
+/**
+ * Checks requested settings against a provider's capabilities. Returns an actionable error message for the
+ * first unsupported setting or value, or `undefined` when every setting can be applied.
+ */
+export function validateExecutionSettings(
+  settings: ExecutionSettings | undefined,
+  capabilities: ExecutionCapabilities,
+): string | undefined {
+  for (const name of EXECUTION_SETTING_NAMES) {
+    const value = settings?.[name];
+    if (value === undefined) continue;
+    const capability = capabilities.settings[name];
+    if (!capability) return `setting ${name} is not supported by ${capabilities.provider}`;
+    if (!capability.options.includes(value)) {
+      return `${name} "${value}" is not supported by ${capabilities.provider}; supported: ${capability.options.join(", ")}`;
+    }
+  }
+  return undefined;
 }
 
 export type ExecutionErrorCode =
@@ -49,8 +96,6 @@ export interface ExecutionError {
   readonly code: ExecutionErrorCode;
   readonly message: string;
 }
-
-import type { ProviderSessionInfo } from "./conversation.js";
 
 interface EventBase {
   readonly executionId: string;
@@ -73,6 +118,8 @@ export type ExecutionEvent =
       readonly startedAt: string;
       /** Conversation the companion recorded this execution in (absent from companions before IMM-50). */
       readonly conversationId?: string;
+      /** Settings applied to this execution, when any were requested. */
+      readonly settings?: ExecutionSettings;
     })
   | (EventBase & { readonly type: "delta"; readonly text: string })
   | (TerminalBase & { readonly type: "completed"; readonly text: string })
@@ -85,7 +132,6 @@ export function isTerminalExecutionEvent(event: ExecutionEvent): event is Termin
   return event.type === "completed" || event.type === "failed" || event.type === "cancelled";
 }
 
-const REQUEST_FIELDS = new Set(["prompt", "conversationId"]);
 /** Conversation IDs are companion-issued UUIDs; also keeps them safe to use as file names. */
 const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -94,6 +140,26 @@ export function isConversationId(value: string): boolean {
 }
 
 export type ExecutionRequestResult = { ok: true; request: ExecutionRequest } | { ok: false; error: string };
+
+const REQUEST_FIELDS = new Set(["prompt", "conversationId", "settings"]);
+
+function parseSettings(value: unknown): { ok: true; settings: ExecutionSettings } | { ok: false; error: string } {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { ok: false, error: "settings must be a JSON object" };
+  }
+  const names: readonly string[] = EXECUTION_SETTING_NAMES;
+  const unknownKeys = Object.keys(value).filter((k) => !names.includes(k));
+  if (unknownKeys.length > 0) {
+    return { ok: false, error: `unsupported settings: ${unknownKeys.join(", ")} (known: ${names.join(", ")})` };
+  }
+  const settings: Record<string, string> = {};
+  for (const [name, v] of Object.entries(value)) {
+    if (v === undefined || v === null) continue;
+    if (typeof v !== "string" || v.trim() === "") return { ok: false, error: `setting ${name} must be a non-empty string` };
+    settings[name] = v;
+  }
+  return { ok: true, settings };
+}
 
 /**
  * Validates an execution request body. Unknown fields are rejected rather than ignored, so a client never
@@ -105,11 +171,15 @@ export function parseExecutionRequest(value: unknown): ExecutionRequestResult {
   }
   const unknownKeys = Object.keys(value).filter((k) => !REQUEST_FIELDS.has(k));
   if (unknownKeys.length > 0) return { ok: false, error: `unsupported request fields: ${unknownKeys.join(", ")}` };
-  const { prompt, conversationId } = value as { prompt?: unknown; conversationId?: unknown };
+  const { prompt, conversationId, settings } = value as { prompt?: unknown; conversationId?: unknown; settings?: unknown };
   if (typeof prompt !== "string" || prompt.trim() === "") return { ok: false, error: "prompt must be a non-empty string" };
   if (prompt.length > MAX_PROMPT_LENGTH) return { ok: false, error: `prompt exceeds ${MAX_PROMPT_LENGTH} characters` };
   if (conversationId !== undefined && (typeof conversationId !== "string" || !CONVERSATION_ID.test(conversationId))) {
     return { ok: false, error: "conversationId must be a conversation ID returned by the companion" };
   }
-  return { ok: true, request: { prompt, ...(conversationId !== undefined && { conversationId }) } };
+  const request: ExecutionRequest = { prompt, ...(conversationId !== undefined && { conversationId }) };
+  if (settings === undefined) return { ok: true, request };
+  const parsed = parseSettings(settings);
+  if (!parsed.ok) return parsed;
+  return { ok: true, request: Object.keys(parsed.settings).length > 0 ? { ...request, settings: parsed.settings } : request };
 }

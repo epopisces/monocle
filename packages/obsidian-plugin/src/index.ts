@@ -10,6 +10,13 @@ export {
 export { parseCompanionEndpoint, type EndpointResult } from "./endpoint.js";
 export { ConversationClient, type ConversationClientOptions } from "./conversation-client.js";
 export {
+  IndexHealthMonitor,
+  type ActionResult,
+  type CompanionRequest,
+  type IndexHealthMonitorOptions,
+  type IndexView,
+} from "./index-health.js";
+export {
   ExecutionClient,
   type ExecuteOptions,
   type ExecutionClientOptions,

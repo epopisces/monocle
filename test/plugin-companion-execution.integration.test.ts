@@ -92,6 +92,36 @@ describe("Obsidian plugin → companion → Cravat execution", () => {
     ]);
   });
 
+  it("discovers the provider's settings and applies the chosen ones to an execution", async () => {
+    const requests: unknown[] = [];
+    const adapter: ProviderAdapter = {
+      id: "fake",
+      capabilities: async () => ({ model: { options: ["a", "b"] }, reasoningEffort: { options: ["low"] } }),
+      async *run(req) {
+        requests.push(req.settings);
+        yield { type: "delta", text: "ok" };
+      },
+    };
+    companion = await startCompanion({ port: 0, adapter });
+    expect(await client().capabilities()).toEqual({
+      provider: "fake",
+      settings: { model: { options: ["a", "b"] }, reasoningEffort: { options: ["low"] } },
+    });
+
+    const events = await collect(client().execute("x", { model: "b", reasoningEffort: "low" }).events);
+    expect(events[0]).toMatchObject({ type: "started", settings: { model: "b", reasoningEffort: "low" } });
+    const rejected = await collect(client().execute("x", { contextWindow: "long_context" }).events);
+    expect(rejected).toEqual([
+      expect.objectContaining({ type: "failed", error: { code: "invalid_request", message: expect.stringMatching(/contextWindow/) } }),
+    ]);
+    expect(requests).toEqual([{ model: "b", reasoningEffort: "low" }]);
+  });
+
+  it("reports no capabilities when the companion cannot be reached", async () => {
+    const offline = new ExecutionClient({ endpoint: "http://127.0.0.1:1", fetch: globalThis.fetch.bind(globalThis) });
+    expect(await offline.capabilities()).toBeUndefined();
+  });
+
   it("reports a lost connection when the companion is not running", async () => {
     const offline = new ExecutionClient({ endpoint: "http://127.0.0.1:1", fetch: globalThis.fetch.bind(globalThis) });
     const events = await collect(offline.execute("x").events);

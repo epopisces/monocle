@@ -18,6 +18,7 @@ export * from "./semantic/chroma-store.js";
 export * from "./semantic/config.js";
 export * from "./semantic/retriever.js";
 export * from "./conversations/conversation-store.js";
+export * from "./index-service.js";
 export type { ExtractedLink, LinkKind, SourceLocation } from "./note-index/links.js";
 export type { LinkMatch, LinkStatus, NoteLink, NoteRef } from "./note-index/relationships.js";
 export type { NoteFilter } from "./note-index/metadata.js";

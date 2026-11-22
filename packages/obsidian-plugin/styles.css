@@ -37,6 +37,63 @@
   margin-top: var(--size-4-1);
 }
 
+.monocle-index-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--size-4-1);
+}
+
+.monocle-index-icon {
+  display: inline-flex;
+}
+
+.monocle-index-icon svg {
+  width: var(--icon-xs);
+  height: var(--icon-xs);
+}
+
+.monocle-index-indicator[data-level="degraded"],
+.monocle-index-head[data-level="degraded"] {
+  color: var(--color-orange);
+}
+
+.monocle-index-indicator[data-level="unavailable"],
+.monocle-index-head[data-level="unavailable"] {
+  color: var(--text-faint);
+}
+
+.monocle-index-head {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  font-weight: var(--font-semibold);
+}
+
+.monocle-index-detail,
+.monocle-index-action-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  margin: var(--size-4-1) 0 var(--size-4-2);
+}
+
+.monocle-index-action-status.mod-error {
+  color: var(--text-error);
+}
+
+.monocle-index-table th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-muted);
+  padding-right: var(--size-4-4);
+}
+
+.monocle-index-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
 .monocle-panel .monocle-chat {
   display: flex;
   flex-direction: column;
@@ -59,6 +116,20 @@
   color: var(--text-muted);
   font-size: var(--font-ui-smaller);
   word-break: break-all;
+}
+
+.monocle-panel .monocle-settings {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--size-4-2);
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+}
+
+.monocle-panel .monocle-setting {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-2-1);
 }
 
 .monocle-panel .monocle-execution-error {

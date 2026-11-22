@@ -1,8 +1,8 @@
-// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-50 conversations). Uses a temp
-// copy of the fixture vault, a temp Electron user-data dir and a temp companion data dir, so the user's Obsidian
-// configuration, vaults and conversations are never touched.
-// The companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
-// Copilot CLI; costs two premium requests; skips the cancel checks).
+// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-49 execution settings, IMM-50
+// conversations, IMM-61 index health). Uses a temp copy of the fixture vault, a temp Electron user-data dir and a
+// temp companion data dir, so the user's Obsidian configuration, vaults and conversations are never touched. The
+// companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
+// Copilot CLI; costs three premium requests; skips the cancel checks).
 // Usage (from repo root, after `npm run build`): node <this file>
 import { spawn, execFileSync } from "node:child_process";
 import { cpSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
@@ -31,14 +31,17 @@ const fakeLauncher = `
   import { startCompanion } from ${JSON.stringify(new URL("packages/companion/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)};
   import { CopilotCliAdapter } from ${JSON.stringify(new URL("packages/cravat/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)};
   const adapter = new CopilotCliAdapter({ command: process.execPath, args: [${JSON.stringify(join(repo, "packages/cravat/test/fixtures/fake-copilot.mjs"))}] });
-  const c = await startCompanion({ adapter, dataDir: process.env.MONOCLE_DATA_DIR });
+  const { openIndexService } = await import(${JSON.stringify(new URL("packages/monocle-core/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)});
+  const index = openIndexService({ vaultRoot: ${JSON.stringify(vault)}, stateDir: ${JSON.stringify(join(work, "state"))}, excludeFolders: ["templates"] });
+  const c = await startCompanion({ adapter, index, dataDir: process.env.MONOCLE_DATA_DIR });
   console.log(JSON.stringify({ event: "listening", url: c.url, instanceId: c.health.instanceId }));
 `;
 
 function startCompanion() {
-  const args = live ? [join(repo, "packages/companion/dist/cli.js")] : ["--input-type=module", "-e", fakeLauncher];
+  const indexArgs = ["--vault", vault, "--state-dir", join(work, "state"), "--exclude", "templates"];
+  const args = live ? [join(repo, "packages/companion/dist/cli.js"), ...indexArgs] : ["--input-type=module", "-e", fakeLauncher];
   const child = spawn(process.execPath, args, {
-    stdio: ["ignore", "pipe", "inherit"],
+    stdio: ["ignore", "pipe", "ignore"],
     env: { ...process.env, MONOCLE_DATA_DIR: dataDir },
   });
   return new Promise((resolve, reject) => {
@@ -109,6 +112,28 @@ try {
   const status = await evaluate("[...document.querySelectorAll('.status-bar-item')].map(e=>e.textContent).find(t=>t.startsWith('Monocle'))");
   check("status bar shows connected", status === "Monocle: Connected", status);
 
+  const indexLabel = "document.querySelector('.monocle-index-indicator .monocle-index-label')?.textContent";
+  check("index indicator shows healthy", (await until(evaluate, indexLabel, "Index healthy")) === "Index healthy");
+  const leaves = "app.workspace.getLeavesOfType('monocle-panel').length + ':' + document.querySelectorAll('.workspace-leaf').length";
+  const leavesBefore = await evaluate(leaves);
+  await evaluate("document.querySelector('.monocle-index-indicator').click()");
+  const modalText = "document.querySelector('.monocle-index-modal')?.textContent ?? ''";
+  await until(evaluate, `(${modalText}).includes('Notes indexed')`, true);
+  const modal = await evaluate(modalText);
+  check("expanded panel shows freshness, queue and warnings", /Last reconciled/.test(modal) && /Semantic/.test(modal) && /Vault warnings/.test(modal), modal.slice(0, 200));
+  await evaluate("[...document.querySelectorAll('.monocle-index-modal button')].find(b => b.textContent === 'Reconcile').click()");
+  check("reconcile control runs", (await until(evaluate, "(document.querySelector('.monocle-index-action-status')?.textContent ?? '').startsWith('Reconciled:')", true)) === true);
+  await evaluate("document.querySelector('.monocle-index-modal .modal-close-button').click()");
+  await until(evaluate, "!document.querySelector('.monocle-index-modal')", true);
+  check("closed panel occupies no workspace", (await evaluate(leaves)) === leavesBefore);
+
+  await evaluate("app.workspace.openLinkText('Project Lantern', '', false)");
+  await until(evaluate, "app.workspace.getActiveFile()?.basename === 'Project Lantern'", true);
+  await evaluate("(async () => { const p = app.vault.adapter; await p.write('projects/Project Lantern.md', (await p.read('projects/Project Lantern.md')) + '\\nsmokeword-61\\n'); })()");
+  await evaluate("app.commands.executeCommandById('monocle:reindex-current-note')");
+  const notice = await until(evaluate, "[...document.querySelectorAll('.notice')].some(n => n.textContent.startsWith('Reindexed projects/Project Lantern.md'))", true).catch(() => false);
+  check("reindex current note command", notice === true);
+
   // IMM-47: submit a prompt, observe the stream and execution identity, then cancel a long-running one.
   const q = (sel) => `document.querySelector('.monocle-panel ${sel}')`;
   const submit = (text) =>
@@ -138,6 +163,36 @@ try {
   const transcriptText = `${q(".monocle-transcript")}.textContent`;
   check("earlier execution shown in transcript", (await until(evaluate, turns, 1)) === 1);
   const firstAnswer = live ? /monocle smoke ok/i : /echo: hello from obsidian/;
+  // IMM-49: provider-discovered settings, applied to the adapter request; unsupported values rejected visibly.
+  const sel = (name) => q(`select[data-setting="${name}"]`);
+  const pick = (name, value) =>
+    evaluate(`(() => { const s = ${sel(name)}; if (![...s.options].some(o => o.value === ${JSON.stringify(value)})) s.add(new Option(${JSON.stringify(value)} + ' (unsupported)', ${JSON.stringify(value)})); s.value = ${JSON.stringify(value)}; s.dispatchEvent(new Event('change')); })()`);
+  const optionsOf = (name) => evaluate(`[...(${sel(name)}?.options ?? [])].map(o => o.value).join(',')`);
+  await until(evaluate, `!!${sel("model")}`, true);
+  const models = await optionsOf("model");
+  check("model choices discovered from the CLI", live ? models.split(",").length > 2 : models === ",auto,fake-pro,fake-mini", models);
+  const efforts = await optionsOf("reasoningEffort");
+  check("thinking effort choices shown", efforts.split(",").includes("low"), efforts);
+  check("context window choices shown", (await optionsOf("contextWindow")).includes("long_context"));
+  const failedState = `${q(".monocle-output")}?.dataset.state`;
+  await pick("model", "no-such-model");
+  await submit("rejected");
+  await until(evaluate, failedState, "failed");
+  const rejection = await evaluate(`${q(".monocle-execution-error")}.textContent`);
+  check("unsupported setting reported, not ignored", /^invalid_request: model "no-such-model" is not supported/.test(rejection), rejection);
+  await pick("model", live ? "" : "fake-pro");
+  await pick("reasoningEffort", "low");
+  if (!live) {
+    await submit("show args [args]");
+    await until(evaluate, outputState, "completed");
+    const argsOut = await evaluate(`${q(".monocle-output")}.textContent`);
+    check("chosen settings reach the Copilot CLI", argsOut.includes('"--model","fake-pro"') && argsOut.includes('"--reasoning-effort","low"'), argsOut);
+  } else {
+    await submit("Reply with exactly: monocle settings ok");
+    check("live run with thinking effort low completes", (await until(evaluate, outputState, "completed", 120000)) === "completed");
+  }
+  await pick("model", "");
+  await pick("reasoningEffort", "");
 
   if (!live) {
     await submit("long task [hang]");
@@ -154,6 +209,7 @@ try {
 
   companion.child.kill();
   check("panel shows Disconnected after companion stops", (await until(evaluate, label, "Disconnected")) === "Disconnected");
+  check("index indicator shows unavailable", (await until(evaluate, indexLabel, "Index unavailable")) === "Index unavailable");
   const err = await evaluate("document.querySelector('.monocle-status-error')?.textContent");
   check("disconnected error visible", !!err, err);
   await evaluate("app.workspace.openLinkText('Ada Example', '', false)");

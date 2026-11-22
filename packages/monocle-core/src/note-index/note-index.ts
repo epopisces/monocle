@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { extractLinks, type ExtractedLink } from "./links.js";
@@ -79,6 +79,13 @@ export class DuplicateNoteIdError extends Error {
   }
 }
 
+export class InvalidNotePathError extends Error {
+  constructor(readonly path: string) {
+    super(`"${path}" is not an indexable note path`);
+    this.name = "InvalidNotePathError";
+  }
+}
+
 export interface NoteIndex {
   readonly vaultRoot: string;
   /** True when a vault-relative path would be indexed (Markdown, not in a dot- or excluded folder). */
@@ -87,6 +94,11 @@ export interface NoteIndex {
   reconcile(): ReconcileReport;
   /** Discards all derived state and re-indexes every note from Markdown. */
   rebuild(): ReconcileReport;
+  /**
+   * Re-reads one note from Markdown regardless of its mtime/size, or drops it when the file is gone.
+   * Throws for paths that are not indexable notes. Does not detect moves (use `reconcile`).
+   */
+  reindexNote(path: string): ReconcileReport;
   /** Exact full-text search over title, frontmatter values and body. All terms must match. */
   search(query: string, options?: SearchOptions): SearchHit[];
   listNotes(): IndexedNote[];
@@ -329,6 +341,52 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
     return report;
   };
 
+  const reindexNote = (path: string): ReconcileReport => {
+    // Paths must match stored keys exactly: vault-relative, `/`-separated, no drive or root.
+    if (!isIndexablePath(path, scan) || /^([a-zA-Z]:|\/)|\\/.test(path)) {
+      throw new InvalidNotePathError(path);
+    }
+    const report: ReconcileReport = { added: [], updated: [], moved: [], deleted: [], unchanged: 0 };
+    db.exec("BEGIN");
+    try {
+      const row = q.byPath.get(path) as NoteRow | undefined;
+      let note: Loaded | undefined;
+      try {
+        const stat = statSync(join(options.vaultRoot, path));
+        note = load(path, stat.mtimeMs, stat.size);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      }
+      if (!note) {
+        if (row) {
+          q.remove.run(row.rowid);
+          q.ftsRemove.run(row.rowid);
+          linkStore.remove(row.rowid);
+          report.deleted.push(path);
+        }
+      } else if (!row) {
+        const { lastInsertRowid } = q.insert.run(...rowValues(note));
+        writeFts(lastInsertRowid, note);
+        report.added.push(path);
+      } else if (row.hash === note.hash) {
+        q.touch.run(note.path, note.mtimeMs, note.size, row.rowid);
+        report.unchanged++;
+      } else {
+        q.update.run(...rowValues(note), row.rowid);
+        writeFts(row.rowid, note);
+        report.updated.push(path);
+      }
+      if (report.added.length || report.updated.length || report.deleted.length) {
+        linkStore.resolveAll();
+      }
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+    return report;
+  };
+
   const duplicateIds = (): DuplicateId[] => {
     const groups = new Map<string, string[]>();
     for (const row of q.duplicates.all() as unknown as { note_id: string; path: string }[]) {
@@ -345,6 +403,7 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
       clear();
       return reconcile();
     },
+    reindexNote,
     search(query, { limit = 20 } = {}) {
       const match = toFtsQuery(query);
       if (!match) return [];
