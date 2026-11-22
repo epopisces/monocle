@@ -8,9 +8,15 @@ import {
   type App,
   type WorkspaceLeaf,
 } from "obsidian";
-import { DEFAULT_COMPANION_ENDPOINT } from "@monocle/contracts";
+import {
+  DEFAULT_COMPANION_ENDPOINT,
+  type Conversation,
+  type ConversationExecution,
+  type ProviderSessionInfo,
+} from "@monocle/contracts";
 import { CompanionConnection, type ConnectionState, type HealthProbe } from "./connection.js";
 import { parseCompanionEndpoint } from "./endpoint.js";
+import { ConversationClient } from "./conversation-client.js";
 import { ExecutionClient, type ExecutionHandle, type FetchLike } from "./execution-client.js";
 
 /**
@@ -22,6 +28,11 @@ const rendererFetch: FetchLike = (input, init) => window.fetch(input, init);
 const VIEW_TYPE = "monocle-panel";
 /** Host-local (per vault, per machine) key; the endpoint must not sync through the vault (D01). */
 const ENDPOINT_STORAGE_KEY = "monocle:companion-endpoint";
+/**
+ * Host-local key for the open conversation. Only the ID is kept here; the conversation itself lives in the
+ * companion's machine-local data directory and never in the vault or plugin data (D05).
+ */
+const CONVERSATION_STORAGE_KEY = "monocle:conversation-id";
 
 const requestUrlProbe: HealthProbe = async (url) => {
   const res = await requestUrl({ url, method: "GET", throw: false });
@@ -40,6 +51,14 @@ const LABELS: Record<ConnectionState["kind"], string> = {
   disconnected: "Disconnected",
   incompatible: "Incompatible companion",
 };
+
+/** How an execution relates to the provider context of earlier messages; `undefined` when there is nothing to say. */
+function describeSession(session: ProviderSessionInfo | undefined): string | undefined {
+  if (!session) return undefined;
+  if (session.continuity === "resumed") return "Continued provider session";
+  if (session.continuity === "new") return "New provider session";
+  return `Earlier context unavailable to the provider${session.reason ? `: ${session.reason}` : ""}`;
+}
 
 export default class MonoclePlugin extends Plugin {
   connection!: CompanionConnection;
@@ -73,6 +92,15 @@ export default class MonoclePlugin extends Plugin {
   setEndpoint(endpoint: string): void {
     this.app.saveLocalStorage(ENDPOINT_STORAGE_KEY, endpoint === DEFAULT_COMPANION_ENDPOINT ? null : endpoint);
     this.connect(endpoint);
+  }
+
+  storedConversationId(): string | undefined {
+    const saved: unknown = this.app.loadLocalStorage(CONVERSATION_STORAGE_KEY);
+    return typeof saved === "string" && saved ? saved : undefined;
+  }
+
+  setConversationId(id: string | undefined): void {
+    this.app.saveLocalStorage(CONVERSATION_STORAGE_KEY, id ?? null);
   }
 
   onState(listener: (s: ConnectionState) => void): () => void {
@@ -137,6 +165,11 @@ class MonoclePanelView extends ItemView {
     const detail = root.createDiv({ cls: "monocle-status-detail" });
     const error = root.createDiv({ cls: "monocle-status-error" });
 
+    const bar = root.createDiv({ cls: "monocle-conversations" });
+    const picker = bar.createEl("select", { cls: "dropdown monocle-conversation-select" });
+    const newConversation = bar.createEl("button", { cls: "monocle-new-conversation", text: "New conversation" });
+    const transcript = root.createDiv({ cls: "monocle-transcript" });
+
     const chat = root.createDiv({ cls: "monocle-chat" });
     const prompt = chat.createEl("textarea", {
       cls: "monocle-prompt",
@@ -146,6 +179,7 @@ class MonoclePanelView extends ItemView {
     const send = actions.createEl("button", { cls: "mod-cta monocle-send", text: "Send" });
     const cancel = actions.createEl("button", { cls: "monocle-cancel", text: "Cancel" });
     const meta = chat.createDiv({ cls: "monocle-execution" });
+    const execSession = chat.createDiv({ cls: "monocle-execution-session" });
     const execError = chat.createDiv({ cls: "monocle-execution-error" });
     const output = chat.createDiv({ cls: "monocle-output" });
     cancel.disabled = true;
@@ -153,28 +187,109 @@ class MonoclePanelView extends ItemView {
 
     let connected = false;
     let active: ExecutionHandle | undefined;
+    let conversationId = this.plugin.storedConversationId();
+    /** Execution shown in the live area below; the transcript lists the conversation's other executions. */
+    let liveExecutionId: string | undefined;
+    let refreshToken = 0;
     const sync = () => {
       send.disabled = !connected || active !== undefined;
       cancel.disabled = active === undefined;
+      picker.disabled = active !== undefined;
+      newConversation.disabled = active !== undefined;
     };
+    const conversationsClient = () =>
+      new ConversationClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch });
+    const adopt = (id: string | undefined) => {
+      conversationId = id;
+      this.plugin.setConversationId(id);
+    };
+    const clearLive = () => {
+      liveExecutionId = undefined;
+      output.empty();
+      delete output.dataset.state;
+      meta.setText("");
+      execSession.setText("");
+      execError.hide();
+    };
+    const renderTurn = async (execution: ConversationExecution) => {
+      const turn = transcript.createDiv({ cls: "monocle-turn", attr: { "data-status": execution.status } });
+      turn.createDiv({ cls: "monocle-turn-prompt", text: execution.prompt });
+      const response = turn.createDiv({ cls: "monocle-turn-response" });
+      if (execution.status === "completed" && execution.response !== undefined) {
+        await MarkdownRenderer.render(this.app, execution.response, response, "", this);
+      } else if (execution.response) response.setText(execution.response);
+      const details = [execution.status, execution.provider, describeSession(execution.providerSession)];
+      if (execution.status === "interrupted") details.push("the companion stopped before it finished");
+      turn.createDiv({ cls: "monocle-turn-meta", text: details.filter(Boolean).join(" · ") });
+      if (execution.error) turn.createDiv({ cls: "monocle-turn-error", text: `${execution.error.code}: ${execution.error.message}` });
+    };
+    /** Reloads the conversation list and the open conversation's transcript from the companion. */
+    const refresh = async () => {
+      if (!connected) return;
+      const token = ++refreshToken;
+      const client = conversationsClient();
+      let summaries;
+      let conversation: Conversation | undefined;
+      try {
+        summaries = await client.list();
+        conversation = summaries && conversationId !== undefined ? await client.get(conversationId) : undefined;
+      } catch {
+        return;
+      }
+      if (token !== refreshToken) return;
+      bar.toggle(summaries !== undefined);
+      if (summaries && conversationId !== undefined && !conversation && !active) adopt(undefined);
+      picker.empty();
+      picker.createEl("option", { text: "New conversation", value: "" });
+      for (const c of summaries ?? []) picker.createEl("option", { text: c.title, value: c.id });
+      picker.value = conversationId ?? "";
+      transcript.empty();
+      for (const execution of conversation?.executions ?? []) {
+        if (execution.executionId !== liveExecutionId) await renderTurn(execution);
+      }
+    };
+    picker.addEventListener("change", () => {
+      if (active) return;
+      adopt(picker.value || undefined);
+      clearLive();
+      void refresh();
+    });
+    newConversation.addEventListener("click", () => {
+      if (active) return;
+      adopt(undefined);
+      clearLive();
+      void refresh();
+    });
     const submit = async () => {
       const text = prompt.value.trim();
       if (!text || active || !connected) return;
-      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(text);
+      const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(
+        text,
+        conversationId === undefined ? {} : { conversationId },
+      );
       active = handle;
       sync();
+      // The previous live execution now belongs in the transcript.
+      liveExecutionId = undefined;
+      void refresh();
       output.empty();
       output.dataset.state = "running";
       execError.hide();
+      execSession.setText("");
       meta.setText("Starting…");
       let streamed = "";
       for await (const event of handle.events) {
         meta.dataset.executionId = event.executionId;
-        if (event.type === "started") meta.setText(`Execution ${event.executionId} · ${event.provider} · running`);
+        if (event.type === "started") {
+          liveExecutionId = event.executionId;
+          if (event.conversationId !== undefined && event.conversationId !== conversationId) adopt(event.conversationId);
+          meta.setText(`Execution ${event.executionId} · ${event.provider} · running`);
+        }
         else if (event.type === "delta") output.setText((streamed += event.text));
         else {
           meta.setText(`Execution ${event.executionId || "(not started)"} · ${event.type}`);
           output.dataset.state = event.type;
+          execSession.setText(describeSession(event.providerSession) ?? "");
           if (event.type === "completed") {
             output.empty();
             await MarkdownRenderer.render(this.app, event.text, output, "", this);
@@ -186,6 +301,7 @@ class MonoclePanelView extends ItemView {
       }
       active = undefined;
       sync();
+      void refresh();
     };
     send.addEventListener("click", () => void submit());
     cancel.addEventListener("click", () => void active?.cancel());
@@ -198,8 +314,10 @@ class MonoclePanelView extends ItemView {
     });
 
     this.unsubscribe = this.plugin.onState((s) => {
+      const wasConnected = connected;
       connected = s.kind === "connected";
       sync();
+      if (connected && !wasConnected) void refresh();
       dot.dataset.state = s.kind;
       label.setText(LABELS[s.kind]);
       detail.setText(

@@ -4,6 +4,7 @@ import type { AddressInfo } from "node:net";
 import {
   ALLOWED_CLIENT_ORIGINS,
   COMPANION_SERVICE_ID,
+  CONVERSATIONS_PATH,
   CONTRACT_VERSION,
   DEFAULT_COMPANION_HOST,
   DEFAULT_COMPANION_PORT,
@@ -14,9 +15,13 @@ import {
   isLoopbackHostname,
   isTerminalExecutionEvent,
   parseExecutionRequest,
+  type Conversation,
+  type ConversationListResponse,
   type ExecutionError,
   type HealthResponse,
+  type ProviderSessionInfo,
 } from "@monocle/contracts";
+import { ConversationStore, conversationTitle } from "@monocle/core";
 import { CopilotCliAdapter, ExecutionManager, type ProviderAdapter } from "@monocle/cravat";
 
 export interface CompanionOptions {
@@ -26,6 +31,11 @@ export interface CompanionOptions {
   readonly port?: number;
   /** Cravat provider adapter; defaults to the installed Copilot CLI. */
   readonly adapter?: ProviderAdapter;
+  /**
+   * Machine-local directory for companion state such as conversations (never the vault). Omitted: state is kept
+   * in memory and lost when the companion stops.
+   */
+  readonly dataDir?: string;
 }
 
 export interface RunningCompanion {
@@ -38,6 +48,7 @@ export interface RunningCompanion {
 /** UTF-16 prompt limit times the worst-case UTF-8 expansion, plus JSON overhead. */
 const MAX_BODY_BYTES = MAX_PROMPT_LENGTH * 4 + 4_096;
 const CANCEL_PATH = new RegExp(`^${EXECUTIONS_PATH}/([^/]+)/cancel$`);
+const CONVERSATION_PATH = new RegExp(`^${CONVERSATIONS_PATH}/([^/]+)$`);
 
 function hostnameOf(hostHeader: string | undefined): string | undefined {
   if (!hostHeader) return undefined;
@@ -68,6 +79,40 @@ async function readBody(req: IncomingMessage): Promise<string> {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+interface ResumePlan {
+  /** Provider session to continue, when the previous one belongs to the current provider. */
+  readonly resumeId?: string;
+  /** Why earlier context cannot be carried over, when the conversation has earlier executions. */
+  readonly unavailable?: string;
+}
+
+/** Decides how a new execution relates to the provider context of earlier executions in its conversation. */
+function planResume(conversation: Conversation, providerId: string): ResumePlan {
+  if (conversation.executions.length === 0) return {};
+  const previous = [...conversation.executions].reverse().find((e) => e.providerSession?.id !== undefined);
+  if (!previous) return { unavailable: "no provider session was recorded for earlier messages" };
+  if (previous.provider !== providerId) {
+    return { unavailable: `provider changed from ${previous.provider} to ${providerId}` };
+  }
+  return { resumeId: previous.providerSession!.id! };
+}
+
+/** Combines the adapter's report with what the companion asked for into the recorded session outcome. */
+function sessionOutcome(plan: ResumePlan, reported: ProviderSessionInfo | undefined): ProviderSessionInfo | undefined {
+  if (reported?.continuity === "unavailable") return reported;
+  if (plan.unavailable !== undefined) {
+    return { ...(reported?.id !== undefined && { id: reported.id }), continuity: "unavailable", reason: plan.unavailable };
+  }
+  if (plan.resumeId !== undefined && reported?.continuity !== "resumed") {
+    return {
+      ...(reported?.id !== undefined && { id: reported.id }),
+      continuity: "unavailable",
+      reason: `provider did not confirm resuming session ${plan.resumeId}`,
+    };
+  }
+  return reported;
+}
+
 /** Starts the companion's loopback HTTP endpoint. Its lifetime is owned by the caller, never by Obsidian. */
 export async function startCompanion(options: CompanionOptions = {}): Promise<RunningCompanion> {
   const host = options.host ?? DEFAULT_COMPANION_HOST;
@@ -84,6 +129,10 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     startedAt: new Date().toISOString(),
   };
   const cravat = new ExecutionManager({ adapter: options.adapter ?? new CopilotCliAdapter(), instanceId: health.instanceId });
+  const conversations = await ConversationStore.open({
+    instanceId: health.instanceId,
+    ...(options.dataDir !== undefined && { dir: options.dataDir }),
+  });
 
   async function startExecution(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // Requiring JSON forces a CORS preflight for browser callers, so a web page cannot fire a "simple" POST.
@@ -100,8 +149,30 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     const parsed = parseExecutionRequest(body);
     if (!parsed.ok) return sendError(res, 400, { code: "invalid_request", message: parsed.error });
 
-    const execution = cravat.start(parsed.request);
+    const { prompt, conversationId } = parsed.request;
+    let conversation;
+    if (conversationId === undefined) {
+      conversation = conversations.create(conversationTitle(prompt));
+    } else {
+      conversation = conversations.get(conversationId);
+      if (!conversation) return sendError(res, 404, { code: "invalid_request", message: `unknown conversation ${conversationId}` });
+      if (conversations.running(conversationId)) {
+        return sendError(res, 409, { code: "invalid_request", message: "this conversation already has a running execution" });
+      }
+    }
+
+    const plan = planResume(conversation, cravat.providerId);
+    const execution = cravat.start(parsed.request, plan.resumeId !== undefined ? { resumeProviderSessionId: plan.resumeId } : {});
+    conversations.beginExecution(conversation.id, {
+      executionId: execution.id,
+      provider: cravat.providerId,
+      instanceId: health.instanceId,
+      startedAt: new Date().toISOString(),
+      prompt,
+      contextReferences: [],
+    });
     let terminal = false;
+    let streamed = "";
     // Closing the stream early (panel closed, client aborted) cancels the work instead of orphaning it.
     res.once("close", () => {
       if (!terminal) cravat.cancel(execution.id);
@@ -111,8 +182,20 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
       "cache-control": "no-store",
       "x-content-type-options": "nosniff",
     });
-    for await (const event of execution.events) {
-      if (isTerminalExecutionEvent(event)) terminal = true;
+    for await (let event of execution.events) {
+      if (event.type === "started") event = { ...event, conversationId: conversation.id };
+      else if (event.type === "delta") streamed += event.text;
+      else if (isTerminalExecutionEvent(event)) {
+        terminal = true;
+        const providerSession = sessionOutcome(plan, event.providerSession);
+        if (providerSession) event = { ...event, providerSession };
+        conversations.finishExecution(conversation.id, execution.id, {
+          status: event.type,
+          ...(providerSession && { providerSession }),
+          ...(event.type === "completed" ? { response: event.text } : streamed && { response: streamed }),
+          ...(event.type === "failed" && { error: event.error }),
+        });
+      }
       if (!res.writableEnded && !res.destroyed) res.write(`${JSON.stringify(event)}\n`);
     }
     res.end();
@@ -143,6 +226,14 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
 
     const path = new URL(req.url ?? "/", "http://localhost").pathname;
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
+    if (req.method === "GET" && path === CONVERSATIONS_PATH) {
+      return sendJson(res, 200, { conversations: conversations.list() } satisfies ConversationListResponse);
+    }
+    const conversationMatch = req.method === "GET" ? CONVERSATION_PATH.exec(path) : null;
+    if (conversationMatch) {
+      const conversation = conversations.get(decodeURIComponent(conversationMatch[1]!));
+      return conversation ? sendJson(res, 200, conversation) : sendJson(res, 404, { error: "no conversation with that ID" });
+    }
     if (req.method === "POST" && path === EXECUTIONS_PATH) {
       startExecution(req, res).catch((err: unknown) => {
         if (!res.headersSent) sendError(res, 500, { code: "provider_error", message: String(err) });
@@ -179,6 +270,6 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
         cravat.cancelAll();
         server.close((err) => (err ? reject(err) : resolve()));
         server.closeAllConnections();
-      }),
+      }).then(() => conversations.close()),
   };
 }

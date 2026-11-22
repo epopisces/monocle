@@ -74,3 +74,46 @@
 .monocle-panel .monocle-output[data-state="completed"] {
   white-space: normal;
 }
+
+.monocle-panel .monocle-conversations {
+  display: flex;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
+.monocle-panel .monocle-conversation-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.monocle-panel .monocle-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-3);
+  margin-top: var(--size-4-3);
+}
+
+.monocle-panel .monocle-turn {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: var(--size-4-2);
+}
+
+.monocle-panel .monocle-turn-prompt {
+  font-weight: var(--font-semibold);
+  white-space: pre-wrap;
+}
+
+.monocle-panel .monocle-turn-response {
+  user-select: text;
+}
+
+.monocle-panel .monocle-turn-meta,
+.monocle-panel .monocle-execution-session {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.monocle-panel .monocle-turn-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+}

@@ -6,6 +6,7 @@ export const CONTRACT_VERSION = "0.2.0";
 
 export * from "./companion.js";
 export * from "./execution.js";
+export * from "./conversation.js";
 
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 

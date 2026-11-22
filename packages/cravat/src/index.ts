@@ -8,6 +8,8 @@ export {
   type ExecutionManagerOptions,
   type ProviderAdapter,
   type ProviderEvent,
+  type ProviderRunOptions,
+  type StartOptions,
 } from "./execution-manager.js";
 export { CopilotCliAdapter, type CopilotCliAdapterOptions } from "./copilot-cli-adapter.js";
 

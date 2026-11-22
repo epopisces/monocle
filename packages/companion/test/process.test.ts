@@ -1,13 +1,18 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { HEALTH_PATH, isHealthResponse, type HealthResponse } from "@monocle/contracts";
 
 const repoRoot = fileURLToPath(new URL("../../../", import.meta.url));
 const cli = fileURLToPath(new URL("../dist/cli.js", import.meta.url));
 const children: ChildProcess[] = [];
+// Keeps the spawned companion away from the operator's real data directory.
+const dataDir = mkdtempSync(join(tmpdir(), "monocle-process-"));
+afterAll(() => rmSync(dataDir, { recursive: true, force: true }));
 
 beforeAll(() => {
   // The smoke test runs the real built entry point, as an operator would.
@@ -22,7 +27,10 @@ afterEach(() => {
 });
 
 function launch(port: number): Promise<{ child: ChildProcess; url: string }> {
-  const child = spawn(process.execPath, [cli, "--port", String(port)], { stdio: ["ignore", "pipe", "inherit"] });
+  const child = spawn(process.execPath, [cli, "--port", String(port)], {
+    stdio: ["ignore", "pipe", "inherit"],
+    env: { ...process.env, MONOCLE_DATA_DIR: dataDir },
+  });
   children.push(child);
   return new Promise((resolve, reject) => {
     child.once("exit", (code) => reject(new Error(`companion exited early with ${code}`)));

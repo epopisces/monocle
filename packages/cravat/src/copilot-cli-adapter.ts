@@ -1,10 +1,11 @@
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ExecutionRequest } from "@monocle/contracts";
-import { ProviderError, type ProviderAdapter, type ProviderEvent } from "./execution-manager.js";
+import { ProviderError, type ProviderAdapter, type ProviderEvent, type ProviderRunOptions } from "./execution-manager.js";
 
 export interface CopilotCliAdapterOptions {
   /** Copilot executable. Defaults to `MONOCLE_COPILOT_PATH`, else `copilot` on PATH. Must be a real executable, not a `.cmd` shim. */
@@ -30,6 +31,14 @@ const CLI_FLAGS = [
 ] as const;
 
 const STDERR_LIMIT = 4_096;
+/** What CLI 1.0.104 prints (then exits 1, before any JSON output) when `--resume=<id>` matches no session. */
+const SESSION_NOT_FOUND = /No session, task, or name matched/i;
+
+/** The requested session could not be resumed; the run produced no output and may be retried fresh. */
+class SessionUnavailable extends Error {}
+
+/** Per-run session flag: start a new session with a known ID, or resume an existing one. */
+type SessionTarget = { readonly kind: "new"; readonly id: string } | { readonly kind: "resume"; readonly id: string };
 
 function killTree(pid: number | undefined): void {
   if (pid === undefined) return;
@@ -63,11 +72,35 @@ export class CopilotCliAdapter implements ProviderAdapter {
     this.env = options.env ?? {};
   }
 
-  async *run(request: ExecutionRequest, signal: AbortSignal): AsyncIterable<ProviderEvent> {
+  /**
+   * Every run uses a Copilot session whose ID it reports, so a later run can pass it as `resumeSessionId` to
+   * continue with the provider's own memory of earlier turns. If that session no longer exists (deleted, or a
+   * different machine), the run starts a fresh session and reports `continuity: "unavailable"`.
+   */
+  async *run(request: ExecutionRequest, signal: AbortSignal, options: ProviderRunOptions = {}): AsyncIterable<ProviderEvent> {
+    if (options.resumeSessionId !== undefined) {
+      try {
+        yield* this.runOnce(request, signal, { kind: "resume", id: options.resumeSessionId });
+        return;
+      } catch (err) {
+        if (!(err instanceof SessionUnavailable)) throw err;
+        const id = randomUUID();
+        yield { type: "session", id, continuity: "unavailable", reason: err.message };
+        yield* this.runOnce(request, signal, { kind: "new", id });
+        return;
+      }
+    }
+    const id = randomUUID();
+    yield { type: "session", id, continuity: "new" };
+    yield* this.runOnce(request, signal, { kind: "new", id });
+  }
+
+  private async *runOnce(request: ExecutionRequest, signal: AbortSignal, session: SessionTarget): AsyncIterable<ProviderEvent> {
     if (signal.aborted) return;
     // Empty scratch cwd: Copilot loads no repository instructions/config from wherever the companion runs.
     const cwd = mkdtempSync(join(tmpdir(), "cravat-copilot-"));
-    const child = spawn(this.command, [...this.args, ...CLI_FLAGS], {
+    const sessionFlag = session.kind === "resume" ? `--resume=${session.id}` : `--session-id=${session.id}`;
+    const child = spawn(this.command, [...this.args, ...CLI_FLAGS, sessionFlag], {
       cwd,
       env: { ...process.env, ...this.env },
       stdio: ["pipe", "pipe", "pipe"],
@@ -94,6 +127,7 @@ export class CopilotCliAdapter implements ProviderAdapter {
     const streamed = new Set<string>();
     let emittedAny = false;
     let lastMessageId: string | undefined;
+    let sawOutput = false;
     const separate = (messageId: string | undefined): ProviderEvent | undefined => {
       const needed = emittedAny && messageId !== lastMessageId;
       lastMessageId = messageId;
@@ -108,6 +142,11 @@ export class CopilotCliAdapter implements ProviderAdapter {
           event = JSON.parse(line) as CliEvent;
         } catch {
           continue;
+        }
+        if (!sawOutput) {
+          sawOutput = true;
+          // The CLI only starts emitting JSON once it has loaded the session.
+          if (session.kind === "resume") yield { type: "session", id: session.id, continuity: "resumed" };
         }
         if (event.type === "assistant.message_delta" && event.data?.deltaContent) {
           const sep = separate(event.data.messageId);
@@ -131,6 +170,10 @@ export class CopilotCliAdapter implements ProviderAdapter {
       if (signal.aborted) return;
       if (launchError) {
         throw new ProviderError("launch_failed", `could not start Copilot CLI "${this.command}": ${launchError.message}`);
+      }
+      if (session.kind === "resume" && !sawOutput && SESSION_NOT_FOUND.test(stderr)) {
+        const detail = stderr.trim().split(/\r?\n/, 1)[0]!.replace(/^Error:\s*/, "");
+        throw new SessionUnavailable(`Copilot CLI session ${session.id} could not be resumed: ${detail}`);
       }
       const failedCode = resultExitCode !== undefined && resultExitCode !== 0 ? resultExitCode : code !== 0 ? code : undefined;
       if (failedCode !== undefined || streamError) {

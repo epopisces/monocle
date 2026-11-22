@@ -14,6 +14,11 @@ export interface ExecutionClientOptions {
   readonly fetch: FetchLike;
 }
 
+export interface ExecuteOptions {
+  /** Continue this companion conversation; omitted starts a new one (see `started.conversationId`). */
+  readonly conversationId?: string;
+}
+
 export interface ExecutionHandle {
   /** Known once the `started` event arrives. */
   readonly executionId: string | undefined;
@@ -50,7 +55,7 @@ export class ExecutionClient {
     this.fetch = options.fetch;
   }
 
-  execute(prompt: string): ExecutionHandle {
+  execute(prompt: string, options: ExecuteOptions = {}): ExecutionHandle {
     const controller = new AbortController();
     const client = this;
     let executionId: string | undefined;
@@ -66,7 +71,7 @@ export class ExecutionClient {
         res = await client.fetch(new URL(EXECUTIONS_PATH, client.endpoint).href, {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ prompt }),
+          body: JSON.stringify({ prompt, ...(options.conversationId !== undefined && { conversationId: options.conversationId }) }),
           signal: controller.signal,
         });
       } catch (err) {

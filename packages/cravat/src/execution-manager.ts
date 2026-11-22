@@ -1,16 +1,33 @@
 import { randomUUID } from "node:crypto";
-import type { ExecutionError, ExecutionErrorCode, ExecutionEvent, ExecutionRequest } from "@monocle/contracts";
+import type {
+  ExecutionError,
+  ExecutionErrorCode,
+  ExecutionEvent,
+  ExecutionRequest,
+  ProviderSessionInfo,
+} from "@monocle/contracts";
 
-/** Output a provider adapter produces while running. */
-export type ProviderEvent = { readonly type: "delta"; readonly text: string };
+/**
+ * Output a provider adapter produces while running. Adapters that keep their own sessions report the session
+ * they ran in with a `session` event (the last one wins).
+ */
+export type ProviderEvent =
+  | { readonly type: "delta"; readonly text: string }
+  | ({ readonly type: "session"; readonly id: string } & Omit<ProviderSessionInfo, "id">);
+
+export interface ProviderRunOptions {
+  /** Provider session (from an earlier run's `session` event) to continue, so the provider keeps that context. */
+  readonly resumeSessionId?: string;
+}
 
 /**
  * A provider runtime behind Cravat (D04). `run` streams output and must stop work promptly when `signal`
- * aborts; it reports failures by throwing, preferably a {@link ProviderError}.
+ * aborts; it reports failures by throwing, preferably a {@link ProviderError}. Adapters without sessions may
+ * ignore `options`.
  */
 export interface ProviderAdapter {
   readonly id: string;
-  run(request: ExecutionRequest, signal: AbortSignal): AsyncIterable<ProviderEvent>;
+  run(request: ExecutionRequest, signal: AbortSignal, options?: ProviderRunOptions): AsyncIterable<ProviderEvent>;
 }
 
 export class ProviderError extends Error {
@@ -35,6 +52,11 @@ export interface ExecutionManagerOptions {
   readonly instanceId: string;
   /** How long to wait for an aborted provider to stop before forcing the `cancelled` terminal state. */
   readonly cancelGraceMs?: number;
+}
+
+export interface StartOptions {
+  /** Passed to the adapter as {@link ProviderRunOptions.resumeSessionId}. */
+  readonly resumeProviderSessionId?: string;
 }
 
 type Payload<E = ExecutionEvent> = E extends ExecutionEvent ? Omit<E, "executionId" | "seq"> : never;
@@ -119,7 +141,7 @@ export class ExecutionManager {
     return this.adapter.id;
   }
 
-  start(request: ExecutionRequest): Execution {
+  start(request: ExecutionRequest, options: StartOptions = {}): Execution {
     const queue = new EventQueue();
     const execution = new RunningExecution(randomUUID(), queue, () => this.running.delete(execution.id));
     this.running.set(execution.id, execution);
@@ -129,7 +151,7 @@ export class ExecutionManager {
       instanceId: this.instanceId,
       startedAt: new Date().toISOString(),
     });
-    void this.drive(execution, request);
+    void this.drive(execution, request, options);
     return { id: execution.id, events: queue.drain() };
   }
 
@@ -148,18 +170,28 @@ export class ExecutionManager {
     for (const id of [...this.running.keys()]) this.cancel(id);
   }
 
-  private async drive(execution: RunningExecution, request: ExecutionRequest): Promise<void> {
+  private async drive(execution: RunningExecution, request: ExecutionRequest, options: StartOptions): Promise<void> {
     const { signal } = execution.controller;
+    const runOptions = options.resumeProviderSessionId === undefined ? {} : { resumeSessionId: options.resumeProviderSessionId };
     let text = "";
+    let providerSession: ProviderSessionInfo | undefined;
+    const withSession = () => (providerSession ? { providerSession } : {});
     try {
-      for await (const event of this.adapter.run(request, signal)) {
+      for await (const event of this.adapter.run(request, signal, runOptions)) {
         if (signal.aborted || execution.done) break;
+        if (event.type === "session") {
+          const { type: _type, ...info } = event;
+          providerSession = info;
+          continue;
+        }
         text += event.text;
         execution.emit({ type: "delta", text: event.text });
       }
-      execution.finish(signal.aborted ? { type: "cancelled" } : { type: "completed", text });
+      execution.finish(signal.aborted ? { type: "cancelled", ...withSession() } : { type: "completed", text, ...withSession() });
     } catch (err) {
-      execution.finish(signal.aborted ? { type: "cancelled" } : { type: "failed", error: toExecutionError(err) });
+      execution.finish(
+        signal.aborted ? { type: "cancelled", ...withSession() } : { type: "failed", error: toExecutionError(err), ...withSession() },
+      );
     }
   }
 }
