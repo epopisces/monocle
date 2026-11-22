@@ -4,6 +4,8 @@
  */
 export const CONTRACT_VERSION = "0.1.0";
 
+export * from "./companion.js";
+
 const SEMVER = /^(\d+)\.(\d+)\.(\d+)$/;
 
 function parse(version: string): [number, number, number] | undefined {

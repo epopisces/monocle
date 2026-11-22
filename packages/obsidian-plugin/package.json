@@ -19,6 +19,7 @@
     "@monocle/contracts": "0.0.0"
   },
   "devDependencies": {
+    "esbuild": "^0.25.12",
     "obsidian": "^1.7.2"
   }
 }

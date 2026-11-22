@@ -2,11 +2,14 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { extractLinks, type ExtractedLink } from "./links.js";
 import { frontmatterText, noteId, noteTitle, parseNote } from "./markdown.js";
+import { matchesFilter, type NoteFilter } from "./metadata.js";
+import { createLinkStore, type NoteLink } from "./relationships.js";
 import { isIndexablePath, scanVault, type ScanOptions } from "./scan.js";
 
 /** Bump when the on-disk schema or derived content changes; a mismatch forces a rebuild from Markdown. */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 export interface NoteIndexOptions {
   /** Absolute path of the vault root (authoritative Markdown). */
@@ -96,6 +99,14 @@ export interface NoteIndex {
    * Reflects the index as of the last reconcile, so callers should reconcile first.
    */
   assertNoteIdAvailable(id: string, path: string): void;
+  /** Notes whose metadata matches every condition of `filter`, ordered by path. */
+  findNotes(filter: NoteFilter): IndexedNote[];
+  /** Explicit links written in the note at `path` (body wikilinks/embeds and wikilink-valued frontmatter), in order. */
+  links(path: string): NoteLink[];
+  /** Resolved explicit links from other notes (or itself) that point to the note at `path`. */
+  backlinks(path: string): NoteLink[];
+  /** Unresolved and ambiguous links across the vault (missing attachments are not included). */
+  brokenLinks(): NoteLink[];
   close(): void;
 }
 
@@ -164,8 +175,10 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
     excludeFolders: [...scan.excludeFolders].sort(),
   });
   const stored = db.prepare("SELECT value FROM meta WHERE key = 'fingerprint'").get() as { value: string } | undefined;
+  const linkStore = createLinkStore(db);
   const clear = (): void => {
     db.exec("DELETE FROM notes; DELETE FROM notes_fts;");
+    linkStore.clear();
   };
   if (stored?.value !== fingerprint) {
     clear();
@@ -211,6 +224,7 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
     frontmatter: Record<string, unknown>;
     frontmatterError: string | null;
     body: string;
+    links: ExtractedLink[];
   }
 
   const load = (path: string, mtimeMs: number, size: number): Loaded | undefined => {
@@ -221,7 +235,8 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       throw error;
     }
-    const parsed = parseNote(bytes.toString("utf8"));
+    const content = bytes.toString("utf8");
+    const parsed = parseNote(content);
     return {
       path,
       mtimeMs,
@@ -232,12 +247,14 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
       frontmatter: parsed.frontmatter,
       frontmatterError: parsed.frontmatterError,
       body: parsed.body,
+      links: extractLinks(content, parsed),
     };
   };
 
   const writeFts = (rowid: number | bigint, note: Loaded): void => {
     q.ftsRemove.run(rowid);
     q.ftsInsert.run(rowid, note.title, frontmatterText(note.frontmatter), note.body);
+    linkStore.replace(rowid, note.links);
   };
 
   const rowValues = (n: Loaded) =>
@@ -297,7 +314,11 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
       for (const row of vanished) {
         q.remove.run(row.rowid);
         q.ftsRemove.run(row.rowid);
+        linkStore.remove(row.rowid);
         report.deleted.push(row.path);
+      }
+      if (report.added.length || report.updated.length || report.moved.length || report.deleted.length) {
+        linkStore.resolveAll();
       }
       db.exec("COMMIT");
     } catch (error) {
@@ -346,6 +367,10 @@ export function openNoteIndex(options: NoteIndexOptions): NoteIndex {
       const conflicts = (q.byId.all(id) as unknown as NoteRow[]).map((r) => r.path).filter((p) => p !== path);
       if (conflicts.length > 0) throw new DuplicateNoteIdError(id, conflicts);
     },
+    findNotes: (filter) => (q.all.all() as unknown as NoteRow[]).map(toNote).filter((n) => matchesFilter(n, filter)),
+    links: (path) => linkStore.outgoing(path),
+    backlinks: (path) => linkStore.incoming(path),
+    brokenLinks: () => linkStore.problems(),
     close: () => db.close(),
   };
 }

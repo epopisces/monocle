@@ -1,6 +1,14 @@
 /** Monocle for Obsidian. Talks to the companion only through @monocle/contracts. */
 import { CONTRACT_VERSION, type PackageDescriptor } from "@monocle/contracts";
 
+export {
+  CompanionConnection,
+  type CompanionConnectionOptions,
+  type ConnectionState,
+  type HealthProbe,
+} from "./connection.js";
+export { parseCompanionEndpoint, type EndpointResult } from "./endpoint.js";
+
 export const packageDescriptor: PackageDescriptor = {
   name: "@monocle/obsidian-plugin",
   role: "client",
