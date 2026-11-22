@@ -1,3 +1,5 @@
+import type { ProviderSessionInfo } from "./conversation.js";
+
 /**
  * Monocle → Cravat execution contract (since contract 0.2.0).
  *
@@ -57,6 +59,11 @@ export interface ExecutionRequest {
   readonly prompt: string;
   /** Monocle vault context for this execution (since 0.2.x). */
   readonly context?: ExecutionContext;
+  /**
+   * Conversation to attach this execution to (see `conversation.ts`). Omitted: the companion starts a new
+   * conversation and reports its ID on the `started` event.
+   */
+  readonly conversationId?: string;
   /** Provider execution options (since 0.2.x). Omitted settings use the provider's defaults. */
   readonly settings?: ExecutionSettings;
 }
@@ -125,6 +132,11 @@ interface EventBase {
   readonly seq: number;
 }
 
+interface TerminalBase extends EventBase {
+  /** Provider runtime session this execution ran in, when the provider reports one. */
+  readonly providerSession?: ProviderSessionInfo;
+}
+
 export type ExecutionEvent =
   | (EventBase & {
       readonly type: "started";
@@ -133,13 +145,15 @@ export type ExecutionEvent =
       /** Companion `instanceId` (see health); a different value after restart means this execution is lost. */
       readonly instanceId: string;
       readonly startedAt: string;
+      /** Conversation the companion recorded this execution in (absent from companions before IMM-50). */
+      readonly conversationId?: string;
       /** Settings applied to this execution, when any were requested. */
       readonly settings?: ExecutionSettings;
     })
   | (EventBase & { readonly type: "delta"; readonly text: string })
-  | (EventBase & { readonly type: "completed"; readonly text: string })
-  | (EventBase & { readonly type: "failed"; readonly error: ExecutionError })
-  | (EventBase & { readonly type: "cancelled" });
+  | (TerminalBase & { readonly type: "completed"; readonly text: string })
+  | (TerminalBase & { readonly type: "failed"; readonly error: ExecutionError })
+  | (TerminalBase & { readonly type: "cancelled" });
 
 export type TerminalExecutionEvent = Extract<ExecutionEvent, { type: "completed" | "failed" | "cancelled" }>;
 
@@ -147,9 +161,16 @@ export function isTerminalExecutionEvent(event: ExecutionEvent): event is Termin
   return event.type === "completed" || event.type === "failed" || event.type === "cancelled";
 }
 
+/** Conversation IDs are companion-issued UUIDs; also keeps them safe to use as file names. */
+const CONVERSATION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isConversationId(value: string): boolean {
+  return CONVERSATION_ID.test(value);
+}
+
 export type ExecutionRequestResult = { ok: true; request: ExecutionRequest } | { ok: false; error: string };
 
-const REQUEST_FIELDS = new Set(["prompt", "settings", "context"]);
+const REQUEST_FIELDS = new Set(["prompt", "conversationId", "settings", "context"]);
 
 function parseSettings(value: unknown): { ok: true; settings: ExecutionSettings } | { ok: false; error: string } {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -179,10 +200,18 @@ export function parseExecutionRequest(value: unknown): ExecutionRequestResult {
   }
   const unknownKeys = Object.keys(value).filter((k) => !REQUEST_FIELDS.has(k));
   if (unknownKeys.length > 0) return { ok: false, error: `unsupported request fields: ${unknownKeys.join(", ")}` };
-  const { prompt, settings, context } = value as { prompt?: unknown; settings?: unknown; context?: unknown };
+  const { prompt, conversationId, settings, context } = value as {
+    prompt?: unknown;
+    conversationId?: unknown;
+    settings?: unknown;
+    context?: unknown;
+  };
   if (typeof prompt !== "string" || prompt.trim() === "") return { ok: false, error: "prompt must be a non-empty string" };
   if (prompt.length > MAX_PROMPT_LENGTH) return { ok: false, error: `prompt exceeds ${MAX_PROMPT_LENGTH} characters` };
-  let request: { prompt: string; settings?: ExecutionSettings; context?: ExecutionContext } = { prompt };
+  if (conversationId !== undefined && (typeof conversationId !== "string" || !CONVERSATION_ID.test(conversationId))) {
+    return { ok: false, error: "conversationId must be a conversation ID returned by the companion" };
+  }
+  let request: ExecutionRequest = { prompt, ...(conversationId !== undefined && { conversationId }) };
   if (settings !== undefined) {
     const parsed = parseSettings(settings);
     if (!parsed.ok) return parsed;

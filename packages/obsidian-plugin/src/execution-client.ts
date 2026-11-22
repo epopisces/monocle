@@ -21,6 +21,8 @@ export interface ExecutionClientOptions {
 export interface ExecuteOptions {
   /** Note context the user chose to share (IMM-48). */
   readonly context?: ExecutionContext | undefined;
+  /** Continue this companion conversation; omitted starts a new one (see `started.conversationId`). */
+  readonly conversationId?: string;
 }
 
 export interface ExecutionHandle {
@@ -98,6 +100,7 @@ export class ExecutionClient {
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
             prompt,
+            ...(options.conversationId !== undefined && { conversationId: options.conversationId }),
             ...(settings && Object.keys(settings).length > 0 && { settings }),
             ...(context && { context }),
           }),

@@ -20,6 +20,7 @@ export * from "./semantic/retriever.js";
 export * from "./vault-tools/vault-reader.js";
 export * from "./vault-tools/tools.js";
 export * from "./vault-tools/mcp-server.js";
+export * from "./conversations/conversation-store.js";
 export * from "./index-service.js";
 export type { ExtractedLink, LinkKind, SourceLocation } from "./note-index/links.js";
 export type { LinkMatch, LinkStatus, NoteLink, NoteRef } from "./note-index/relationships.js";

@@ -5,7 +5,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { EXECUTIONS_PATH, type ExecutionEvent, type ExecutionRequest } from "@monocle/contracts";
+import {
+  conversationPath,
+  EXECUTIONS_PATH,
+  type Conversation,
+  type ExecutionEvent,
+  type ExecutionRequest,
+} from "@monocle/contracts";
 import { startCompanion, type RunningCompanion } from "@monocle/companion";
 import { CopilotCliAdapter, type ExecutionToolset, type ProviderAdapter } from "@monocle/cravat";
 
@@ -119,6 +125,29 @@ describe("execution context", () => {
     expect(request.prompt).toContain("2026-01 Adopt Fixture Vaults.md");
     const args = tools!.mcpServers[0]!.args;
     expect(args).toEqual(expect.arrayContaining(["--exclude=projects", "--exclude=people/Ada Example.md"]));
+  });
+
+  it("records what context was shared on the conversation, as references only", async () => {
+    running = await startCompanion({ port: 0, adapter: capturing(), vault: { root: vault } });
+    const { events } = await execute({
+      prompt: "q",
+      context: {
+        activeNote: { path: "people/Ada Example.md", content: "secret-body", selection: "secret-sel" },
+        include: ["projects/Project Lantern.md", "work/2026-01 Adopt Fixture Vaults.md"],
+        exclude: ["projects"],
+      },
+    });
+    const started = events[0];
+    if (started?.type !== "started") throw new Error("no started event");
+    const res = await fetch(new URL(conversationPath(started.conversationId!), running.url));
+    const conversation = (await res.json()) as Conversation;
+    const recorded = conversation.executions[0]!.contextReferences;
+    expect(recorded).toEqual([
+      { kind: "note", path: "people/Ada Example.md", label: "Active note" },
+      { kind: "selection", path: "people/Ada Example.md", label: "Selection" },
+      { kind: "note", path: "work/2026-01 Adopt Fixture Vaults.md", label: "Included note" },
+    ]);
+    expect(JSON.stringify(conversation)).not.toMatch(/secret-body|secret-sel|Project Lantern/);
   });
 
   it("rejects included paths that escape the vault, and includes without a configured vault", async () => {

@@ -3,6 +3,8 @@
 // Behaviour is selected by FAKE_COPILOT_MODE: stream | args | fail | result-error | hang. Without it, a prompt
 // containing "[hang]" hangs, "[args]" echoes the CLI arguments and anything else streams (used by the Obsidian
 // smoke test). `--help` / `help config` print help excerpts used for capability discovery.
+// Like the real CLI, `--resume=<id>` fails fast when <id> starts with "missing"; `result.sessionId` echoes the
+// `--session-id`/`--resume` value, and in stream mode a prompt containing "[session]" is answered with that ID.
 // In stream mode, each `[tool:<server>-<tool> {json args}]` in the prompt is "called" like the real CLI would:
 // only if listed by --available-tools, via the stdio MCP server configured with --additional-mcp-config.
 import { spawn } from "node:child_process";
@@ -37,6 +39,14 @@ if (argv[0] === "help" && argv[1] === "config") {
 `);
   process.exit(0);
 }
+
+const flag = (name) => argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+const resume = flag("resume");
+if (resume?.startsWith("missing")) {
+  process.stderr.write(`Error: No session, task, or name matched '${resume}'.\n\nTo resume by session or task ID:  copilot --resume=<id>\n`);
+  process.exit(1);
+}
+const sessionId = resume ?? flag("session-id") ?? "fake-session";
 
 let prompt = "";
 stdin.setEncoding("utf8");
@@ -75,6 +85,11 @@ process.stdout.write("not json noise\n");
 
 switch (mode) {
   case "stream": {
+    if (prompt.includes("[session]")) {
+      delta("m1", `session: ${sessionId}`);
+      emit({ type: "result", exitCode: 0, sessionId });
+      break;
+    }
     delta("m1", "echo: ");
     delta("m1", prompt);
     let toolText = "";
@@ -83,7 +98,7 @@ switch (mode) {
     }
     if (toolText) delta("m1", toolText);
     emit({ type: "assistant.message", data: { messageId: "m1", content: `echo: ${prompt}${toolText}` } });
-    emit({ type: "result", exitCode: 0, sessionId: "fake-session" });
+    emit({ type: "result", exitCode: 0, sessionId });
     break;
   }
   case "args":

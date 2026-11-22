@@ -113,4 +113,21 @@ describe("Cravat execution manager", () => {
     }
     expect(types).toEqual(["started", "delta", "cancelled"]);
   });
+
+  it("passes a provider session to resume and reports the session the provider ran in", async () => {
+    const seen: (string | undefined)[] = [];
+    const adapter: ProviderAdapter = {
+      id: "fake",
+      async *run(_req, _signal, options) {
+        seen.push(options?.resumeSessionId);
+        yield { type: "session", id: "s-1", continuity: "resumed" };
+        yield { type: "delta", text: "ok" };
+      },
+    };
+    const cravat = new ExecutionManager({ adapter, instanceId: "i" });
+    const events = await collect(cravat.start({ prompt: "x" }, { resumeProviderSessionId: "s-1" }).events);
+    expect(seen).toEqual(["s-1"]);
+    expect(events.map((e) => e.type)).toEqual(["started", "delta", "completed"]);
+    expect(events.at(-1)).toMatchObject({ text: "ok", providerSession: { id: "s-1", continuity: "resumed" } });
+  });
 });

@@ -6,15 +6,29 @@ import {
   type ExecutionErrorCode,
   type ExecutionEvent,
   type ExecutionRequest,
+  type ProviderSessionInfo,
   type ProviderSettingCapabilities,
 } from "@monocle/contracts";
 
-/** Output a provider adapter produces while running. */
-export type ProviderEvent = { readonly type: "delta"; readonly text: string };
+/**
+ * Output a provider adapter produces while running. Adapters that keep their own sessions report the session
+ * they ran in with a `session` event (the last one wins).
+ */
+export type ProviderEvent =
+  | { readonly type: "delta"; readonly text: string }
+  | ({ readonly type: "session"; readonly id: string } & Omit<ProviderSessionInfo, "id">);
+
+export interface ProviderRunOptions {
+  /** Provider session (from an earlier run's `session` event) to continue, so the provider keeps that context. */
+  readonly resumeSessionId?: string;
+  /** The only capability the agent gets; without it the agent runs with no tools at all. */
+  readonly tools?: ExecutionToolset | undefined;
+}
 
 /**
  * A provider runtime behind Cravat (D04). `run` streams output and must stop work promptly when `signal`
- * aborts; it reports failures by throwing, preferably a {@link ProviderError}.
+ * aborts; it reports failures by throwing, preferably a {@link ProviderError}. Adapters without sessions may
+ * ignore `options`.
  */
 export interface ProviderAdapter {
   readonly id: string;
@@ -41,15 +55,6 @@ export interface ExecutionToolset {
   readonly mcpServers: readonly McpToolServer[];
 }
 
-export interface ProviderRunOptions {
-  /** The only capability the agent gets; without it the agent runs with no tools at all. */
-  readonly tools?: ExecutionToolset | undefined;
-}
-
-export interface StartOptions {
-  readonly tools?: ExecutionToolset | undefined;
-}
-
 export class ProviderError extends Error {
   constructor(
     readonly code: Exclude<ExecutionErrorCode, "invalid_request" | "connection_lost">,
@@ -72,6 +77,13 @@ export interface ExecutionManagerOptions {
   readonly instanceId: string;
   /** How long to wait for an aborted provider to stop before forcing the `cancelled` terminal state. */
   readonly cancelGraceMs?: number;
+}
+
+export interface StartOptions {
+  /** Passed to the adapter as {@link ProviderRunOptions.resumeSessionId}. */
+  readonly resumeProviderSessionId?: string;
+  /** Passed to the adapter as {@link ProviderRunOptions.tools}. */
+  readonly tools?: ExecutionToolset | undefined;
 }
 
 type Payload<E = ExecutionEvent> = E extends ExecutionEvent ? Omit<E, "executionId" | "seq"> : never;
@@ -205,16 +217,29 @@ export class ExecutionManager {
 
   private async drive(execution: RunningExecution, request: ExecutionRequest, options: StartOptions): Promise<void> {
     const { signal } = execution.controller;
+    const runOptions: ProviderRunOptions = {
+      ...(options.resumeProviderSessionId !== undefined && { resumeSessionId: options.resumeProviderSessionId }),
+      ...(options.tools && { tools: options.tools }),
+    };
     let text = "";
+    let providerSession: ProviderSessionInfo | undefined;
+    const withSession = () => (providerSession ? { providerSession } : {});
     try {
-      for await (const event of this.adapter.run(request, signal, options.tools ? { tools: options.tools } : {})) {
+      for await (const event of this.adapter.run(request, signal, runOptions)) {
         if (signal.aborted || execution.done) break;
+        if (event.type === "session") {
+          const { type: _type, ...info } = event;
+          providerSession = info;
+          continue;
+        }
         text += event.text;
         execution.emit({ type: "delta", text: event.text });
       }
-      execution.finish(signal.aborted ? { type: "cancelled" } : { type: "completed", text });
+      execution.finish(signal.aborted ? { type: "cancelled", ...withSession() } : { type: "completed", text, ...withSession() });
     } catch (err) {
-      execution.finish(signal.aborted ? { type: "cancelled" } : { type: "failed", error: toExecutionError(err) });
+      execution.finish(
+        signal.aborted ? { type: "cancelled", ...withSession() } : { type: "failed", error: toExecutionError(err), ...withSession() },
+      );
     }
   }
 }

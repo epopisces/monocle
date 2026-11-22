@@ -7,7 +7,7 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 - [x] [IMM-47](tickets/IMM-47.md) — M1: Stream and cancel a Cravat execution through Copilot adapter
 - [ ] [IMM-48](tickets/IMM-48.md) — M1: Supply active-note context and restricted read-only vault tools
 - [x] [IMM-49](tickets/IMM-49.md) — M2: Configure model, context window and thinking effort in Monocle
-- [ ] [IMM-50](tickets/IMM-50.md) — M2: Persist and resume local Monocle conversations
+- [x] [IMM-50](tickets/IMM-50.md) — M2: Persist and resume local Monocle conversations
 - [ ] [IMM-51](tickets/IMM-51.md) — M2: Route registered deterministic commands and agentic requests
 - [ ] [IMM-52](tickets/IMM-52.md) — M2: Create schema-valid notes via existing Curator skill
 - [ ] [IMM-53](tickets/IMM-53.md) — M3: Persist session-scoped portable change proposals
@@ -33,3 +33,4 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 | 2026-11-22 | IMM-61 | Index health service (core), `/v1/index/*` companion routes + `--vault/--state-dir/--exclude/--semantic-config` CLI, status-bar health indicator with modal maintenance panel (reindex note, reconcile, confirmed rebuild) (branch `epopisces-imm-61-index-health-ui`) | `npm ci && npm run check`: 103/103 passed pre-merge, 132/132 after merging IMM-47; `npm run smoke:obsidian`: 14/14 pre-merge, 20/20 after merge | No |
 | 2026-11-22 | IMM-47 | Execution contract 0.2.0, Cravat ExecutionManager + Copilot CLI adapter, streamed NDJSON/cancel routes with Origin guard, panel prompt/stream/cancel UI (branch `epopisces-imm-47-cravat-stream-and-cancel`) | `npm ci && npm run check`: 87/87 passed pre-merge, 119/119 after merging IMM-59/60; `npm run smoke:obsidian`: 14/14 (fake CLI), 11/11 live Copilot | No |
 | 2026-11-22 | IMM-49 | Optional execution settings (model, reasoning effort, context window) in contract 0.2.x, `GET /v1/capabilities` discovered from the Copilot CLI's help, pre-run validation with actionable `invalid_request`, panel selects (branch `epopisces-imm-49-model-settings`) | `npm ci && npm run check`: 129/129 passed (10 new), 142/142 after merging IMM-61; `npm run smoke:obsidian`: 19/19 (fake CLI), 25/25 after merge, 16/16 live Copilot | No |
+| 2026-11-22 | IMM-50 | Companion-side machine-local conversation store (`--data-dir`/`MONOCLE_DATA_DIR`), `/v1/conversations` routes, optional `conversationId`/`providerSession` contract fields (still 0.2.0), Copilot session resume via `--session-id`/`--resume` with truthful continuity, panel transcript/picker (branch `epopisces-imm-50-conversation-persistence`) | `npm ci && npm run check`: 161/161 after merging IMM-49/61; `npm run smoke:obsidian`: fake CLI pass, 31/31 live Copilot | No |

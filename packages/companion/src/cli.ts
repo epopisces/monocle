@@ -2,6 +2,8 @@
 /**
  * Standalone companion launcher. Runs independently of Obsidian; stop it with Ctrl+C / SIGTERM.
  * Options: --host <loopback> --port <n> (or MONOCLE_COMPANION_HOST / MONOCLE_COMPANION_PORT);
+ * --data-dir <dir> (or MONOCLE_DATA_DIR) holds machine-local conversations (never inside a synced vault; default
+ * %LOCALAPPDATA%\Monocle, ~/Library/Application Support/Monocle or $XDG_STATE_HOME/monocle);
  * --vault <dir> (or MONOCLE_VAULT) enables the derived indexes and lets the agent read that vault through
  * read-only tools, with --state-dir <dir> (host-local, default ~/.monocle/state/<vault hash>), repeatable
  * --exclude <vault-relative folder or note> (not indexed, never sent to or readable by the agent), and
@@ -13,12 +15,14 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createSemanticIndexFromConfig, openIndexService, type IndexService, type SemanticConfig } from "@monocle/core";
+import { defaultDataDir } from "./data-dir.js";
 import { startCompanion } from "./server.js";
 
 const { values } = parseArgs({
   options: {
     host: { type: "string" },
     port: { type: "string" },
+    "data-dir": { type: "string" },
     vault: { type: "string" },
     "state-dir": { type: "string" },
     exclude: { type: "string", multiple: true },
@@ -28,6 +32,9 @@ const { values } = parseArgs({
 });
 
 const host = values.host ?? process.env.MONOCLE_COMPANION_HOST;
+const dataDir = resolve(
+  values["data-dir"] || process.env.MONOCLE_DATA_DIR || defaultDataDir(process.platform, process.env, homedir()),
+);
 const portText = values.port ?? process.env.MONOCLE_COMPANION_PORT;
 const port = portText === undefined ? undefined : Number(portText);
 if (port !== undefined && (!Number.isInteger(port) || port < 0 || port > 65535)) {
@@ -60,9 +67,10 @@ try {
     ...(port !== undefined && { port }),
     ...(index && { index }),
     ...(vault && { vault: { root: resolve(vault), exclude: values.exclude ?? [] } }),
+    dataDir,
   });
   // One JSON line on stdout so supervisors and tests can discover the bound URL.
-  console.log(JSON.stringify({ event: "listening", url: companion.url, instanceId: companion.health.instanceId }));
+  console.log(JSON.stringify({ event: "listening", url: companion.url, instanceId: companion.health.instanceId, dataDir }));
   const shutdown = () =>
     void companion.close().then(() => {
       index?.close();

@@ -1,7 +1,8 @@
-// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-48 note context and
-// read-only vault tools, IMM-49 execution settings, IMM-61 index health). Uses a temp copy of the fixture vault
-// and a temp Electron user-data dir, so the user's Obsidian configuration and vaults are never touched. The companion runs Cravat against a fake Copilot CLI unless
-// MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in Copilot CLI; costs one premium request; skips the cancel checks).
+// Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-48 note context
+// and read-only vault tools, IMM-49 execution settings, IMM-50 conversations, IMM-61 index health). Uses a temp copy of the fixture vault, a temp Electron user-data dir and a
+// temp companion data dir, so the user's Obsidian configuration, vaults and conversations are never touched. The
+// companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
+// Copilot CLI; costs three premium requests; skips the cancel checks).
 // Usage (from repo root, after `npm run build`): node <this file>
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -15,6 +16,7 @@ const obsidianExe = process.env.OBSIDIAN_EXE ?? join(process.env.LOCALAPPDATA ??
 const work = mkdtempSync(join(tmpdir(), "monocle-obsidian-smoke-"));
 const vault = join(work, "vault");
 const userData = join(work, "userdata");
+const dataDir = join(work, "companion-data");
 const cdpPort = 9333;
 const log = (...a) => console.log("[smoke]", ...a);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -32,14 +34,17 @@ const fakeLauncher = `
   const adapter = new CopilotCliAdapter({ command: process.execPath, args: [${JSON.stringify(join(repo, "packages/cravat/test/fixtures/fake-copilot.mjs"))}] });
   const { openIndexService } = await import(${JSON.stringify(new URL("packages/monocle-core/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)});
   const index = openIndexService({ vaultRoot: ${JSON.stringify(vault)}, stateDir: ${JSON.stringify(join(work, "state"))}, excludeFolders: ["templates"] });
-  const c = await startCompanion({ adapter, index, vault: { root: ${JSON.stringify(vault)}, exclude: ["templates"] } });
+  const c = await startCompanion({ adapter, index, dataDir: process.env.MONOCLE_DATA_DIR, vault: { root: ${JSON.stringify(vault)}, exclude: ["templates"] } });
   console.log(JSON.stringify({ event: "listening", url: c.url, instanceId: c.health.instanceId }));
 `;
 
 function startCompanion() {
   const indexArgs = ["--vault", vault, "--state-dir", join(work, "state"), "--exclude", "templates"];
   const args = live ? [join(repo, "packages/companion/dist/cli.js"), ...indexArgs] : ["--input-type=module", "-e", fakeLauncher];
-  const child = spawn(process.execPath, args, { stdio: ["ignore", "pipe", "ignore"] });
+  const child = spawn(process.execPath, args, {
+    stdio: ["ignore", "pipe", "ignore"],
+    env: { ...process.env, MONOCLE_DATA_DIR: dataDir },
+  });
   return new Promise((resolve, reject) => {
     child.once("exit", (c) => reject(new Error(`companion exited ${c}`)));
     createInterface({ input: child.stdout }).on("line", (l) => {
@@ -99,11 +104,13 @@ const noteHashes = () =>
   );
 const check = (name, ok, detail = "") => { results.push({ name, ok }); log(ok ? "PASS" : "FAIL", name, detail); };
 let companion, obsidian;
+const launchObsidian = () =>
+  spawn(obsidianExe, [`--user-data-dir=${userData}`, `--remote-debugging-port=${cdpPort}`], { stdio: "ignore" });
 try {
   companion = await startCompanion();
   log("companion", companion.url);
-  obsidian = spawn(obsidianExe, [`--user-data-dir=${userData}`, `--remote-debugging-port=${cdpPort}`], { stdio: "ignore" });
-  const { ws, evaluate } = await cdp();
+  obsidian = launchObsidian();
+  let { ws, evaluate } = await cdp();
   await until(evaluate, "!!(window.app && app.workspace && app.workspace.layoutReady)", true, 60000);
   await evaluate("(async () => { await app.plugins.setEnable(true); await app.plugins.enablePluginAndSave('monocle'); })()");
   check("plugin loads", await until(evaluate, "!!app.plugins.plugins.monocle", true));
@@ -147,6 +154,23 @@ try {
   const meta = await evaluate(`${q(".monocle-execution")}.textContent`);
   check("execution ID shown", /^Execution [0-9a-f-]{36} · completed$/.test(meta), meta);
 
+  // IMM-50: a second prompt continues the same conversation and provider session; the first moves to the transcript.
+  const storedConversation = "app.loadLocalStorage('monocle:conversation-id')";
+  const conversationId = await evaluate(storedConversation);
+  check("conversation ID remembered host-locally", /^[0-9a-f-]{36}$/.test(conversationId ?? ""), conversationId);
+  await submit(live ? "What exact phrase did I ask you to reply with? Reply with only that phrase." : "second message");
+  check("follow-up completes", (await until(evaluate, outputState, "completed", live ? 120000 : 20000)) === "completed");
+  check("follow-up stays in the conversation", (await evaluate(storedConversation)) === conversationId);
+  const session = await evaluate(`${q(".monocle-execution-session")}.textContent`);
+  check("follow-up continues the provider session", session === "Continued provider session", session);
+  if (live) {
+    const recalled = await evaluate(`${q(".monocle-output")}.textContent`);
+    check("provider remembers earlier context", /monocle smoke ok/i.test(recalled), recalled);
+  }
+  const turns = `${q(".monocle-transcript")}.querySelectorAll('.monocle-turn').length`;
+  const transcriptText = `${q(".monocle-transcript")}.textContent`;
+  check("earlier execution shown in transcript", (await until(evaluate, turns, 1)) === 1);
+  const firstAnswer = live ? /monocle smoke ok/i : /echo: [\s\S]*hello from obsidian/;
   // IMM-49: provider-discovered settings, applied to the adapter request; unsupported values rejected visibly.
   const sel = (name) => q(`select[data-setting="${name}"]`);
   const pick = (name, value) =>
@@ -202,6 +226,8 @@ try {
 
   companion = await startCompanion();
   check("panel reconnects after companion restart", (await until(evaluate, label, "Connected")) === "Connected");
+  await until(evaluate, `${firstAnswer}.test(${transcriptText})`, true);
+  check("history survives a companion restart", true);
 
   // IMM-48: the active note (Ada Example, opened above) is sent as context, the agent reads another note via the
   // read-only vault tools, excluded notes stay out, and the vault is unchanged.
@@ -231,6 +257,17 @@ try {
   await sleep(1000);
   const h = await (await fetch(new URL("/v1/health", companion.url))).json();
   check("companion still healthy after Obsidian closes", h.status === "ok" && h.instanceId === companion.instanceId);
+
+  // Reopen Obsidian with the same profile: the panel restores the open conversation from the companion.
+  obsidian = launchObsidian();
+  ({ ws, evaluate } = await cdp());
+  await until(evaluate, "!!(window.app && app.workspace && app.workspace.layoutReady && app.plugins.plugins.monocle)", true, 60000);
+  await evaluate("app.commands.executeCommandById('monocle:open-panel')");
+  await until(evaluate, label, "Connected");
+  check("conversation restored after Obsidian restart", (await until(evaluate, `${q(".monocle-conversation-select")}?.value`, conversationId)) === conversationId);
+  await until(evaluate, `${q(".monocle-transcript")}.querySelectorAll('.monocle-turn').length >= 2 && ${firstAnswer}.test(${transcriptText})`, true);
+  check("restored transcript shows earlier executions", true);
+  ws.close();
 } catch (e) {
   check("smoke run", false, e.message);
 } finally {

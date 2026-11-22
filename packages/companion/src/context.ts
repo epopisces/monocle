@@ -1,4 +1,4 @@
-import type { ExecutionContext, ExecutionRequest } from "@monocle/contracts";
+import type { ConversationContextReference, ExecutionContext, ExecutionRequest } from "@monocle/contracts";
 import { MAX_CONTEXT_LENGTH } from "@monocle/contracts";
 import {
   VAULT_MCP_SERVER_NAME,
@@ -26,6 +26,8 @@ export interface PreparedExecution {
   /** Request for Cravat: the composed prompt, without the Monocle-specific `context`. */
   readonly request: ExecutionRequest;
   readonly tools?: ExecutionToolset;
+  /** What was actually shared (after exclusions), for the conversation record; paths only, never content. */
+  readonly references: readonly ConversationContextReference[];
 }
 
 const fence = (text: string) => {
@@ -43,7 +45,8 @@ export function prepareExecution(input: ExecutionRequest, vault?: CompanionVault
   const { context, ...rest } = input;
   const exclude = [...(vault?.exclude ?? []), ...(context?.exclude ?? [])];
   const reader = vault ? new VaultReader({ vaultRoot: vault.root, exclude }) : undefined;
-  const sections = context ? contextSections(context, new VaultExclusions(exclude), reader) : [];
+  const references: ConversationContextReference[] = [];
+  const sections = context ? contextSections(context, new VaultExclusions(exclude), reader, references) : [];
   const prompt =
     sections.length === 0
       ? rest.prompt
@@ -52,10 +55,15 @@ export function prepareExecution(input: ExecutionRequest, vault?: CompanionVault
           ...sections,
           `## User request\n\n${rest.prompt}`,
         ].join("\n\n");
-  return { request: { ...rest, prompt }, ...(vault && { tools: vaultToolset(vault, exclude) }) };
+  return { request: { ...rest, prompt }, references, ...(vault && { tools: vaultToolset(vault, exclude) }) };
 }
 
-function contextSections(context: ExecutionContext, exclusions: VaultExclusions, reader: VaultReader | undefined): string[] {
+function contextSections(
+  context: ExecutionContext,
+  exclusions: VaultExclusions,
+  reader: VaultReader | undefined,
+  references: ConversationContextReference[],
+): string[] {
   const sections: string[] = [];
   let budget = MAX_CONTEXT_LENGTH;
   const take = (text: string) => {
@@ -70,12 +78,16 @@ function contextSections(context: ExecutionContext, exclusions: VaultExclusions,
     let content = active.content;
     if (content === undefined && reader) content = read(reader, active.path).content;
     shown.add(active.path.toLowerCase());
+    references.push({ kind: "note", path: active.path, label: "Active note" });
     sections.push(
       content === undefined
         ? `## Active note: ${active.path}`
         : `## Active note: ${active.path}\n\n${fence(take(content))}`,
     );
-    if (active.selection) sections.push(`## Selected text in the active note\n\n${fence(take(active.selection))}`);
+    if (active.selection) {
+      sections.push(`## Selected text in the active note\n\n${fence(take(active.selection))}`);
+      references.push({ kind: "selection", path: active.path, label: "Selection" });
+    }
   }
 
   if (context.include?.length && !reader) throw new ContextError("included notes require the companion to be configured with a vault");
@@ -84,6 +96,7 @@ function contextSections(context: ExecutionContext, exclusions: VaultExclusions,
     const note = read(reader!, path);
     if (shown.has(note.path.toLowerCase())) continue;
     shown.add(note.path.toLowerCase());
+    references.push({ kind: "note", path: note.path, label: "Included note" });
     sections.push(`## Included note: ${note.path}\n\n${fence(take(note.content))}`);
   }
   return sections;
