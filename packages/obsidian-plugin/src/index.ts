@@ -15,7 +15,7 @@ export {
   type IndexHealthMonitorOptions,
   type IndexView,
 } from "./index-health.js";
-export { ExecutionClient, type ExecutionClientOptions, type ExecutionHandle, type FetchLike } from "./execution-client.js";
+export { ExecutionClient, type ExecuteOptions, type ExecutionClientOptions, type ExecutionHandle, type FetchLike } from "./execution-client.js";
 export { buildExecutionContext, type ActiveNoteSnapshot, type ContextChoices } from "./context.js";
 
 export const packageDescriptor: PackageDescriptor = {

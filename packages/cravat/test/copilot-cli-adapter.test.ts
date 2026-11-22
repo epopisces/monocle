@@ -108,7 +108,7 @@ describe("Copilot CLI adapter with an execution toolset", () => {
 
   async function runWith(mode: string, prompt: string, tools?: ExecutionToolset): Promise<string> {
     let text = "";
-    for await (const e of fakeAdapter(mode).run({ prompt }, new AbortController().signal, tools)) text += e.text;
+    for await (const e of fakeAdapter(mode).run({ prompt }, new AbortController().signal, { tools })) text += e.text;
     return text;
   }
 

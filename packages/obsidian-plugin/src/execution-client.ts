@@ -18,6 +18,11 @@ export interface ExecutionClientOptions {
   readonly fetch: FetchLike;
 }
 
+export interface ExecuteOptions {
+  /** Note context the user chose to share (IMM-48). */
+  readonly context?: ExecutionContext | undefined;
+}
+
 export interface ExecutionHandle {
   /** Known once the `started` event arrives. */
   readonly executionId: string | undefined;
@@ -74,7 +79,8 @@ export class ExecutionClient {
     }
   }
 
-  execute(prompt: string, settings?: ExecutionSettings, context?: ExecutionContext): ExecutionHandle {
+  execute(prompt: string, settings?: ExecutionSettings, options: ExecuteOptions = {}): ExecutionHandle {
+    const { context } = options;
     const controller = new AbortController();
     const client = this;
     let executionId: string | undefined;

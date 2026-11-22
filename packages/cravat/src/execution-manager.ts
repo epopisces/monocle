@@ -23,8 +23,7 @@ export interface ProviderAdapter {
    * requests that set any are rejected instead of silently ignored.
    */
   capabilities?(): Promise<ProviderSettingCapabilities>;
-  /** `tools` is the only capability the agent gets; without it the agent runs with no tools at all. */
-  run(request: ExecutionRequest, signal: AbortSignal, tools?: ExecutionToolset): AsyncIterable<ProviderEvent>;
+  run(request: ExecutionRequest, signal: AbortSignal, options?: ProviderRunOptions): AsyncIterable<ProviderEvent>;
 }
 
 /** A local stdio MCP server whose listed tools (bare names, not prefixed) are exposed to the agent. */
@@ -40,6 +39,11 @@ export interface McpToolServer {
 /** Tools an execution may use, supplied by the Cravat caller (never by the request body). */
 export interface ExecutionToolset {
   readonly mcpServers: readonly McpToolServer[];
+}
+
+export interface ProviderRunOptions {
+  /** The only capability the agent gets; without it the agent runs with no tools at all. */
+  readonly tools?: ExecutionToolset | undefined;
 }
 
 export interface StartOptions {
@@ -180,7 +184,7 @@ export class ExecutionManager {
       startedAt: new Date().toISOString(),
       ...(request.settings && { settings: request.settings }),
     });
-    void this.drive(execution, request, options.tools);
+    void this.drive(execution, request, options);
     return { id: execution.id, events: queue.drain() };
   }
 
@@ -199,11 +203,11 @@ export class ExecutionManager {
     for (const id of [...this.running.keys()]) this.cancel(id);
   }
 
-  private async drive(execution: RunningExecution, request: ExecutionRequest, tools?: ExecutionToolset): Promise<void> {
+  private async drive(execution: RunningExecution, request: ExecutionRequest, options: StartOptions): Promise<void> {
     const { signal } = execution.controller;
     let text = "";
     try {
-      for await (const event of this.adapter.run(request, signal, tools)) {
+      for await (const event of this.adapter.run(request, signal, options.tools ? { tools: options.tools } : {})) {
         if (signal.aborted || execution.done) break;
         text += event.text;
         execution.emit({ type: "delta", text: event.text });

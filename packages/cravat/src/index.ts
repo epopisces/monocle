@@ -8,6 +8,7 @@ export {
   type ExecutionManagerOptions,
   type ExecutionToolset,
   type McpToolServer,
+  type ProviderRunOptions,
   type StartOptions,
   type ProviderAdapter,
   type ProviderEvent,

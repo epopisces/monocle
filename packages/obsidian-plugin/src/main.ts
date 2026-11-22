@@ -288,7 +288,7 @@ class MonoclePanelView extends ItemView {
       const handle = new ExecutionClient({ endpoint: this.plugin.connection.endpoint, fetch: rendererFetch }).execute(
         text,
         this.plugin.executionSettings(),
-        context,
+        { context },
       );
       active = handle;
       sync();

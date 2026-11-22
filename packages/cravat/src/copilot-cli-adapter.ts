@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { ExecutionRequest, ExecutionSettings, ProviderSettingCapabilities } from "@monocle/contracts";
-import { ProviderError, type ExecutionToolset, type ProviderAdapter, type ProviderEvent } from "./execution-manager.js";
+import { ProviderError, type ExecutionToolset, type ProviderAdapter, type ProviderRunOptions, type ProviderEvent } from "./execution-manager.js";
 
 export interface CopilotCliAdapterOptions {
   /** Copilot executable. Defaults to `MONOCLE_COPILOT_PATH`, else `copilot` on PATH. Must be a real executable, not a `.cmd` shim. */
@@ -164,7 +164,8 @@ export class CopilotCliAdapter implements ProviderAdapter {
     return caps;
   }
 
-  async *run(request: ExecutionRequest, signal: AbortSignal, tools?: ExecutionToolset): AsyncIterable<ProviderEvent> {
+  async *run(request: ExecutionRequest, signal: AbortSignal, options: ProviderRunOptions = {}): AsyncIterable<ProviderEvent> {
+    const { tools } = options;
     if (signal.aborted) return;
     const config = tools ? mcpConfig(tools) : undefined;
     // Empty scratch cwd: Copilot loads no repository instructions/config from wherever the companion runs.

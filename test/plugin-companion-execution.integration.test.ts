@@ -164,7 +164,7 @@ describe("Obsidian plugin → companion → Cravat execution", () => {
         include: "Other.md\nPrivate.md\n",
         exclude: " Private.md ",
       });
-      const events = await collect(client().execute("Summarise", undefined, context).events);
+      const events = await collect(client().execute("Summarise", undefined, { context }).events);
       expect(events.at(-1)?.type).toBe("completed");
       expect(seen).toContain("current-note-body");
       expect(seen).toContain("other-note-body");

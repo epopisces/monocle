@@ -36,7 +36,8 @@ function capturing(): ProviderAdapter & { calls: { request: ExecutionRequest; to
   return {
     id: "capture",
     calls,
-    async *run(request, _signal, tools) {
+    async *run(request, _signal, options) {
+      const tools = options?.tools;
       calls.push({ request, tools });
       yield { type: "delta", text: "ok" };
     },
