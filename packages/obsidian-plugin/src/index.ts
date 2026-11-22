@@ -15,6 +15,7 @@ export {
   type IndexHealthMonitorOptions,
   type IndexView,
 } from "./index-health.js";
+export { ExecutionClient, type ExecutionClientOptions, type ExecutionHandle, type FetchLike } from "./execution-client.js";
 
 export const packageDescriptor: PackageDescriptor = {
   name: "@monocle/obsidian-plugin",

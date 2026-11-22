@@ -55,16 +55,16 @@ Requires: 14 Incrementally index synchronized notes in SQLite FTS5; 16 Add confi
 - **Contracts:** `packages/contracts/src/index-health.ts` — `IndexHealth`, `IndexActionResponse`, route constants,
   `isIndexHealth`. Additive; `CONTRACT_VERSION` not bumped (older companions answer 404 → plugin shows unavailable).
 - **Companion:** `GET /v1/index/health`, `POST /v1/index/{reconcile,rebuild,reindex-note}` (POSTs require
-  `application/json`, which forces a CORS preflight the companion never grants — CSRF guard). CLI gains `--vault`
+  `application/json`; with IMM-47's Origin guard only Obsidian's renderer origin passes CORS — CSRF guard). CLI gains `--vault`
   (or `MONOCLE_VAULT`), `--state-dir` (default `~/.monocle/state/<hash>`), repeatable `--exclude`, and
   `--semantic-config <json>`. Without `--vault` the routes return 404.
 - **Plugin:** Obsidian-free `IndexHealthMonitor` polls every 5 s while connected; `index-ui.ts` adds the status-bar
   indicator (healthy / indexing (N queued) / degraded / unavailable), a modal panel with freshness, queue, errors,
   warnings and buttons (reindex current note, reconcile, rebuild with confirmation), plus four commands. The panel is a
   modal, so it takes no workspace when closed.
-- **Automated checks:** `npm ci && npm run check` — 103/103 passed (new: index-service 4, note-index reindex 1,
+- **Automated checks:** `npm ci && npm run check` — 103/103 passed pre-merge, 132/132 after merging IMM-47 (new: index-service 4, note-index reindex 1,
   companion routes 4 + process 1, plugin monitor 3; bundle test stub gained `Modal`/`Notice`).
-- **Obsidian verification:** `npm run smoke:obsidian` (real Obsidian, fixture vault) — 14/14 passed, including
+- **Obsidian verification:** `npm run smoke:obsidian` (real Obsidian, fixture vault) — 14/14 passed pre-merge, 20/20 after merging IMM-47, including
   healthy indicator, expanded panel contents, reconcile control, closed panel adds no leaves, reindex-current-note
   command after an edit, and "Index unavailable" after the companion stops.
 - **Not done:** auto-reading Obsidian's templates folder (pass `--exclude templates`); live Chroma/Ollama

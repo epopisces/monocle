@@ -40,10 +40,32 @@ Requires: 02 Connect Obsidian panel to independent companion.
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed (record command and outcome)
+- [x] Acceptance criteria validated
+- [x] Summary and artifacts committed or handed back for synchronization
+
+**Commands and outcomes:**
+
+- `npm ci && npm run check` (lint/typecheck/build/test): 87/87 tests passed pre-merge, 119/119 after merging `origin/refactor` (IMM-59/60).
+  IMM-47 adds 29 tests: Cravat `ExecutionManager` (8), `CopilotCliAdapter` against a fake CLI incl. failed launch,
+  provider error and kill-on-cancel (6), companion execution routes incl. Origin/CORS/415/413/404 (8),
+  plugin `ExecutionClient` ↔ real companion integration incl. cancel and connection loss (7). No live credentials needed.
+- `npm run smoke:obsidian` (real Obsidian 1.8.9, fake Copilot CLI): 14/14 — prompt streams into panel, execution ID
+  shown, cancel ends `cancelled` and the provider process is killed.
+- `MONOCLE_SMOKE_LIVE=1 npm run smoke:obsidian` (installed Copilot CLI 1.0.104, signed in): 11/11 — live answer streamed.
+- Manual live checks: cancel mid-stream → `202`, stream `started, delta…, cancelled`, no lingering `copilot` processes;
+  `MONOCLE_COPILOT_PATH=copilot-not-installed` → `failed launch_failed: spawn copilot-not-installed ENOENT` in panel.
 
 **Implementation notes:**
 
+- Contract `0.2.0` (`packages/contracts/src/execution.ts`): `POST /v1/executions` → NDJSON events `started`/`delta`/
+  exactly one of `completed`/`failed`/`cancelled`; `POST /v1/executions/{id}/cancel`. Request parser rejects unknown fields.
+- Transport: renderer `fetch` streaming NDJSON with CORS (`requestUrl` buffers whole responses). Companion rejects
+  browser Origins other than `app://obsidian.md` and requires JSON content type (forces preflight). No auth token yet.
+- Cravat `ExecutionManager` owns IDs, ordering, single terminal event, cancel (abort + forced terminal after grace) and
+  shutdown; `CopilotCliAdapter` spawns `copilot --output-format json --stream on --available-tools none
+  --disable-builtin-mcps`, prompt via stdin, empty temp cwd, kills the process tree on cancel.
+- Panel: prompt box, Send/Cancel, execution ID/state, error `code: message`, streamed text rendered as Markdown on
+  completion; closing the panel cancels. Follow-up notes for IMM-48/49/50 are in the shared implementer notes
+  (`IMM-47-cravat-execution.md`).

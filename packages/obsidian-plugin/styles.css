@@ -93,3 +93,41 @@
   gap: var(--size-4-2);
   margin-top: var(--size-4-4);
 }
+
+.monocle-panel .monocle-chat {
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  margin-top: var(--size-4-4);
+}
+
+.monocle-panel .monocle-prompt {
+  width: 100%;
+  resize: vertical;
+}
+
+.monocle-panel .monocle-actions {
+  display: flex;
+  gap: var(--size-4-2);
+  justify-content: flex-end;
+}
+
+.monocle-panel .monocle-execution {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  word-break: break-all;
+}
+
+.monocle-panel .monocle-execution-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+}
+
+.monocle-panel .monocle-output {
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.monocle-panel .monocle-output[data-state="completed"] {
+  white-space: normal;
+}
