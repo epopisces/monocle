@@ -1,10 +1,10 @@
-import { cpSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { COMMANDS_PATH, CONVERSATIONS_PATH, conversationPath, EXECUTIONS_PATH } from "@monocle/contracts";
-import { startCompanion, type RunningCompanion } from "@monocle/companion";
+import { startCompanion, type CompanionNotesOptions, type RunningCompanion } from "@monocle/companion";
 import { openIndexService, type IndexService } from "@monocle/core";
 import type { ProviderAdapter } from "@monocle/cravat";
 
@@ -29,14 +29,14 @@ afterEach(async () => {
   providerRuns = 0;
 });
 
-async function start(withVault = true): Promise<void> {
+async function start(withVault = true, notes?: CompanionNotesOptions): Promise<void> {
   if (withVault) {
     work = mkdtempSync(join(tmpdir(), "monocle-commands-"));
     const vault = join(work, "vault");
     cpSync(fileURLToPath(new URL("../../../fixtures/vault/", import.meta.url)), vault, { recursive: true });
     index = openIndexService({ vaultRoot: vault, stateDir: join(work, "state"), excludeFolders: ["templates"], watch: false });
   }
-  running = await startCompanion({ port: 0, adapter: neverRun, ...(index && { index }) });
+  running = await startCompanion({ port: 0, adapter: neverRun, ...(index && { index }), ...(notes && { notes }) });
 }
 
 async function command(body: unknown): Promise<{ status: number; json: any }> {
@@ -157,5 +157,54 @@ describe("deterministic commands", () => {
     const excluded = await command({ command: "validate", context: { activeNote: { path: "templates/Fixture Template.md" } } });
     expect(excluded).toMatchObject({ status: 400, json: { error: { code: "invalid_request" } } });
     expect(providerRuns).toBe(0);
+  });
+});
+
+describe("/new-note", () => {
+  const notes: CompanionNotesOptions = { template: "Fixture Template", fields: { type: "capture" } };
+
+  it("creates a schema-valid note with the next unique ID and indexes it, without Cravat", async () => {
+    await start(true, notes);
+    const { status, json } = await command({ command: "new-note", argument: "Meeting Notes" });
+    expect(status).toBe(200);
+    expect(json.data).toMatchObject({ path: "inbox/Meeting Notes.md", id: "fx-0004", template: "Fixture Template" });
+    expect(json.data.validation.valid).toBe(true);
+    expect(json.markdown).toContain("[[inbox/Meeting Notes.md|Meeting Notes]]");
+    expect(readFileSync(join(index!.noteIndex.vaultRoot, "inbox", "Meeting Notes.md"), "utf8")).toContain('id: "fx-0004"');
+    expect(index!.noteIndex.listNotes().some((n) => n.id === "fx-0004")).toBe(true);
+    expect(providerRuns).toBe(0);
+  });
+
+  it("never overwrites an existing note and says why", async () => {
+    await start(true, notes);
+    const first = await command({ command: "new-note", argument: "Ada Lovelace" });
+    expect(first.status).toBe(200);
+    const before = readFileSync(join(index!.noteIndex.vaultRoot, "inbox", "Ada Lovelace.md"), "utf8");
+    const clash = await command({ command: "new-note", argument: "ada lovelace" });
+    expect(clash.status).toBe(400);
+    expect(clash.json.error).toMatchObject({ code: "note_creation_failed", reason: "path_exists" });
+    expect(clash.json.error.message).toContain("inbox/Ada Lovelace.md already exists");
+    expect(readFileSync(join(index!.noteIndex.vaultRoot, "inbox", "Ada Lovelace.md"), "utf8")).toBe(before);
+  });
+
+  it("is not permitted until a note template is configured", async () => {
+    await start(true);
+    const { status, json } = await command({ command: "new-note", argument: "Meeting Notes" });
+    expect(status).toBe(403);
+    expect(json.error.code).toBe("not_permitted");
+    expect(json.error.message).toContain("--note-template");
+    expect(existsSync(join(index!.noteIndex.vaultRoot, "inbox", "Meeting Notes.md"))).toBe(false);
+  });
+
+  it("asks for a title and a vault", async () => {
+    await start(true, notes);
+    const untitled = await command({ command: "new-note", argument: "  " });
+    expect(untitled).toMatchObject({ status: 400, json: { error: { code: "missing_context" } } });
+    await running!.close();
+    index!.close();
+    index = undefined;
+    await start(false, notes);
+    const noVault = await command({ command: "new-note", argument: "Meeting Notes" });
+    expect(noVault).toMatchObject({ status: 400, json: { error: { code: "missing_context" } } });
   });
 });

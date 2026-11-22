@@ -9,11 +9,12 @@ import {
   type CommandError,
   type CommandRequest,
   type CommandResult,
+  type CreatedNoteData,
   type ExecutionError,
   type ExecutionRequest,
   type NoteValidation,
 } from "@monocle/contracts";
-import { createRetriever, InvalidNotePathError, validateNote, type IndexService } from "@monocle/core";
+import { createNote, createRetriever, InvalidNotePathError, NoteCreationError, validateNote, type IndexService, type NoteRenderer } from "@monocle/core";
 
 type Send = (res: ServerResponse, status: number, body: unknown) => void;
 
@@ -21,6 +22,20 @@ const MAX_BODY_BYTES = 64 * 1024;
 const SEARCH_LIMIT = 10;
 
 class RequestError extends Error {}
+
+/** Enables `/new-note` (IMM-52). Without it the companion never creates notes. */
+export interface CompanionNotesOptions {
+  /** Template name: a note (without `.md`) in the vault's Obsidian templates folder, or as understood by `renderer`. */
+  readonly template: string;
+  /** Vault-relative folder for new notes; default Obsidian's new-note folder. */
+  readonly folder?: string;
+  /** Extra template values, e.g. `{ type: "capture" }`. */
+  readonly fields?: Readonly<Record<string, string>>;
+  /** Default: the vault's own template. Use `commandNoteRenderer` for an external script such as Curator's. */
+  readonly renderer?: NoteRenderer;
+}
+
+class NotPermittedError extends Error {}
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
   let size = 0;
@@ -44,9 +59,9 @@ function renderValidation(v: NoteValidation): string {
   return `${head}\n\n${lines.join("\n")}`;
 }
 
-type Runner = (index: IndexService, argument: string, request: CommandRequest) => Promise<CommandResult>;
+type Runner = (index: IndexService, argument: string, request: CommandRequest, notes: CompanionNotesOptions | undefined) => Promise<CommandResult>;
 
-/** Deterministic, read-only command implementations. Each runs inside Monocle; none starts Cravat. */
+/** Deterministic command implementations. Each runs inside Monocle; none starts Cravat. Only `new-note` writes. */
 const RUNNERS: Record<string, Runner> = {
   async validate(index, _argument, request) {
     const data = validateNote(index.noteIndex, request.context!.activeNote!.path);
@@ -76,6 +91,21 @@ const RUNNERS: Record<string, Runner> = {
         ? `No notes match \`${argument}\`.`
         : hits.map((h) => `- [[${h.path}|${h.title}]]${h.snippet ? ` — ${h.snippet.replace(/\s+/g, " ")}` : ""}`).join("\n");
     return { command: "search", title: `Search: ${argument}`, markdown, data: { query: argument, hits, semantic: result.semantic } };
+  },
+  async "new-note"(index, argument, _request, notes) {
+    if (!notes) {
+      throw new NotPermittedError("Note creation is not enabled; start the companion with --note-template <template name>");
+    }
+    const created = createNote(
+      index.noteIndex,
+      { title: argument, template: notes.template, ...(notes.folder !== undefined && { folder: notes.folder }), ...(notes.fields && { fields: notes.fields }) },
+      { reconcile: () => void index.reconcile(), ...(notes.renderer && { renderer: notes.renderer }) },
+    );
+    index.reindexNote(created.path);
+    const data: CreatedNoteData = { path: created.path, id: created.id, template: notes.template, validation: created.validation };
+    const warnings = created.validation.issues.map((i) => `\n- **${i.severity}** (${i.code}): ${i.message}`).join("");
+    const markdown = `Created [[${created.path}|${argument}]] at \`${created.path}\` with ${created.idField} \`${created.id}\`.${warnings ? `\n${warnings}` : ""}`;
+    return { command: "new-note", title: `New note ${created.path}`, markdown, data };
   },
 };
 
@@ -120,7 +150,13 @@ export function planAgenticCommand(request: ExecutionRequest, vaultConfigured: b
 }
 
 /** `POST /v1/commands` (IMM-51): runs a deterministic registry command without Cravat. */
-export async function handleCommandRoute(index: IndexService | undefined, req: IncomingMessage, res: ServerResponse, send: Send): Promise<void> {
+export async function handleCommandRoute(
+  index: IndexService | undefined,
+  notes: CompanionNotesOptions | undefined,
+  req: IncomingMessage,
+  res: ServerResponse,
+  send: Send,
+): Promise<void> {
   const fail = (status: number, error: CommandError) => send(res, status, { error });
   if (req.method !== "POST") return send(res, 405, { error: "method not allowed" });
   // Non-simple content type forces a CORS preflight, so web pages can't trigger commands.
@@ -145,9 +181,11 @@ export async function handleCommandRoute(index: IndexService | undefined, req: I
   const missing = missingContext(def, available);
   if (missing.length > 0) return fail(400, { code: "missing_context", message: missing.join("; "), missing });
   try {
-    return send(res, 200, await RUNNERS[def.id]!(index!, resolveCommandArgument(def, available), request));
+    return send(res, 200, await RUNNERS[def.id]!(index!, resolveCommandArgument(def, available), request, notes));
   } catch (error) {
     if (error instanceof InvalidNotePathError) return fail(400, { code: "invalid_request", message: error.message });
+    if (error instanceof NotPermittedError) return fail(403, { code: "not_permitted", message: error.message });
+    if (error instanceof NoteCreationError) return fail(400, { code: "note_creation_failed", reason: error.code, message: error.message });
     throw error;
   }
 }

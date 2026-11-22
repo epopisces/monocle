@@ -40,10 +40,18 @@ Requires: 04 Supply active-note context and restricted read-only vault tools; 07
 
 ## Offline execution record (local, not synchronized to Linear)
 
-- [ ] Implementation completed
-- [ ] Automated checks passed (record command and outcome)
-- [ ] Acceptance criteria validated
-- [ ] Summary and artifacts committed or handed back for synchronization
+- [x] Implementation completed
+- [x] Automated checks passed: `npm ci && npm run check` 245/245 (20 new create-note tests in core, 4 `/new-note` route tests in companion); `npm run smoke:obsidian` 60/60 (fake CLI), `MONOCLE_SMOKE_LIVE=1` 55/55 (real companion CLI with `--note-template`)
+- [x] Acceptance criteria validated (fixture/temp vaults only; Curator gap below)
+- [x] Summary and artifacts committed or handed back for synchronization (branch `epopisces-imm-52-curator-note-creation`)
 
 **Implementation notes:**
+
+- **Curator gap.** Neither Obsidian Curator nor `create-obsidian-note` is installed on this host (searched `~/.copilot`, `~/.agents`, `~/.claude`, `C:\development`), so nothing could be inspected or reused. Per the ticket's non-goal (don't rewrite Curator, don't invent a schema), note generation sits behind a `NoteRenderer` adapter boundary in `@monocle/core` (`operations/create-note.ts`):
+  - `vaultTemplateRenderer` (default) fills the vault's own Obsidian template (`.obsidian/templates.json` folder, else `templates/`) — the same file Obsidian's Templates plugin inserts.
+  - `commandNoteRenderer` is the Curator integration point: runs an external script (no shell, 30 s timeout) with the `NoteDraft` JSON on stdin and expects `{"content": "<markdown>"}` on stdout; non-zero exit → `renderer_failed` with its stderr. Tested with `packages/monocle-core/test/fixtures/fake-curator.mjs`. CLI: `--note-renderer <exe> --note-renderer-arg ...`. Python dependencies of the real script remain to be verified on a host that has it.
+- **Monocle owns integrity, the renderer owns content.** `planNote` (no writes) checks title (Obsidian-forbidden characters rejected, not sanitized), folder (vault-relative, indexed, no dot/excluded folders; default `.obsidian/app.json` `newFileFolderPath`), reconciles the index first, refuses a case-insensitive path clash, assigns the next ID, renders, then rejects unfilled `{{placeholders}}`, unparsable frontmatter, a missing ID and an ID already in use. `createNote` writes with an exclusive create (`wx`, never replaces a file that appeared meanwhile), re-indexes, runs `validateNote`, and removes the note again if it fails with an error.
+- **ID semantics (deterministic, from the vault's existing IDs).** The dominant `<prefix><digits>` sequence continues with the same padding (fixture: `fx-0003` → `fx-0004`); otherwise Obsidian's unique-note timestamp `YYYYMMDDHHmm` (local clock), suffixed `-1`, `-2`, … on collision. Generated fields `{{date}}` (YYYY-MM-DD) and `{{time}}` (HH:mm) follow Obsidian's Templates defaults. Request fields cannot override the ID.
+- **Command.** Registry command `/new-note <title>` (chat surface, `route: "monocle"`, new permission `create-note`) via `POST /v1/commands`; enabled only when the companion is started with `--note-template <name>` (optional `--note-folder`, repeatable `--note-field key=value`), otherwise `403 not_permitted` saying how to enable it. Failures are `400 note_creation_failed` with a `reason` (`NoteCreationErrorCode`) and a message saying what to change. `monocle_vault` stays read-only; agents get no write tool (IMM-53/54).
+- **Unverified conventions** (need real-vault inspection): the real ID field/format, the real templates (fixture `{{id}}`/`{{type}}` are not stock Obsidian Templates variables), and whether new notes should go to `newFileFolderPath`.
 

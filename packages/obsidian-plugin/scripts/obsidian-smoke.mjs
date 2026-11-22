@@ -1,5 +1,5 @@
 // Isolated Obsidian smoke test (IMM-46 connection, IMM-47 execution stream/cancel, IMM-48 note context
-// and read-only vault tools, IMM-49 execution settings, IMM-50 conversations, IMM-51 command routing, IMM-61 index health). Uses a temp copy of the fixture vault, a temp Electron user-data dir and a
+// and read-only vault tools, IMM-49 execution settings, IMM-50 conversations, IMM-51 command routing, IMM-52 note creation, IMM-61 index health). Uses a temp copy of the fixture vault, a temp Electron user-data dir and a
 // temp companion data dir, so the user's Obsidian configuration, vaults and conversations are never touched. The
 // companion runs Cravat against a fake Copilot CLI unless MONOCLE_SMOKE_LIVE=1 (uses the installed, signed-in
 // Copilot CLI; costs three premium requests; skips the cancel checks).
@@ -34,12 +34,12 @@ const fakeLauncher = `
   const adapter = new CopilotCliAdapter({ command: process.execPath, args: [${JSON.stringify(join(repo, "packages/cravat/test/fixtures/fake-copilot.mjs"))}] });
   const { openIndexService } = await import(${JSON.stringify(new URL("packages/monocle-core/dist/index.js", `file:///${repo.replace(/\\/g, "/")}/`).href)});
   const index = openIndexService({ vaultRoot: ${JSON.stringify(vault)}, stateDir: ${JSON.stringify(join(work, "state"))}, excludeFolders: ["templates"] });
-  const c = await startCompanion({ adapter, index, dataDir: process.env.MONOCLE_DATA_DIR, vault: { root: ${JSON.stringify(vault)}, exclude: ["templates"] } });
+  const c = await startCompanion({ adapter, index, dataDir: process.env.MONOCLE_DATA_DIR, vault: { root: ${JSON.stringify(vault)}, exclude: ["templates"] }, notes: { template: "Fixture Template", fields: { type: "capture" } } });
   console.log(JSON.stringify({ event: "listening", url: c.url, instanceId: c.health.instanceId }));
 `;
 
 function startCompanion() {
-  const indexArgs = ["--vault", vault, "--state-dir", join(work, "state"), "--exclude", "templates"];
+  const indexArgs = ["--vault", vault, "--state-dir", join(work, "state"), "--exclude", "templates", "--note-template", "Fixture Template", "--note-field", "type=capture"];
   const args = live ? [join(repo, "packages/companion/dist/cli.js"), ...indexArgs] : ["--input-type=module", "-e", fakeLauncher];
   const child = spawn(process.execPath, args, {
     stdio: ["ignore", "pipe", "ignore"],
@@ -306,6 +306,26 @@ try {
   else check("lookup sends grounding instructions", lookup.startsWith("echo: ") && lookup.includes("monocle_vault") && lookup.includes("Question: Who owns Project Lantern?"), lookup.slice(0, 300));
   check("lookup ran as an execution", /^Execution [0-9a-f-]{36} · completed$/.test(await evaluate(metaText)));
   check("vault notes unchanged by commands", JSON.stringify(noteHashes()) === JSON.stringify(commandNotesBefore));
+
+  // IMM-52: /new-note creates one schema-valid note from the vault template with the next unique ID; it never
+  // overwrites an existing note and leaves every other note untouched.
+  const executionsBeforeCreate = await conversationCount();
+  await submit("/new-note Smoke Capture");
+  check("chat /new-note runs in Monocle", (await until(evaluate, metaText, "Monocle /new-note · completed")) === "Monocle /new-note · completed");
+  const created = await evaluate(outputText);
+  check("new note gets the next ID", created.includes("inbox/Smoke Capture.md") && created.includes("fx-0004"), created);
+  const createdPath = join(vault, "inbox", "Smoke Capture.md");
+  let createdText = "";
+  try { createdText = readFileSync(createdPath, "utf8"); } catch {}
+  check("new note written from the template", /^---\r?\nid: "fx-0004"\r?\ntype: "capture"\r?\ntitle: "Smoke Capture"/.test(createdText), createdText.slice(0, 120));
+  check("Obsidian sees the new note", (await until(evaluate, "!!app.vault.getAbstractFileByPath('inbox/Smoke Capture.md')", true)) === true);
+  await submit("/new-note smoke capture");
+  await until(evaluate, outputState, "failed");
+  const clash = await evaluate(`${q(".monocle-execution-error")}.textContent`);
+  check("existing note never overwritten", /^note_creation_failed: inbox\/Smoke Capture\.md already exists/.test(clash) && readFileSync(createdPath, "utf8") === createdText, clash);
+  const { [createdPath]: _new, ...afterCreate } = noteHashes();
+  check("other notes unchanged by /new-note", JSON.stringify(afterCreate) === JSON.stringify(commandNotesBefore));
+  check("/new-note started no Cravat execution", (await conversationCount()) === executionsBeforeCreate);
 
   ws.close();
   obsidian.kill();

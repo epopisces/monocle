@@ -27,7 +27,7 @@ import {
 } from "@monocle/contracts";
 import { ConversationStore, conversationTitle, type IndexService } from "@monocle/core";
 import { handleIndexRoute, INDEX_ROUTE_PREFIX } from "./index-routes.js";
-import { handleCommandRoute, planAgenticCommand } from "./command-routes.js";
+import { handleCommandRoute, planAgenticCommand, type CompanionNotesOptions } from "./command-routes.js";
 import { CopilotCliAdapter, ExecutionManager, type ProviderAdapter } from "@monocle/cravat";
 import { ContextError, prepareExecution, type CompanionVaultOptions, type PreparedExecution } from "./context.js";
 
@@ -42,6 +42,8 @@ export interface CompanionOptions {
   readonly adapter?: ProviderAdapter;
   /** Vault the agent may read (context assembly and read-only tools). Without it the agent gets no tools. */
   readonly vault?: CompanionVaultOptions;
+  /** Enables `/new-note` in the vault of `index` (IMM-52). Omitted: the companion never creates notes. */
+  readonly notes?: CompanionNotesOptions;
   /**
    * Machine-local directory for companion state such as conversations (never the vault). Omitted: state is kept
    * in memory and lost when the companion stops.
@@ -257,7 +259,7 @@ export async function startCompanion(options: CompanionOptions = {}): Promise<Ru
     if (req.method === "GET" && path === HEALTH_PATH) return sendJson(res, 200, health);
     if (path.startsWith(INDEX_ROUTE_PREFIX)) return void handleIndexRoute(options.index, req, res, path, sendJson);
     if (path === COMMANDS_PATH) {
-      handleCommandRoute(options.index, req, res, sendJson).catch((err: unknown) => {
+      handleCommandRoute(options.index, options.notes, req, res, sendJson).catch((err: unknown) => {
         if (!res.headersSent) sendError(res, 500, { code: "provider_error", message: String(err) });
         else res.destroy();
       });

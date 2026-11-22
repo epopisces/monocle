@@ -3,6 +3,7 @@ import { CONTRACT_VERSION, type PackageDescriptor } from "@monocle/contracts";
 
 export { startCompanion, type CompanionOptions, type RunningCompanion } from "./server.js";
 export { type CompanionVaultOptions } from "./context.js";
+export { type CompanionNotesOptions } from "./command-routes.js";
 
 export const packageDescriptor: PackageDescriptor = {
   name: "@monocle/companion",

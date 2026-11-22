@@ -8,8 +8,11 @@
 export const COMMANDS_PATH = "/v1/commands";
 
 export type CommandRoute = "monocle" | "cravat";
-/** What the command may do to the vault. IMM-51 commands are all read-only. */
-export type CommandPermission = "read-vault";
+/**
+ * What the command may do to the vault. `read-vault` never writes. `create-note` may add one new note through
+ * Monocle's guarded creation (exclusive create, fresh unique ID, schema check); it never modifies existing notes.
+ */
+export type CommandPermission = "read-vault" | "create-note";
 export type CommandRequirement = "activeNote" | "vault";
 export type CommandSurface = "chat" | "palette" | "editor-menu" | "file-menu";
 
@@ -72,6 +75,16 @@ export const COMMANDS: readonly CommandDefinition[] = [
     requires: ["vault"],
     argument: { name: "question", required: true, fromSelection: true },
     surfaces: ["chat", "palette", "editor-menu"],
+  },
+  {
+    id: "new-note",
+    name: "Create note",
+    description: "Create a note from the vault's note template with a new unique ID.",
+    route: "monocle",
+    permission: "create-note",
+    requires: ["vault"],
+    argument: { name: "title", required: true },
+    surfaces: ["chat"],
   },
 ];
 
@@ -171,12 +184,43 @@ export type CommandErrorCode =
   /** Required context (active note, argument, vault) is absent; `missing` lists one message per gap. */
   | "missing_context"
   /** The command is routed to Cravat; send it to `POST /v1/executions` with `command` instead. */
-  | "agentic_command";
+  | "agentic_command"
+  /** The companion does not allow this command's permission (e.g. note creation is not configured). */
+  | "not_permitted"
+  /** A note could not be created; `reason` says why and nothing was written. */
+  | "note_creation_failed";
+
+/** Why `/new-note` refused to create a note. Each comes with a message saying what to change. */
+export type NoteCreationErrorCode =
+  | "invalid_title"
+  | "invalid_folder"
+  /** A note already exists at the path (compared case-insensitively). Existing notes are never overwritten. */
+  | "path_exists"
+  | "template_not_found"
+  | "unfilled_placeholder"
+  | "frontmatter_invalid"
+  /** The rendered note has no persistent ID in the ID field. */
+  | "missing_id"
+  /** The rendered note's ID is already used by another note. */
+  | "duplicate_id"
+  /** An external renderer (e.g. Curator's create-obsidian-note script) failed or broke its output contract. */
+  | "renderer_failed";
 
 export interface CommandError {
   readonly code: CommandErrorCode;
   readonly message: string;
   readonly missing?: readonly string[];
+  /** Set with `note_creation_failed`. */
+  readonly reason?: NoteCreationErrorCode;
+}
+
+/** `data` of a successful `/new-note`. */
+export interface CreatedNoteData {
+  readonly path: string;
+  readonly id: string;
+  readonly template: string;
+  /** Validation of the note as saved; warnings (e.g. unresolved links from the template) are allowed. */
+  readonly validation: NoteValidation;
 }
 
 const COMMAND_REQUEST_FIELDS = new Set(["command", "argument", "context"]);
