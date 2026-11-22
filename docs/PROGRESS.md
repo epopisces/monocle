@@ -17,7 +17,7 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 - [ ] [IMM-57](tickets/IMM-57.md) — M3: Rebase stale changes into new pending proposals
 - [x] [IMM-58](tickets/IMM-58.md) — M4: Incrementally index synchronized notes in SQLite FTS5
 - [x] [IMM-59](tickets/IMM-59.md) — M4: Query metadata, persistent identities and explicit note relationships
-- [ ] [IMM-60](tickets/IMM-60.md) — M4: Add configurable optional ChromaDB semantic retrieval
+- [x] [IMM-60](tickets/IMM-60.md) — M4: Add configurable optional ChromaDB semantic retrieval
 - [ ] [IMM-61](tickets/IMM-61.md) — M4: Show compact index health and expandable maintenance controls
 - [ ] [IMM-62](tickets/IMM-62.md) — M5: Verify Monocle MVP end to end and on second host
 
@@ -29,3 +29,4 @@ This is a local checklist; it does **not** reflect live Linear status. Export st
 | 2026-11-22 | IMM-58 | SQLite FTS5 note index (`node:sqlite`) with reconcile/rebuild/search, ID/path/move tracking, duplicate-ID diagnosis, debounced watcher (branch `epopisces-imm-58-sqlite-fts5-index`) | `npm ci && npm run check`: 37/37 passed | No |
 | 2026-11-22 | IMM-46 | Loopback companion (`/v1/health`, CLI), plugin panel/status/settings with connection state machine, esbuild bundle, isolated Obsidian smoke script (branch `epopisces-imm-46-obsidian-panel`) | `npm ci && npm run check`: 43/43 passed pre-merge, 58/58 after merging IMM-58; `npm run smoke:obsidian` (Obsidian 1.8.9): 8/8 passed | No |
 | 2026-11-22 | IMM-59 | Explicit relationship index (wikilinks, embeds, frontmatter links; path/name/alias resolution to rowid-backed identities), backlinks, broken/ambiguous diagnosis, metadata filter; SCHEMA_VERSION 2 (branch `epopisces-imm-59-metadata-relationships`) | `npm ci && npm run check`: 46/46 passed pre-merge, 67/67 after merging IMM-46 | No |
+| 2026-11-22 | IMM-60 | Optional semantic retrieval: heading-aware chunker with content-hash passage IDs, local-default Ollama + policy-gated OpenAI-compatible embedding adapters, Chroma v2 REST store, bounded background queue with embedding cache and model-change rebuild, unified retriever with RRF fusion and lexical fallback (branch `epopisces-imm-60-chromadb-semantic-retrieval`) | `npm ci && npm run check`: 90/90 passed (23 new) | No |
